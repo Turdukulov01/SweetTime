@@ -1,0 +1,379 @@
+import 'package:flutter/material.dart';
+
+enum AppLanguage {
+  ru('RU', 'Русский', Locale('ru')),
+  ky('KG', 'Кыргызча', Locale('ky')),
+  en('EN', 'English', Locale('en'));
+
+  const AppLanguage(this.shortLabel, this.nativeName, this.locale);
+
+  final String shortLabel;
+  final String nativeName;
+  final Locale locale;
+
+  static AppLanguage fromLocale(Locale locale) => switch (locale.languageCode) {
+    'ky' => AppLanguage.ky,
+    'en' => AppLanguage.en,
+    _ => AppLanguage.ru,
+  };
+}
+
+class LocalizedText {
+  const LocalizedText({required this.ru, this.ky, this.en});
+
+  final String ru;
+  final String? ky;
+  final String? en;
+
+  String resolve(AppLanguage language) => switch (language) {
+    AppLanguage.ru => ru,
+    AppLanguage.ky => _presentOrRussian(ky),
+    AppLanguage.en => _presentOrRussian(en),
+  };
+
+  String _presentOrRussian(String? value) {
+    final normalized = value?.trim();
+    return normalized == null || normalized.isEmpty ? ru : normalized;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is LocalizedText &&
+          other.ru == ru &&
+          other.ky == ky &&
+          other.en == en;
+
+  @override
+  int get hashCode => Object.hash(ru, ky, en);
+}
+
+class MenuCategory {
+  const MenuCategory({required this.id, required this.name});
+
+  final String id;
+  final LocalizedText name;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || other is MenuCategory && other.id == id;
+
+  @override
+  int get hashCode => id.hashCode;
+}
+
+enum NewsStoryVisual { sparkle, storefront, qr, loyalty }
+
+extension NewsStoryVisualUi on NewsStoryVisual {
+  IconData get icon => switch (this) {
+    NewsStoryVisual.sparkle => Icons.auto_awesome,
+    NewsStoryVisual.storefront => Icons.storefront_outlined,
+    NewsStoryVisual.qr => Icons.qr_code_scanner,
+    NewsStoryVisual.loyalty => Icons.loyalty_outlined,
+  };
+}
+
+class NewsStory {
+  const NewsStory({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.badge,
+    required this.accentHex,
+    required this.visual,
+    required this.publishedAt,
+    required this.sortOrder,
+    this.expiresAt,
+    this.isPublished = true,
+    this.assetImage,
+    this.imageUrl,
+    this.ctaLabel,
+    this.ctaRoute,
+  });
+
+  final String id;
+  final LocalizedText title;
+  final LocalizedText body;
+  final LocalizedText badge;
+
+  /// Серверный контракт хранит строку #RRGGBB; demo использует числовое значение.
+  final int accentHex;
+  final NewsStoryVisual visual;
+  final String publishedAt;
+  final String? expiresAt;
+  final bool isPublished;
+  final int sortOrder;
+  final String? assetImage;
+  final String? imageUrl;
+  final LocalizedText? ctaLabel;
+  final String? ctaRoute;
+
+  Color get accentColor => Color(accentHex);
+
+  bool isActiveAt(DateTime now) {
+    if (!isPublished) return false;
+    final start = DateTime.tryParse(publishedAt);
+    final end = expiresAt == null ? null : DateTime.tryParse(expiresAt!);
+    if (start != null && start.isAfter(now)) return false;
+    if (end != null && !end.isAfter(now)) return false;
+    return true;
+  }
+}
+
+/// Правила лояльности SweetTime: 1 балл = 1 сом.
+abstract final class Loyalty {
+  static const int pointValueKgs = 1;
+  static const double earnRate = 0.05; // начисляем 5% от оплаченной суммы
+  static const double maxSpendShare =
+      0.3; // баллами можно оплатить до 30% заказа
+  static const int expiryMonths = 12;
+}
+
+/// Реферальная программа: приглашённому 50, пригласившему 100 после первого заказа.
+abstract final class Referral {
+  static const int invitedBonus = 50;
+  static const int inviterBonus = 100;
+}
+
+class Branch {
+  const Branch({
+    required this.id,
+    required this.name,
+    required this.address,
+    required this.hours,
+    required this.phone,
+    required this.isOpen,
+    required this.twoGisUrl,
+    required this.googleMapsUrl,
+  });
+
+  final String id;
+  final LocalizedText name;
+  final LocalizedText address;
+  final String hours;
+  final String phone;
+  final bool isOpen;
+  final String twoGisUrl;
+  final String googleMapsUrl;
+}
+
+class Product {
+  const Product({
+    required this.id,
+    required this.category,
+    required this.name,
+    required this.description,
+    required this.basePrice,
+    required this.accentColor,
+    required this.rating,
+    required this.reviewsCount,
+    required this.sizes,
+    required this.toppings,
+    required this.availableBranchIds,
+    this.assetImage,
+    this.isNew = false,
+    this.isBestSeller = false,
+  });
+
+  final String id;
+  final MenuCategory category;
+  final LocalizedText name;
+  final LocalizedText description;
+  final int basePrice;
+  final Color accentColor;
+  final double rating;
+  final int reviewsCount;
+  final List<ModifierOption> sizes;
+  final List<ModifierOption> toppings;
+  final List<String> availableBranchIds;
+  final String? assetImage;
+  final bool isNew;
+  final bool isBestSeller;
+
+  bool availableIn(Branch branch) => availableBranchIds.contains(branch.id);
+}
+
+class ModifierOption {
+  const ModifierOption({
+    required this.id,
+    required this.name,
+    required this.priceDelta,
+  });
+
+  final String id;
+  final LocalizedText name;
+  final int priceDelta;
+}
+
+enum IceLevel { none, less, regular, extra }
+
+class CartItem {
+  const CartItem({
+    required this.product,
+    required this.quantity,
+    required this.sizeId,
+    required this.sugarPercent,
+    required this.ice,
+    required this.toppingIds,
+    required this.total,
+  });
+
+  final Product product;
+  final int quantity;
+  final String sizeId;
+  final int sugarPercent;
+  final IceLevel ice;
+  final List<String> toppingIds;
+  final int total;
+
+  ModifierOption get sizeOption =>
+      product.sizes.firstWhere((option) => option.id == sizeId);
+
+  List<ModifierOption> get toppingOptions => product.toppings
+      .where((option) => toppingIds.contains(option.id))
+      .toList(growable: false);
+
+  CartItem copyWith({int? quantity, int? total}) {
+    return CartItem(
+      product: product,
+      quantity: quantity ?? this.quantity,
+      sizeId: sizeId,
+      sugarPercent: sugarPercent,
+      ice: ice,
+      toppingIds: toppingIds,
+      total: total ?? this.total,
+    );
+  }
+}
+
+class Promotion {
+  const Promotion({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.code,
+  });
+
+  final String id;
+  final LocalizedText title;
+  final LocalizedText description;
+  final String code;
+}
+
+class PointEvent {
+  const PointEvent({
+    required this.title,
+    required this.amount,
+    required this.date,
+  });
+
+  final LocalizedText title;
+  final int amount;
+  final LocalizedText date;
+}
+
+enum OrderReadyTimeKind { asap, scheduled, table }
+
+class OrderReadyTime {
+  const OrderReadyTime({required this.kind, this.value});
+
+  final OrderReadyTimeKind kind;
+  final String? value;
+}
+
+class CustomerOrder {
+  const CustomerOrder({
+    required this.id,
+    required this.items,
+    required this.branch,
+    required this.type,
+    required this.status,
+    required this.paymentMethod,
+    required this.readyTime,
+    required this.total,
+    required this.pointsUsed,
+    required this.pointsEarned,
+  });
+
+  final String id;
+  final List<CartItem> items;
+  final Branch branch;
+  final OrderType type;
+  final OrderStatus status;
+  final PaymentMethod paymentMethod;
+  final OrderReadyTime readyTime;
+  final int total;
+  final int pointsUsed;
+  final int pointsEarned;
+}
+
+enum OrderType {
+  pickup(Icons.shopping_bag_outlined),
+  scheduled(Icons.schedule_outlined),
+  qrCafe(Icons.qr_code_2_outlined);
+
+  const OrderType(this.icon);
+
+  final IconData icon;
+}
+
+enum PaymentMethod {
+  mock(Icons.credit_card_outlined),
+  cash(Icons.payments_outlined),
+  qrDemo(Icons.qr_code_scanner_outlined);
+
+  const PaymentMethod(this.icon);
+
+  final IconData icon;
+}
+
+enum OrderStatus {
+  created,
+  awaitingPayment,
+  paid,
+  accepted,
+  preparing,
+  ready,
+  completed,
+  cancelled,
+}
+
+/// Результат сканирования/ввода кода друга (правила — docs/design/REFERRAL_LOGIC.md).
+enum ReferralResult {
+  success,
+  selfCode,
+  alreadyInvited,
+  notNewUser,
+  invalidCode;
+
+  bool get isSuccess => this == ReferralResult.success;
+}
+
+/// Постоянный заказ: любимые напитки к нужному времени с предоплатой вперёд.
+enum RecurringPlan {
+  single(1),
+  week(7),
+  month(30);
+
+  const RecurringPlan(this.days);
+
+  final int days;
+}
+
+class RecurringOrder {
+  const RecurringOrder({
+    required this.products,
+    required this.time,
+    required this.branch,
+    required this.plan,
+    required this.paidUntil,
+  });
+
+  final List<Product> products;
+  final String time;
+  final Branch branch;
+  final RecurringPlan plan;
+  final DateTime paidUntil;
+
+  int get comboPrice => products.fold(0, (sum, p) => sum + p.basePrice);
+}

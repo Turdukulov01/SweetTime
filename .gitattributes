@@ -1,0 +1,13 @@
+# Единые окончания строк в репозитории (кросс-платформенная команда)
+* text=auto eol=lf
+
+# Бинарные ассеты — не нормализовать
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.apk binary
+*.aab binary

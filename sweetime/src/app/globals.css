@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-pink-100/60;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-cream font-body text-ink antialiased dark:bg-berry-700 dark:text-cream;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display text-berry-500 dark:text-cream;
+  }
+
+  ::selection {
+    @apply bg-pink-300 text-berry-600;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-pink-400 ring-offset-2 ring-offset-cream;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .container-sweetime {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .section-heading {
+    @apply font-display text-3xl font-semibold text-berry-500 sm:text-4xl dark:text-cream;
+  }
+
+  .pearl-bullet {
+    @apply relative pl-5 before:absolute before:left-0 before:top-2 before:h-2 before:w-2 before:rounded-full before:bg-pink-400;
+  }
+}

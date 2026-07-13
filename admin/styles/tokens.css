@@ -1,0 +1,18 @@
+:root {
+  /* --font-sans задаёт next/font (Inter) классом на <html> */
+  --background: 255 250 240;
+  --foreground: 37 23 19;
+  --surface: 255 255 255;
+  --muted: 124 75 53;
+  --ring: 255 92 154;
+  /* Акцент тенанта (RGB-триплет). Переопределяется в shell из company.accentColor. */
+  --accent: 255 92 154;
+}
+
+.dark {
+  --background: 22 18 21;
+  --foreground: 255 247 238;
+  --surface: 35 29 33;
+  --muted: 231 202 188;
+  --ring: 143 229 199;
+}

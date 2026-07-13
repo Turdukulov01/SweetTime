@@ -1,0 +1,64 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# SweetTime monorepo artifacts
+backend/.venv/
+backend/.pytest_cache/
+backend/**/__pycache__/
+backend/*.db
+admin/node_modules/
+admin/dist/
+
+# Node (admin + web prototypes) — build output и зависимости не в истории
+**/node_modules/
+**/.next/
+**/out/
+# APK/бинарные deliverables держим как артефакты, не в git
+/dist/
+# Flutter plugin junction-ссылки (Windows без Developer Mode)
+**/.plugin_symlinks/
+# next-env автогенерируется
+admin/next-env.d.ts

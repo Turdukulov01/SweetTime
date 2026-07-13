@@ -1,0 +1,1 @@
+"""SweetTime FastAPI application package."""
