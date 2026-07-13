@@ -12,14 +12,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Path
+from fastapi import Depends, FastAPI, HTTPException, Path, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import schemas
 from .database import Base, engine, get_db
-from .models import Branch, Company, Order, Product
+from .models import Branch, Company, News, Order, Product, Promotion
 from .seed import seed_if_empty
 
 
@@ -96,6 +96,28 @@ def get_company_order(
     return order
 
 
+def get_company_news(
+    newsId: str = Path(...),
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> News:
+    news = db.get(News, newsId)
+    if news is None or news.company_id != company.id:
+        raise HTTPException(status_code=404, detail="News not found")
+    return news
+
+
+def get_company_promotion(
+    promotionId: str = Path(...),
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> Promotion:
+    promotion = db.get(Promotion, promotionId)
+    if promotion is None or promotion.company_id != company.id:
+        raise HTTPException(status_code=404, detail="Promotion not found")
+    return promotion
+
+
 # ---------------------------------------------------------------------------
 # Сериализация ORM → схемы контракта (camelCase)
 # ---------------------------------------------------------------------------
@@ -156,6 +178,36 @@ def _order_out(o: Order) -> schemas.OrderOut:
         pointsUsed=o.points_used,
         pointsEarned=o.points_earned,
         createdAt=o.created_at,
+    )
+
+
+def _news_out(n: News) -> schemas.NewsOut:
+    return schemas.NewsOut(
+        id=n.id,
+        sortOrder=n.sort_order,
+        isPublished=n.is_published,
+        title=n.title,
+        body=n.body,
+        badge=n.badge,
+        accentColor=n.accent_color,
+        visual=n.visual,
+        publishedAt=n.published_at,
+        expiresAt=n.expires_at,
+        imageUrl=n.image_url,
+        ctaLabel=n.cta_label,
+        ctaRoute=n.cta_route,
+    )
+
+
+def _promotion_out(p: Promotion) -> schemas.PromotionOut:
+    return schemas.PromotionOut(
+        id=p.id,
+        sortOrder=p.sort_order,
+        active=p.active,
+        title=p.title,
+        description=p.description,
+        code=p.code,
+        accentColor=p.accent_color,
     )
 
 
@@ -472,3 +524,191 @@ def patch_order_status(
     db.add(order)
     db.commit()
     return _order_out(order)
+
+
+# ---------------------------------------------------------------------------
+# News (сторис витрины)
+# ---------------------------------------------------------------------------
+
+
+@app.get(
+    "/api/companies/{companyId}/news",
+    response_model=list[schemas.NewsOut],
+    tags=["news"],
+)
+def list_news(
+    company: Company = Depends(get_company), db: Session = Depends(get_db)
+) -> list[schemas.NewsOut]:
+    items = db.scalars(
+        select(News)
+        .where(News.company_id == company.id)
+        .order_by(News.sort_order.asc())
+    ).all()
+    return [_news_out(n) for n in items]
+
+
+@app.post(
+    "/api/companies/{companyId}/news",
+    response_model=schemas.NewsOut,
+    status_code=201,
+    tags=["news"],
+)
+def create_news(
+    body: schemas.NewsCreate,
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> schemas.NewsOut:
+    news = News(
+        id=f"news-{uuid4().hex[:8]}",
+        company_id=company.id,
+        sort_order=body.sortOrder,
+        is_published=body.isPublished,
+        title=body.title.model_dump(),
+        body=body.body.model_dump(),
+        badge=body.badge.model_dump(),
+        accent_color=body.accentColor,
+        visual=body.visual,
+        published_at=body.publishedAt,
+        expires_at=body.expiresAt,
+        image_url=body.imageUrl,
+        cta_label=body.ctaLabel.model_dump() if body.ctaLabel else None,
+        cta_route=body.ctaRoute,
+    )
+    db.add(news)
+    db.commit()
+    return _news_out(news)
+
+
+@app.patch(
+    "/api/companies/{companyId}/news/{newsId}",
+    response_model=schemas.NewsOut,
+    tags=["news"],
+)
+def patch_news(
+    patch: schemas.NewsPatch,
+    news: News = Depends(get_company_news),
+    db: Session = Depends(get_db),
+) -> schemas.NewsOut:
+    data = patch.model_dump(exclude_unset=True)
+    field_map = {
+        "title": "title",
+        "body": "body",
+        "badge": "badge",
+        "accentColor": "accent_color",
+        "visual": "visual",
+        "publishedAt": "published_at",
+        "expiresAt": "expires_at",
+        "isPublished": "is_published",
+        "sortOrder": "sort_order",
+        "imageUrl": "image_url",
+        "ctaLabel": "cta_label",
+        "ctaRoute": "cta_route",
+    }
+    for api_field, orm_field in field_map.items():
+        if api_field in data:
+            setattr(news, orm_field, data[api_field])
+    db.add(news)
+    db.commit()
+    return _news_out(news)
+
+
+@app.delete(
+    "/api/companies/{companyId}/news/{newsId}",
+    status_code=204,
+    tags=["news"],
+)
+def delete_news(
+    news: News = Depends(get_company_news),
+    db: Session = Depends(get_db),
+) -> Response:
+    db.delete(news)
+    db.commit()
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Promotions (сезонные акции витрины)
+# ---------------------------------------------------------------------------
+
+
+@app.get(
+    "/api/companies/{companyId}/promotions",
+    response_model=list[schemas.PromotionOut],
+    tags=["promotions"],
+)
+def list_promotions(
+    company: Company = Depends(get_company), db: Session = Depends(get_db)
+) -> list[schemas.PromotionOut]:
+    items = db.scalars(
+        select(Promotion)
+        .where(Promotion.company_id == company.id)
+        .order_by(Promotion.sort_order.asc())
+    ).all()
+    return [_promotion_out(p) for p in items]
+
+
+@app.post(
+    "/api/companies/{companyId}/promotions",
+    response_model=schemas.PromotionOut,
+    status_code=201,
+    tags=["promotions"],
+)
+def create_promotion(
+    body: schemas.PromotionCreate,
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> schemas.PromotionOut:
+    promotion = Promotion(
+        id=f"promo-{uuid4().hex[:8]}",
+        company_id=company.id,
+        sort_order=body.sortOrder,
+        active=body.active,
+        title=body.title.model_dump(),
+        description=body.description.model_dump(),
+        code=body.code,
+        accent_color=body.accentColor,
+    )
+    db.add(promotion)
+    db.commit()
+    return _promotion_out(promotion)
+
+
+@app.patch(
+    "/api/companies/{companyId}/promotions/{promotionId}",
+    response_model=schemas.PromotionOut,
+    tags=["promotions"],
+)
+def patch_promotion(
+    patch: schemas.PromotionPatch,
+    promotion: Promotion = Depends(get_company_promotion),
+    db: Session = Depends(get_db),
+) -> schemas.PromotionOut:
+    data = patch.model_dump(exclude_unset=True)
+    field_map = {
+        "title": "title",
+        "description": "description",
+        "code": "code",
+        "accentColor": "accent_color",
+        "active": "active",
+        "sortOrder": "sort_order",
+    }
+    for api_field, orm_field in field_map.items():
+        if api_field in data:
+            setattr(promotion, orm_field, data[api_field])
+    db.add(promotion)
+    db.commit()
+    return _promotion_out(promotion)
+
+
+@app.delete(
+    "/api/companies/{companyId}/promotions/{promotionId}",
+    status_code=204,
+    tags=["promotions"],
+)
+def delete_promotion(
+    promotion: Promotion = Depends(get_company_promotion),
+    db: Session = Depends(get_db),
+) -> Response:
+    db.delete(promotion)
+    db.commit()
+    return Response(status_code=204)

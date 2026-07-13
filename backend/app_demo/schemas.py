@@ -4,13 +4,25 @@
 и в потребителях (админка Next.js, Flutter).
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 OrderType = Literal["pickup", "scheduled", "qr"]
 OrderStatus = Literal["new", "preparing", "ready", "done", "cancelled"]
 PaymentMethod = Literal["mock", "cash", "qr"]
+NewsVisual = Literal["sparkle", "storefront", "qr", "loyalty"]
+
+# "#RRGGBB" — шесть hex-символов после решётки
+HexColor = Annotated[str, StringConstraints(pattern=r"^#[0-9A-Fa-f]{6}$")]
+
+
+class LocalizedText(BaseModel):
+    """Локализованное поле витрины: ru обязателен, ky/en опциональны (CX-012)."""
+
+    ru: str = Field(min_length=1)
+    ky: str | None = None
+    en: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +224,94 @@ class OrderCreate(BaseModel):
 
 class OrderStatusPatch(BaseModel):
     status: OrderStatus
+
+
+# ---------------------------------------------------------------------------
+# News (сторис витрины)
+# ---------------------------------------------------------------------------
+
+
+class NewsOut(BaseModel):
+    id: str
+    sortOrder: int
+    isPublished: bool
+    title: LocalizedText
+    body: LocalizedText
+    badge: LocalizedText
+    accentColor: HexColor
+    visual: NewsVisual
+    publishedAt: str
+    expiresAt: str | None = None
+    imageUrl: str | None = None
+    ctaLabel: LocalizedText | None = None
+    ctaRoute: str | None = None
+
+
+class NewsCreate(BaseModel):
+    title: LocalizedText
+    body: LocalizedText
+    badge: LocalizedText
+    accentColor: HexColor = "#FF5C9A"
+    visual: NewsVisual
+    publishedAt: str
+    expiresAt: str | None = None
+    isPublished: bool = True
+    sortOrder: int = 0
+    imageUrl: str | None = None
+    ctaLabel: LocalizedText | None = None
+    ctaRoute: str | None = None
+
+
+class NewsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: LocalizedText | None = None
+    body: LocalizedText | None = None
+    badge: LocalizedText | None = None
+    accentColor: HexColor | None = None
+    visual: NewsVisual | None = None
+    publishedAt: str | None = None
+    expiresAt: str | None = None
+    isPublished: bool | None = None
+    sortOrder: int | None = None
+    imageUrl: str | None = None
+    ctaLabel: LocalizedText | None = None
+    ctaRoute: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Promotions (сезонные акции витрины)
+# ---------------------------------------------------------------------------
+
+
+class PromotionOut(BaseModel):
+    id: str
+    sortOrder: int
+    active: bool
+    title: LocalizedText
+    description: LocalizedText
+    code: str | None = None
+    accentColor: HexColor
+
+
+class PromotionCreate(BaseModel):
+    title: LocalizedText
+    description: LocalizedText
+    code: str | None = None
+    accentColor: HexColor = "#FF5C9A"
+    active: bool = True
+    sortOrder: int = 0
+
+
+class PromotionPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: LocalizedText | None = None
+    description: LocalizedText | None = None
+    code: str | None = None
+    accentColor: HexColor | None = None
+    active: bool | None = None
+    sortOrder: int | None = None
 
 
 # ---------------------------------------------------------------------------

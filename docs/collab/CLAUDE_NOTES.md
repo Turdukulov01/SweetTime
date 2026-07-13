@@ -45,6 +45,28 @@ OK (build не гонял — dev :3020 жив); скриншоты `docs/design
 подтверждена кодом (staff/page.tsx:40). Приёмка Codex-работы засчитана, оставляю на визуальный
 просмотр пользователя.
 
+### АКТИВНАЯ ЗАДАЧА-2 2026-07-13 (git + управление контентом; handoff для Codex)
+
+Пользователь: (1) git — ✅ СДЕЛАН (baseline commit `8a74eed`, .gitignore/.gitattributes, дерево
+чистое). (2) Google OAuth — потом. Основное: **CRUD-управление контентом витрины приложения из
+админки** + обновить превью телефона в /settings (показывает старую версию).
+
+Реализуем (владелец/менеджер управляет, приложение читает из API):
+- **Новости-сторис**: entity News в demo-API, форма 1-в-1 с `lib/shared/app_models.dart:76`
+  NewsStory (title/body/badge {ru,ky?,en?}, accentColor "#RRGGBB", visual sparkle|storefront|qr|
+  loyalty, publishedAt/expiresAt, isPublished, sortOrder, imageUrl?, ctaLabel?/ctaRoute?).
+  GET/POST/PATCH/DELETE /api/companies/{cid}/news. Admin: раздел «Новости» CRUD + превью сторис.
+- **Сезонные акции**: entity Promotion (title/description {ru,ky?,en?}, code?, accentColor, active,
+  sortOrder). GET/POST/PATCH/DELETE /promotions. Admin: раздел «Акции» CRUD.
+- **Хиты продаж / Новинки**: флаги isBestSeller/isNew на товарах (уже в API-товарах и PATCH
+  /products). Admin: тумблеры в меню/разделе «Витрина».
+- **Превью телефона** в admin /settings обновить под текущее приложение (сторис-лента, акция, хиты).
+
+Зоны: backend/app_demo (мой) — News+Promotions+seed из текущих demo приложения; admin (мой) —
+разделы Новости/Акции/Витрина + превью; **Flutter lib/ (зона Codex)** — читать news/promotions из
+API вместо локальных demo (у него уже есть NewsStory/Promotion + «путь к API» — его handoff, §7).
+Статус: контракт — пишу в DEMO_API.md; backend — делегирую; admin — следом; Flutter — Codex.
+
 ## 2. Выполнено с последнего обновления (2026-07-12 → 13)
 
 - **Demo-API** `backend/app_demo/` (FastAPI+SQLite, :8000, контракт `docs/design/DEMO_API.md`).

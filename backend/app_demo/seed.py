@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Branch, Company, Order, Product
+from .models import Branch, Company, News, Order, Product, Promotion
 
 
 def _iso(dt: datetime) -> str:
@@ -628,6 +628,249 @@ _COFFEEGO_HISTORY = [
 ]
 _COFFEEGO_HISTORY_START = 180  # CG-180 … CG-198
 
+# ---------------------------------------------------------------------------
+# Витрина: новости-сторис и акции.
+# SweetTime — 1-в-1 из приложения (lib/shared/demo_data.dart): accentHex
+# 0xFFRRGGBB → "#RRGGBB", переводы ru/ky/en сохранены. CoffeeGo — свои.
+# ---------------------------------------------------------------------------
+
+_SWEETTIME_NEWS = [
+    News(
+        id="news-week-flavor",
+        company_id="sweettime",
+        sort_order=10,
+        is_published=True,
+        title={
+            "ru": "Новый вкус недели",
+            "ky": "Аптанын жаңы даамы",
+            "en": "Flavor of the week",
+        },
+        body={
+            "ru": "Попробуйте клубничный улун с воздушной сырной пенкой — "
+            "только до воскресенья.",
+            "ky": "Кулпунай улунун жумшак сыр көбүгү менен татып көрүңүз — "
+            "жекшембиге чейин гана.",
+            "en": "Try strawberry oolong with airy cheese foam — available "
+            "through Sunday only.",
+        },
+        badge={"ru": "Новинка", "ky": "Жаңы", "en": "New"},
+        accent_color="#FF8FBD",
+        visual="sparkle",
+        published_at="2026-07-13T00:00:00Z",
+    ),
+    News(
+        id="news-manas",
+        company_id="sweettime",
+        sort_order=20,
+        is_published=True,
+        title={
+            "ru": "Мы открылись на Манаса",
+            "ky": "Манас көчөсүндө ачылдык",
+            "en": "Now open on Manas",
+        },
+        body={
+            "ru": "Новый филиал уже принимает заказы. Заходите ежедневно с "
+            "10:00 до 22:00.",
+            "ky": "Жаңы филиал заказдарды кабыл алууда. Күн сайын 10:00дөн "
+            "22:00гө чейин келиңиз.",
+            "en": "Our new branch is taking orders daily from 10:00 to 22:00.",
+        },
+        badge={"ru": "Филиал", "ky": "Филиал", "en": "Branch"},
+        accent_color="#8FDCC4",
+        visual="storefront",
+        published_at="2026-07-10T00:00:00Z",
+    ),
+    News(
+        id="news-table-qr",
+        company_id="sweettime",
+        sort_order=30,
+        is_published=True,
+        title={
+            "ru": "Заказ со столика",
+            "ky": "Столдон заказ бериңиз",
+            "en": "Order from your table",
+        },
+        body={
+            "ru": "Отсканируйте QR в кафе, соберите напиток и не стойте в "
+            "очереди.",
+            "ky": "Кафедеги QR кодду сканерлеп, суусундукту тандап, кезек "
+            "күтпөңүз.",
+            "en": "Scan the in-cafe QR, customize your drink and skip the "
+            "queue.",
+        },
+        badge={"ru": "Совет", "ky": "Кеңеш", "en": "Tip"},
+        accent_color="#FFC96B",
+        visual="qr",
+        published_at="2026-07-08T00:00:00Z",
+    ),
+    News(
+        id="news-double-points",
+        company_id="sweettime",
+        sort_order=40,
+        is_published=True,
+        title={
+            "ru": "Двойные баллы",
+            "ky": "Эки эсе упай",
+            "en": "Double points",
+        },
+        body={
+            "ru": "Каждый понедельник начисляем вдвое больше баллов за "
+            "напитки с матчей.",
+            "ky": "Ар дүйшөмбүдө матча суусундуктары үчүн эки эсе көп упай "
+            "беребиз.",
+            "en": "Earn double points on matcha drinks every Monday.",
+        },
+        badge={"ru": "Лояльность", "ky": "Лоялдуулук", "en": "Loyalty"},
+        accent_color="#A9D88E",
+        visual="loyalty",
+        published_at="2026-07-06T00:00:00Z",
+    ),
+]
+
+_SWEETTIME_PROMOTIONS = [
+    Promotion(
+        id="promo-duo",
+        company_id="sweettime",
+        sort_order=10,
+        active=True,
+        title={
+            "ru": "Утренний дуэт",
+            "ky": "Эртең мененки дуэт",
+            "en": "Morning Duo",
+        },
+        description={
+            "ru": "Любой кофе и моти-кап за 520 сом",
+            "ky": "Каалаган кофе жана моти-кап 520 сомго",
+            "en": "Any coffee and a mochi cup for KGS 520",
+        },
+        code="DUO",
+        accent_color="#FF8FBD",
+    ),
+    Promotion(
+        id="promo-pearls",
+        company_id="sweettime",
+        sort_order=20,
+        active=True,
+        title={
+            "ru": "Час шариков",
+            "ky": "Шариктер сааты",
+            "en": "Pearl Hour",
+        },
+        description={
+            "ru": "Бесплатная тапиока после 16:00",
+            "ky": "16:00дөн кийин тапиока акысыз",
+            "en": "Free tapioca after 16:00",
+        },
+        code="PEARLS",
+        accent_color="#8FDCC4",
+    ),
+    Promotion(
+        id="promo-mint",
+        company_id="sweettime",
+        sort_order=30,
+        active=True,
+        title={
+            "ru": "Мятный понедельник",
+            "ky": "Жалбыз дүйшөмбү",
+            "en": "Mint Monday",
+        },
+        description={
+            "ru": "Вдвое больше баллов за зеленые напитки",
+            "ky": "Жашыл суусундуктар үчүн эки эсе көп упай",
+            "en": "Double points on green drinks",
+        },
+        code="MINT",
+        accent_color="#A9D88E",
+    ),
+]
+
+_COFFEEGO_NEWS = [
+    News(
+        id="cg-news-yunusalieva",
+        company_id="coffeego",
+        sort_order=10,
+        is_published=True,
+        title={
+            "ru": "CoffeeGo теперь на Юнусалиева",
+            "ky": "CoffeeGo эми Юнусалиевада",
+            "en": "CoffeeGo now on Yunusalieva",
+        },
+        body={
+            "ru": "Второй филиал открыт: свежая обжарка каждое утро, "
+            "работаем с 08:00 до 21:00.",
+            "ky": "Экинчи филиал ачылды: ар таңда жаңы куурулган кофе, "
+            "08:00дөн 21:00гө чейин иштейбиз.",
+            "en": "Our second spot is open: fresh roast every morning, "
+            "08:00 to 21:00.",
+        },
+        badge={"ru": "Филиал", "ky": "Филиал", "en": "Branch"},
+        accent_color="#34C99A",
+        visual="storefront",
+        published_at="2026-07-11T00:00:00Z",
+    ),
+    News(
+        id="cg-news-loyalty",
+        company_id="coffeego",
+        sort_order=20,
+        is_published=True,
+        title={
+            "ru": "Шестой кофе — в подарок",
+            "ky": "Алтынчы кофе — белекке",
+            "en": "Every sixth coffee is free",
+        },
+        body={
+            "ru": "Копите отметки в приложении: каждый шестой напиток "
+            "мы дарим.",
+            "ky": "Тиркемеде белгилерди чогултуңуз: ар алтынчы суусундукту "
+            "белекке беребиз.",
+            "en": "Collect stamps in the app: every sixth drink is on us.",
+        },
+        badge={"ru": "Лояльность", "ky": "Лоялдуулук", "en": "Loyalty"},
+        accent_color="#6B4226",
+        visual="loyalty",
+        published_at="2026-07-07T00:00:00Z",
+    ),
+]
+
+_COFFEEGO_PROMOTIONS = [
+    Promotion(
+        id="cg-promo-morning",
+        company_id="coffeego",
+        sort_order=10,
+        active=True,
+        title={
+            "ru": "Утренний кофе −20%",
+            "ky": "Эртең мененки кофе −20%",
+            "en": "Morning coffee -20%",
+        },
+        description={
+            "ru": "Скидка на любой напиток до 10:00",
+            "ky": "10:00гө чейин каалаган суусундукка арзандатуу",
+            "en": "Discount on any drink before 10:00",
+        },
+        code="MORNING",
+        accent_color="#34C99A",
+    ),
+    Promotion(
+        id="cg-promo-combo",
+        company_id="coffeego",
+        sort_order=20,
+        active=True,
+        title={
+            "ru": "Кофе + круассан",
+            "ky": "Кофе + круассан",
+            "en": "Coffee + croissant",
+        },
+        description={
+            "ru": "Капучино и миндальный круассан за 430 сом",
+            "ky": "Капучино жана бадам круассаны 430 сомго",
+            "en": "Cappuccino and almond croissant for KGS 430",
+        },
+        code="COMBO",
+        accent_color="#6B4226",
+    ),
+]
+
 
 def _make_order(
     oid: str,
@@ -708,5 +951,9 @@ def seed_if_empty(db: Session) -> bool:
         _build_history("coffeego", "CG", _COFFEEGO_HISTORY_START, _COFFEEGO_HISTORY)
     )
     db.add_all(_build_orders("coffeego", _COFFEEGO_ORDERS))
+    db.add_all(_SWEETTIME_NEWS)
+    db.add_all(_SWEETTIME_PROMOTIONS)
+    db.add_all(_COFFEEGO_NEWS)
+    db.add_all(_COFFEEGO_PROMOTIONS)
     db.commit()
     return True

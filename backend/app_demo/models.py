@@ -65,6 +65,54 @@ class Product(Base):
     is_best_seller: Mapped[bool] = mapped_column(default=False)
 
 
+class News(Base):
+    """Новость-сторис витрины. Локализованные поля (title/body/badge/ctaLabel)
+    и переводы хранятся JSON-колонками {"ru": ..., "ky"?: ..., "en"?: ...}."""
+
+    __tablename__ = "news"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id"), index=True
+    )
+    sort_order: Mapped[int] = mapped_column(default=0, index=True)
+    is_published: Mapped[bool] = mapped_column(default=True)
+    # {"ru": ..., "ky"?: ..., "en"?: ...}
+    title: Mapped[dict] = mapped_column(JSON)
+    body: Mapped[dict] = mapped_column(JSON)
+    badge: Mapped[dict] = mapped_column(JSON)
+    # "#RRGGBB"
+    accent_color: Mapped[str]
+    # sparkle | storefront | qr | loyalty
+    visual: Mapped[str]
+    # ISO-8601 строки
+    published_at: Mapped[str]
+    expires_at: Mapped[str | None] = mapped_column(default=None)
+    image_url: Mapped[str | None] = mapped_column(default=None)
+    # локализованный объект или null
+    cta_label: Mapped[dict | None] = mapped_column(JSON, default=None)
+    cta_route: Mapped[str | None] = mapped_column(default=None)
+
+
+class Promotion(Base):
+    """Сезонная акция витрины. title/description — локализованные JSON."""
+
+    __tablename__ = "promotions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id"), index=True
+    )
+    sort_order: Mapped[int] = mapped_column(default=0, index=True)
+    active: Mapped[bool] = mapped_column(default=True)
+    # {"ru": ..., "ky"?: ..., "en"?: ...}
+    title: Mapped[dict] = mapped_column(JSON)
+    description: Mapped[dict] = mapped_column(JSON)
+    code: Mapped[str | None] = mapped_column(default=None)
+    # "#RRGGBB"
+    accent_color: Mapped[str]
+
+
 class Order(Base):
     __tablename__ = "orders"
 
