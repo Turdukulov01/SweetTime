@@ -3,6 +3,16 @@
 
 export type Role = "owner" | "manager" | "barista";
 
+/**
+ * Локализованный текст витрины: русский обязателен, кыргызский и английский —
+ * опциональны. Контракт demo-API возвращает объект `{ru, ky?, en?}` (CX-012).
+ */
+export interface LocalizedText {
+  ru: string;
+  ky?: string;
+  en?: string;
+}
+
 export interface LoyaltyConfig {
   /** Доля начисления баллов от суммы заказа, например 0.05 = 5% */
   earnRate: number;
@@ -80,6 +90,54 @@ export interface Product {
   availableBranchIds: string[];
   /** Включён ли товар в меню */
   active: boolean;
+  /** «Хит продаж» — попадает в подборку хитов на витрине приложения */
+  isBestSeller?: boolean;
+  /** «Новинка» — попадает в подборку «Новое в меню» на витрине приложения */
+  isNew?: boolean;
+}
+
+/** Визуал сторис (иконка-заглушка новости на витрине приложения) */
+export type NewsVisual = "sparkle" | "storefront" | "qr" | "loyalty";
+
+/** Новость-сторис витрины приложения (форма 1-в-1 с NewsStory приложения) */
+export interface NewsStory {
+  id: string;
+  companyId: string;
+  /** Порядок показа: по возрастанию */
+  sortOrder: number;
+  /** Опубликована ли сторис (иначе — черновик, приложению не видна) */
+  isPublished: boolean;
+  title: LocalizedText;
+  body: LocalizedText;
+  badge: LocalizedText;
+  /** Акцентный цвет сторис, HEX (#RRGGBB) */
+  accentColor: string;
+  visual: NewsVisual;
+  /** ISO-дата публикации */
+  publishedAt: string;
+  /** ISO-дата истечения или null (бессрочно) */
+  expiresAt: string | null;
+  imageUrl: string | null;
+  /** Подпись кнопки перехода или null */
+  ctaLabel: LocalizedText | null;
+  /** Роут кнопки перехода в приложении или null */
+  ctaRoute: string | null;
+}
+
+/** Сезонная акция витрины приложения */
+export interface Promotion {
+  id: string;
+  companyId: string;
+  /** Порядок показа: по возрастанию */
+  sortOrder: number;
+  /** Активна ли акция (иначе не показывается в приложении) */
+  active: boolean;
+  title: LocalizedText;
+  description: LocalizedText;
+  /** Промокод или null */
+  code: string | null;
+  /** Акцентный цвет карточки, HEX (#RRGGBB) */
+  accentColor: string;
 }
 
 export type RecurringPlan = "week" | "month";
@@ -141,4 +199,6 @@ export interface CompanyData {
   orders: Order[];
   users: AdminUser[];
   recurring: RecurringOrder[];
+  news: NewsStory[];
+  promotions: Promotion[];
 }

@@ -8,8 +8,10 @@ import type {
   Branch,
   Company,
   CompanyData,
+  NewsStory,
   Order,
   Product,
+  Promotion,
   RecurringOrder
 } from "@/lib/types";
 
@@ -32,6 +34,13 @@ function daysFromNow(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
   d.setHours(23, 59, 0, 0);
+  return d.toISOString();
+}
+
+function daysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  d.setHours(9, 0, 0, 0);
   return d.toISOString();
 }
 
@@ -157,7 +166,8 @@ const sweettimeProducts: Product[] = [
       { id: "t4", label: "Шарики с коричневым сахаром", priceDelta: 50 }
     ],
     availableBranchIds: ["b1", "b2", "b3"],
-    active: true
+    active: true,
+    isBestSeller: true
   },
   {
     id: "p2",
@@ -172,7 +182,8 @@ const sweettimeProducts: Product[] = [
       { id: "t5", label: "Пудинг", priceDelta: 45 }
     ],
     availableBranchIds: ["b1", "b2"],
-    active: true
+    active: true,
+    isNew: true
   },
   {
     id: "p3",
@@ -187,7 +198,8 @@ const sweettimeProducts: Product[] = [
       { id: "t6", label: "Кофейное желе", priceDelta: 40 }
     ],
     availableBranchIds: ["b1", "b2", "b3"],
-    active: true
+    active: true,
+    isBestSeller: true
   },
   {
     id: "p4",
@@ -202,7 +214,8 @@ const sweettimeProducts: Product[] = [
       { id: "t1", label: "Шарики тапиоки", priceDelta: 40 }
     ],
     availableBranchIds: ["b1", "b2", "b3"],
-    active: true
+    active: true,
+    isNew: true
   },
   {
     id: "p5",
@@ -259,7 +272,125 @@ const sweettimeProducts: Product[] = [
     sizes: [],
     toppings: [],
     availableBranchIds: ["b1", "b2", "b3"],
-    active: true
+    active: true,
+    isBestSeller: true
+  }
+];
+
+// Новости-сторис и сезонные акции витрины SweetTime (мок-фоллбэк без API)
+const sweettimeNews: NewsStory[] = [
+  {
+    id: "news-week-flavor",
+    companyId: "sweettime",
+    sortOrder: 10,
+    isPublished: true,
+    title: {
+      ru: "Новый вкус недели",
+      ky: "Аптанын жаңы даамы",
+      en: "Flavor of the week"
+    },
+    body: {
+      ru: "Попробуйте клубничный улун с воздушной сырной пенкой — только до воскресенья."
+    },
+    badge: { ru: "Новинка", ky: "Жаңы", en: "New" },
+    accentColor: "#FF8FBD",
+    visual: "sparkle",
+    publishedAt: daysAgo(0),
+    expiresAt: null,
+    imageUrl: null,
+    ctaLabel: null,
+    ctaRoute: null
+  },
+  {
+    id: "news-manas",
+    companyId: "sweettime",
+    sortOrder: 20,
+    isPublished: true,
+    title: {
+      ru: "Мы открылись на Манаса",
+      ky: "Манас көчөсүндө ачылдык",
+      en: "Now open on Manas"
+    },
+    body: {
+      ru: "Новый филиал уже принимает заказы. Заходите ежедневно с 10:00 до 22:00."
+    },
+    badge: { ru: "Филиал" },
+    accentColor: "#8FDCC4",
+    visual: "storefront",
+    publishedAt: daysAgo(3),
+    expiresAt: null,
+    imageUrl: null,
+    ctaLabel: null,
+    ctaRoute: null
+  },
+  {
+    id: "news-table-qr",
+    companyId: "sweettime",
+    sortOrder: 30,
+    isPublished: true,
+    title: { ru: "Заказ со столика" },
+    body: {
+      ru: "Отсканируйте QR в кафе, соберите напиток и не стойте в очереди."
+    },
+    badge: { ru: "Совет" },
+    accentColor: "#FFC96B",
+    visual: "qr",
+    publishedAt: daysAgo(5),
+    expiresAt: null,
+    imageUrl: null,
+    ctaLabel: null,
+    ctaRoute: null
+  },
+  {
+    id: "news-double-points",
+    companyId: "sweettime",
+    sortOrder: 40,
+    isPublished: true,
+    title: { ru: "Двойные баллы" },
+    body: {
+      ru: "Каждый понедельник начисляем вдвое больше баллов за напитки с матчей."
+    },
+    badge: { ru: "Лояльность" },
+    accentColor: "#A9D88E",
+    visual: "loyalty",
+    publishedAt: daysAgo(7),
+    expiresAt: null,
+    imageUrl: null,
+    ctaLabel: null,
+    ctaRoute: null
+  }
+];
+
+const sweettimePromotions: Promotion[] = [
+  {
+    id: "promo-duo",
+    companyId: "sweettime",
+    sortOrder: 10,
+    active: true,
+    title: { ru: "Утренний дуэт" },
+    description: { ru: "Любой кофе и моти-кап за 520 сом" },
+    code: "DUO",
+    accentColor: "#FF8FBD"
+  },
+  {
+    id: "promo-pearls",
+    companyId: "sweettime",
+    sortOrder: 20,
+    active: true,
+    title: { ru: "Час шариков" },
+    description: { ru: "Бесплатная тапиока после 16:00" },
+    code: "PEARLS",
+    accentColor: "#8FDCC4"
+  },
+  {
+    id: "promo-mint",
+    companyId: "sweettime",
+    sortOrder: 30,
+    active: true,
+    title: { ru: "Мятный понедельник" },
+    description: { ru: "Вдвое больше баллов за зелёные напитки" },
+    code: "MINT",
+    accentColor: "#A9D88E"
   }
 ];
 
@@ -528,7 +659,8 @@ const coffeegoProducts: Product[] = [
     sizes: coffeeSizes,
     toppings: coffeeToppings,
     availableBranchIds: ["cg-b1", "cg-b2"],
-    active: true
+    active: true,
+    isBestSeller: true
   },
   {
     id: "cg-p4",
@@ -540,7 +672,8 @@ const coffeegoProducts: Product[] = [
     sizes: coffeeSizes,
     toppings: coffeeToppings,
     availableBranchIds: ["cg-b1", "cg-b2"],
-    active: true
+    active: true,
+    isBestSeller: true
   },
   {
     id: "cg-p5",
@@ -567,7 +700,8 @@ const coffeegoProducts: Product[] = [
     sizes: coffeeSizes,
     toppings: [coffeeToppings[2]],
     availableBranchIds: ["cg-b1", "cg-b2"],
-    active: true
+    active: true,
+    isNew: true
   },
   {
     id: "cg-p7",
@@ -678,6 +812,66 @@ const coffeegoRecurring: RecurringOrder[] = [
   }
 ];
 
+const coffeegoNews: NewsStory[] = [
+  {
+    id: "cg-news-beans",
+    companyId: "coffeego",
+    sortOrder: 10,
+    isPublished: true,
+    title: { ru: "Новая обжарка недели", en: "New roast of the week" },
+    body: {
+      ru: "Эфиопия Иргачеффе — цитрус и жасмин. Попробуйте в фильтре или капучино."
+    },
+    badge: { ru: "Зерно" },
+    accentColor: "#8FDCC4",
+    visual: "sparkle",
+    publishedAt: daysAgo(1),
+    expiresAt: null,
+    imageUrl: null,
+    ctaLabel: null,
+    ctaRoute: null
+  },
+  {
+    id: "cg-news-loyalty",
+    companyId: "coffeego",
+    sortOrder: 20,
+    isPublished: true,
+    title: { ru: "Шестой кофе — в подарок" },
+    body: { ru: "Собирайте штампы в приложении и получайте напиток бесплатно." },
+    badge: { ru: "Лояльность" },
+    accentColor: "#FFC96B",
+    visual: "loyalty",
+    publishedAt: daysAgo(4),
+    expiresAt: null,
+    imageUrl: null,
+    ctaLabel: null,
+    ctaRoute: null
+  }
+];
+
+const coffeegoPromotions: Promotion[] = [
+  {
+    id: "cg-promo-morning",
+    companyId: "coffeego",
+    sortOrder: 10,
+    active: true,
+    title: { ru: "Раннее утро" },
+    description: { ru: "Американо −30% до 10:00" },
+    code: "EARLY",
+    accentColor: "#6b4226"
+  },
+  {
+    id: "cg-promo-combo",
+    companyId: "coffeego",
+    sortOrder: 20,
+    active: true,
+    title: { ru: "Кофе + круассан" },
+    description: { ru: "Комбо за 380 сом" },
+    code: "COMBO",
+    accentColor: "#d4a373"
+  }
+];
+
 // ---------------------------------------------------------------------------
 // Публичный API мок-слоя (единственная точка доступа к данным)
 // ---------------------------------------------------------------------------
@@ -706,7 +900,15 @@ export function getCompanyData(companyId: string): CompanyData | null {
       .map(({ password: _password, ...user }) => user),
     recurring: sweettimeRecurring
       .concat(coffeegoRecurring)
-      .filter((r) => r.companyId === companyId)
+      .filter((r) => r.companyId === companyId),
+    news: sweettimeNews
+      .concat(coffeegoNews)
+      .filter((n) => n.companyId === companyId)
+      .sort((a, b) => a.sortOrder - b.sortOrder),
+    promotions: sweettimePromotions
+      .concat(coffeegoPromotions)
+      .filter((p) => p.companyId === companyId)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
   };
 }
 

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { RoleGate } from "@/components/role-gate";
 import { useCompanyStore } from "@/lib/company-store";
-import type { Company, Product } from "@/lib/types";
+import type { Company, NewsStory, Product, Promotion } from "@/lib/types";
 import { cn, formatCurrency } from "@/lib/utils";
 
 const ACCENT_PRESETS = [
@@ -34,17 +34,68 @@ const HEX_RE = /^#?([0-9a-fA-F]{6})$/;
 // Живое превью телефона: мини-версия главного экрана клиентского приложения
 // ---------------------------------------------------------------------------
 
+function PreviewDrinkCard({
+  drink,
+  accent,
+  currency
+}: {
+  drink: Product;
+  accent: string;
+  currency: string;
+}) {
+  return (
+    <div className="rounded-xl border border-coffee-900/10 bg-white p-2.5">
+      <span
+        className="block h-10 w-10 rounded-full"
+        style={{ backgroundColor: drink.color }}
+        aria-hidden="true"
+      />
+      <p className="mt-1.5 truncate text-[10px] font-semibold text-coffee-900">
+        {drink.name}
+      </p>
+      <div className="mt-0.5 flex items-center justify-between">
+        <p className="text-[10px] font-semibold" style={{ color: accent }}>
+          {formatCurrency(drink.price, currency)}
+        </p>
+        <span
+          className="flex h-5 w-5 items-center justify-center rounded-full text-white"
+          style={{ backgroundColor: accent }}
+        >
+          <Plus className="h-3 w-3" />
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function PhonePreview({
   company,
-  products
+  products,
+  news,
+  promotions
 }: {
   company: Company;
   products: Product[];
+  news: NewsStory[];
+  promotions: Promotion[];
 }) {
   const accent = company.accentColor;
   const appName = company.appName.trim() || "Приложение";
   const letter = appName.charAt(0).toUpperCase();
-  const drinks = products.filter((p) => p.active).slice(0, 2);
+
+  const stories = [...news]
+    .filter((n) => n.isPublished)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .slice(0, 4);
+  const promo = [...promotions]
+    .filter((p) => p.active)
+    .sort((a, b) => a.sortOrder - b.sortOrder)[0];
+  const bestSellers = products
+    .filter((p) => p.active && p.isBestSeller)
+    .slice(0, 2);
+  const newItems = products.filter((p) => p.active && p.isNew).slice(0, 2);
+  // fallback, чтобы блоки не были пустыми, если флаги ещё не проставлены
+  const hits = bestSellers.length ? bestSellers : products.filter((p) => p.active).slice(0, 2);
 
   const tabs = [
     { label: "Главная", icon: Home, active: true },
@@ -72,7 +123,7 @@ function PhonePreview({
         </div>
 
         {/* Шапка приложения */}
-        <div className="flex items-center justify-between px-5 pt-4">
+        <div className="flex items-center justify-between px-5 pb-1 pt-3">
           <div className="flex min-w-0 items-center gap-2">
             <span
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-sm font-bold text-white"
@@ -90,52 +141,85 @@ function PhonePreview({
           <Bell className="h-4 w-4 shrink-0 text-coffee-500" />
         </div>
 
-        {/* Hero-карточка */}
-        <div
-          className="mx-4 mt-3 rounded-2xl p-4 text-white"
-          style={{
-            background: `linear-gradient(135deg, ${accent}, ${accent}B3)`
-          }}
-        >
-          <p className="text-[13px] font-semibold leading-snug">
-            Соберём любимый напиток к 11:00?
-          </p>
-          <span className="mt-2.5 inline-block rounded-full bg-white/25 px-3 py-1 text-[10px] font-semibold">
-            Заказать
-          </span>
-        </div>
-
-        {/* Карточки напитков из меню компании */}
-        <p className="px-5 pb-2 pt-4 text-[11px] font-semibold text-coffee-900">
-          Хиты меню
-        </p>
-        <div className="grid grid-cols-2 gap-2 px-4">
-          {drinks.map((drink) => (
-            <div
-              key={drink.id}
-              className="rounded-xl border border-coffee-900/10 bg-white p-2.5"
-            >
-              <span
-                className="block h-10 w-10 rounded-full"
-                style={{ backgroundColor: drink.color }}
-                aria-hidden="true"
-              />
-              <p className="mt-1.5 truncate text-[10px] font-semibold text-coffee-900">
-                {drink.name}
-              </p>
-              <div className="mt-0.5 flex items-center justify-between">
-                <p className="text-[10px] font-semibold" style={{ color: accent }}>
-                  {formatCurrency(drink.price, company.currency)}
-                </p>
+        {/* Прокручиваемое содержимое главного экрана */}
+        <div className="flex-1 overflow-y-auto pb-2">
+          {/* Лента сторис (новости) */}
+          {stories.length > 0 && (
+            <div className="flex gap-3 overflow-x-auto px-5 py-3">
+              {stories.map((story) => (
                 <span
-                  className="flex h-5 w-5 items-center justify-center rounded-full text-white"
-                  style={{ backgroundColor: accent }}
+                  key={story.id}
+                  className="flex w-12 shrink-0 flex-col items-center gap-1"
                 >
-                  <Plus className="h-3 w-3" />
+                  <span
+                    className="flex h-12 w-12 items-center justify-center rounded-full p-[2px]"
+                    style={{ background: `linear-gradient(135deg, ${story.accentColor}, ${story.accentColor}80)` }}
+                  >
+                    <span className="flex h-full w-full items-center justify-center rounded-full bg-cream-50 text-[9px] font-bold" style={{ color: story.accentColor }}>
+                      {(story.badge.ru || story.title.ru || "•").charAt(0)}
+                    </span>
+                  </span>
+                  <span className="w-full truncate text-center text-[8px] text-coffee-700">
+                    {story.title.ru}
+                  </span>
                 </span>
-              </div>
+              ))}
             </div>
-          ))}
+          )}
+
+          {/* Сезонная акция */}
+          {promo && (
+            <div
+              className="mx-4 mt-1 rounded-2xl p-4 text-white"
+              style={{ background: `linear-gradient(135deg, ${promo.accentColor}, ${promo.accentColor}B3)` }}
+            >
+              <p className="text-[9px] font-semibold uppercase tracking-wide text-white/80">
+                Сезонная акция
+              </p>
+              <p className="mt-0.5 text-[13px] font-semibold leading-snug">
+                {promo.title.ru}
+              </p>
+              {promo.code && (
+                <span className="mt-2 inline-block rounded-full bg-white/25 px-3 py-1 font-mono text-[10px] font-bold">
+                  {promo.code}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Хиты продаж */}
+          <p className="px-5 pb-2 pt-4 text-[11px] font-semibold text-coffee-900">
+            Хиты продаж
+          </p>
+          <div className="grid grid-cols-2 gap-2 px-4">
+            {hits.map((drink) => (
+              <PreviewDrinkCard
+                key={drink.id}
+                drink={drink}
+                accent={accent}
+                currency={company.currency}
+              />
+            ))}
+          </div>
+
+          {/* Новое в меню */}
+          {newItems.length > 0 && (
+            <>
+              <p className="px-5 pb-2 pt-4 text-[11px] font-semibold text-coffee-900">
+                Новое в меню
+              </p>
+              <div className="grid grid-cols-2 gap-2 px-4">
+                {newItems.map((drink) => (
+                  <PreviewDrinkCard
+                    key={drink.id}
+                    drink={drink}
+                    accent={accent}
+                    currency={company.currency}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Нижняя таб-навигация */}
@@ -177,7 +261,8 @@ function PhonePreview({
 // ---------------------------------------------------------------------------
 
 function SettingsContent() {
-  const { company, products, updateCompany } = useCompanyStore();
+  const { company, products, news, promotions, updateCompany } =
+    useCompanyStore();
 
   // Черновик hex-поля (акцент применяется только при валидном значении)
   const [hexDraft, setHexDraft] = useState(company.accentColor);
@@ -343,7 +428,12 @@ function SettingsContent() {
             </div>
           </div>
 
-          <PhonePreview company={company} products={products} />
+          <PhonePreview
+            company={company}
+            products={products}
+            news={news}
+            promotions={promotions}
+          />
         </div>
       </section>
 

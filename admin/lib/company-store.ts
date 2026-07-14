@@ -24,21 +24,31 @@ import {
 } from "react";
 import {
   apiCreateBranch,
+  apiCreateNews,
   apiCreateProduct,
+  apiCreatePromotion,
+  apiDeleteNews,
+  apiDeletePromotion,
   apiEnabled,
   apiFetchBranches,
   apiFetchConfig,
+  apiFetchNews,
   apiFetchProducts,
+  apiFetchPromotions,
   apiPatchBranch,
   apiPatchConfig,
-  apiPatchProduct
+  apiPatchNews,
+  apiPatchProduct,
+  apiPatchPromotion
 } from "@/lib/api";
 import { getCompanyData } from "@/lib/data";
 import type {
   AdminUser,
   Branch,
   Company,
+  NewsStory,
   Product,
+  Promotion,
   RecurringOrder
 } from "@/lib/types";
 
@@ -48,6 +58,8 @@ interface CompanyState {
   branches: Branch[];
   users: AdminUser[];
   recurring: RecurringOrder[];
+  news: NewsStory[];
+  promotions: Promotion[];
 }
 
 interface CompanyStoreValue extends CompanyState {
@@ -60,6 +72,15 @@ interface CompanyStoreValue extends CompanyState {
   addUser: (user: AdminUser) => void;
   updateUser: (userId: string, patch: Partial<Omit<AdminUser, "id">>) => void;
   removeUser: (userId: string) => void;
+  addNews: (news: NewsStory) => void;
+  updateNews: (newsId: string, patch: Partial<Omit<NewsStory, "id">>) => void;
+  removeNews: (newsId: string) => void;
+  addPromotion: (promotion: Promotion) => void;
+  updatePromotion: (
+    promotionId: string,
+    patch: Partial<Omit<Promotion, "id">>
+  ) => void;
+  removePromotion: (promotionId: string) => void;
 }
 
 const CompanyStoreContext = createContext<CompanyStoreValue | null>(null);
@@ -86,7 +107,9 @@ export function CompanyStoreProvider({
       products: data.products,
       branches: data.branches,
       users: data.users,
-      recurring: data.recurring
+      recurring: data.recurring,
+      news: data.news,
+      promotions: data.promotions
     };
   });
 
@@ -104,13 +127,17 @@ export function CompanyStoreProvider({
     Promise.all([
       apiFetchConfig(companyId),
       apiFetchProducts(companyId),
-      apiFetchBranches(companyId)
+      apiFetchBranches(companyId),
+      apiFetchNews(companyId),
+      apiFetchPromotions(companyId)
     ])
-      .then(([company, products, branches]) => {
+      .then(([company, products, branches, news, promotions]) => {
         if (cancelled) return;
         apiModeRef.current = true;
         setState((prev) =>
-          prev ? { ...prev, company, products, branches } : prev
+          prev
+            ? { ...prev, company, products, branches, news, promotions }
+            : prev
         );
       })
       .catch((error) => {
@@ -311,6 +338,219 @@ export function CompanyStoreProvider({
     );
   }, []);
 
+  // ----- Новости-сторис -----
+
+  const sortNews = (list: NewsStory[]) =>
+    [...list].sort((a, b) => a.sortOrder - b.sortOrder);
+
+  const addNews = useCallback(
+    (news: NewsStory) => {
+      setState((prev) =>
+        prev ? { ...prev, news: sortNews([...prev.news, news]) } : prev
+      );
+      if (!apiModeRef.current) return;
+
+      const { id: tempId, companyId: _cid, ...payload } = news;
+      apiCreateNews(companyId, payload)
+        .then((created) => {
+          setState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  news: sortNews(
+                    prev.news.map((n) => (n.id === tempId ? created : n))
+                  )
+                }
+              : prev
+          );
+        })
+        .catch((error) => {
+          // Создание не подтвердилось сервером — убираем временную сторис
+          setState((prev) =>
+            prev
+              ? { ...prev, news: prev.news.filter((n) => n.id !== tempId) }
+              : prev
+          );
+          console.warn(
+            "[admin] API: не удалось создать новость, изменение отменено.",
+            error
+          );
+        });
+    },
+    [companyId]
+  );
+
+  const updateNews = useCallback(
+    (newsId: string, patch: Partial<Omit<NewsStory, "id">>) => {
+      setState((prev) =>
+        prev
+          ? {
+              ...prev,
+              news: sortNews(
+                prev.news.map((n) => (n.id === newsId ? { ...n, ...patch } : n))
+              )
+            }
+          : prev
+      );
+      if (!apiModeRef.current) return;
+
+      apiPatchNews(companyId, newsId, patch)
+        .then((updated) => {
+          setState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  news: sortNews(
+                    prev.news.map((n) => (n.id === newsId ? updated : n))
+                  )
+                }
+              : prev
+          );
+        })
+        .catch((error) => warnApi("сохранить новость", error));
+    },
+    [companyId]
+  );
+
+  const removeNews = useCallback(
+    (newsId: string) => {
+      let removed: NewsStory | undefined;
+      setState((prev) => {
+        if (!prev) return prev;
+        removed = prev.news.find((n) => n.id === newsId);
+        return { ...prev, news: prev.news.filter((n) => n.id !== newsId) };
+      });
+      if (!apiModeRef.current) return;
+
+      apiDeleteNews(companyId, newsId).catch((error) => {
+        // Откат: возвращаем удалённую сторис на место
+        setState((prev) =>
+          prev && removed
+            ? { ...prev, news: sortNews([...prev.news, removed]) }
+            : prev
+        );
+        console.warn(
+          "[admin] API: не удалось удалить новость, изменение отменено.",
+          error
+        );
+      });
+    },
+    [companyId]
+  );
+
+  // ----- Сезонные акции -----
+
+  const sortPromotions = (list: Promotion[]) =>
+    [...list].sort((a, b) => a.sortOrder - b.sortOrder);
+
+  const addPromotion = useCallback(
+    (promotion: Promotion) => {
+      setState((prev) =>
+        prev
+          ? {
+              ...prev,
+              promotions: sortPromotions([...prev.promotions, promotion])
+            }
+          : prev
+      );
+      if (!apiModeRef.current) return;
+
+      const { id: tempId, companyId: _cid, ...payload } = promotion;
+      apiCreatePromotion(companyId, payload)
+        .then((created) => {
+          setState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  promotions: sortPromotions(
+                    prev.promotions.map((p) => (p.id === tempId ? created : p))
+                  )
+                }
+              : prev
+          );
+        })
+        .catch((error) => {
+          setState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  promotions: prev.promotions.filter((p) => p.id !== tempId)
+                }
+              : prev
+          );
+          console.warn(
+            "[admin] API: не удалось создать акцию, изменение отменено.",
+            error
+          );
+        });
+    },
+    [companyId]
+  );
+
+  const updatePromotion = useCallback(
+    (promotionId: string, patch: Partial<Omit<Promotion, "id">>) => {
+      setState((prev) =>
+        prev
+          ? {
+              ...prev,
+              promotions: sortPromotions(
+                prev.promotions.map((p) =>
+                  p.id === promotionId ? { ...p, ...patch } : p
+                )
+              )
+            }
+          : prev
+      );
+      if (!apiModeRef.current) return;
+
+      apiPatchPromotion(companyId, promotionId, patch)
+        .then((updated) => {
+          setState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  promotions: sortPromotions(
+                    prev.promotions.map((p) =>
+                      p.id === promotionId ? updated : p
+                    )
+                  )
+                }
+              : prev
+          );
+        })
+        .catch((error) => warnApi("сохранить акцию", error));
+    },
+    [companyId]
+  );
+
+  const removePromotion = useCallback(
+    (promotionId: string) => {
+      let removed: Promotion | undefined;
+      setState((prev) => {
+        if (!prev) return prev;
+        removed = prev.promotions.find((p) => p.id === promotionId);
+        return {
+          ...prev,
+          promotions: prev.promotions.filter((p) => p.id !== promotionId)
+        };
+      });
+      if (!apiModeRef.current) return;
+
+      apiDeletePromotion(companyId, promotionId).catch((error) => {
+        setState((prev) =>
+          prev && removed
+            ? { ...prev, promotions: sortPromotions([...prev.promotions, removed]) }
+            : prev
+        );
+        console.warn(
+          "[admin] API: не удалось удалить акцию, изменение отменено.",
+          error
+        );
+      });
+    },
+    [companyId]
+  );
+
   const value = useMemo<CompanyStoreValue | null>(
     () =>
       state
@@ -323,7 +563,13 @@ export function CompanyStoreProvider({
             updateBranch,
             addUser,
             updateUser,
-            removeUser
+            removeUser,
+            addNews,
+            updateNews,
+            removeNews,
+            addPromotion,
+            updatePromotion,
+            removePromotion
           }
         : null,
     [
@@ -335,7 +581,13 @@ export function CompanyStoreProvider({
       updateBranch,
       addUser,
       updateUser,
-      removeUser
+      removeUser,
+      addNews,
+      updateNews,
+      removeNews,
+      addPromotion,
+      updatePromotion,
+      removePromotion
     ]
   );
 

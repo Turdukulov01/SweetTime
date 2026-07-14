@@ -13,8 +13,10 @@ import {
   LayoutDashboard,
   LogOut,
   MapPin,
+  Newspaper,
   Settings,
   Store,
+  Tag,
   Users
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -45,6 +47,18 @@ const NAV_ITEMS: Array<{
     roles: ["owner", "manager", "barista"]
   },
   { href: "/menu", label: "Меню", icon: CupSoda, roles: ["owner", "manager"] },
+  {
+    href: "/news",
+    label: "Новости",
+    icon: Newspaper,
+    roles: ["owner", "manager"]
+  },
+  {
+    href: "/promotions",
+    label: "Акции",
+    icon: Tag,
+    roles: ["owner", "manager"]
+  },
   {
     href: "/branches",
     label: "Филиалы",

@@ -9,11 +9,15 @@ import { useSyncExternalStore } from "react";
 import type {
   Branch,
   Company,
+  LocalizedText,
+  NewsStory,
+  NewsVisual,
   Order,
   PaymentMethod,
   OrderStatus,
   OrderType,
-  Product
+  Product,
+  Promotion
 } from "@/lib/types";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/+$/, "");
@@ -99,9 +103,58 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** DELETE-запрос без тела ответа (сервер отвечает 204 No Content). */
+async function requestVoid(path: string, method = "DELETE"): Promise<void> {
+  if (!apiEnabled) throw new ApiError(0, "API отключён (NEXT_PUBLIC_API_URL)");
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, { method, cache: "no-store" });
+  } catch {
+    setApiStatus("down");
+    throw new ApiError(0, "API недоступен");
+  }
+
+  setApiStatus("live");
+
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const body = (await response.json()) as { detail?: unknown };
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      // тело не JSON — оставляем HTTP-код
+    }
+    throw new ApiError(response.status, detail);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Формы ответов API и маппинг в доменные типы админки
 // ---------------------------------------------------------------------------
+
+interface ApiLocalized {
+  ru: string;
+  ky?: string | null;
+  en?: string | null;
+}
+
+/** {ru, ky:null, en:null} с сервера → доменный LocalizedText (null → undefined) */
+function mapLocalized(v: ApiLocalized): LocalizedText {
+  return {
+    ru: v.ru,
+    ky: v.ky ?? undefined,
+    en: v.en ?? undefined
+  };
+}
+
+/** LocalizedText → тело запроса: пустые ky/en опускаем, ru всегда шлём */
+function serializeLocalized(v: LocalizedText): Record<string, string> {
+  const out: Record<string, string> = { ru: v.ru.trim() };
+  if (v.ky && v.ky.trim()) out.ky = v.ky.trim();
+  if (v.en && v.en.trim()) out.en = v.en.trim();
+  return out;
+}
 
 interface ApiModifier {
   name: string;
@@ -119,6 +172,8 @@ interface ApiProduct {
   toppings: ApiModifier[];
   availableBranchIds: string[];
   active: boolean;
+  isNew?: boolean;
+  isBestSeller?: boolean;
 }
 
 interface ApiBranch {
@@ -169,7 +224,9 @@ function mapProduct(companyId: string, p: ApiProduct): Product {
       priceDelta: t.priceDelta
     })),
     availableBranchIds: p.availableBranchIds ?? [],
-    active: p.active
+    active: p.active,
+    isBestSeller: p.isBestSeller ?? false,
+    isNew: p.isNew ?? false
   };
 }
 
@@ -216,6 +273,8 @@ function serializeProductPatch(
   if (patch.color !== undefined) body.color = patch.color;
   if (patch.price !== undefined) body.price = patch.price;
   if (patch.active !== undefined) body.active = patch.active;
+  if (patch.isBestSeller !== undefined) body.isBestSeller = patch.isBestSeller;
+  if (patch.isNew !== undefined) body.isNew = patch.isNew;
   if (patch.availableBranchIds !== undefined)
     body.availableBranchIds = patch.availableBranchIds;
   if (patch.sizes !== undefined)
@@ -328,4 +387,178 @@ export async function apiPatchOrderStatus(
     { method: "PATCH", body: JSON.stringify({ status }) }
   );
   return mapOrder(companyId, updated);
+}
+
+// ---------------------------------------------------------------------------
+// Новости-сторис
+// ---------------------------------------------------------------------------
+
+interface ApiNews {
+  id: string | number;
+  sortOrder: number;
+  isPublished: boolean;
+  title: ApiLocalized;
+  body: ApiLocalized;
+  badge: ApiLocalized;
+  accentColor: string;
+  visual: NewsVisual;
+  publishedAt: string;
+  expiresAt: string | null;
+  imageUrl: string | null;
+  ctaLabel: ApiLocalized | null;
+  ctaRoute: string | null;
+}
+
+function mapNews(companyId: string, n: ApiNews): NewsStory {
+  return {
+    id: String(n.id),
+    companyId,
+    sortOrder: n.sortOrder,
+    isPublished: n.isPublished,
+    title: mapLocalized(n.title),
+    body: mapLocalized(n.body),
+    badge: mapLocalized(n.badge),
+    accentColor: n.accentColor,
+    visual: n.visual,
+    publishedAt: n.publishedAt,
+    expiresAt: n.expiresAt ?? null,
+    imageUrl: n.imageUrl ?? null,
+    ctaLabel: n.ctaLabel ? mapLocalized(n.ctaLabel) : null,
+    ctaRoute: n.ctaRoute ?? null
+  };
+}
+
+function serializeNewsPatch(
+  patch: Partial<Omit<NewsStory, "id" | "companyId">>
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (patch.sortOrder !== undefined) body.sortOrder = patch.sortOrder;
+  if (patch.isPublished !== undefined) body.isPublished = patch.isPublished;
+  if (patch.title !== undefined) body.title = serializeLocalized(patch.title);
+  if (patch.body !== undefined) body.body = serializeLocalized(patch.body);
+  if (patch.badge !== undefined) body.badge = serializeLocalized(patch.badge);
+  if (patch.accentColor !== undefined) body.accentColor = patch.accentColor;
+  if (patch.visual !== undefined) body.visual = patch.visual;
+  if (patch.publishedAt !== undefined) body.publishedAt = patch.publishedAt;
+  if (patch.expiresAt !== undefined) body.expiresAt = patch.expiresAt;
+  if (patch.imageUrl !== undefined) body.imageUrl = patch.imageUrl;
+  if (patch.ctaLabel !== undefined)
+    body.ctaLabel = patch.ctaLabel ? serializeLocalized(patch.ctaLabel) : null;
+  if (patch.ctaRoute !== undefined) body.ctaRoute = patch.ctaRoute;
+  return body;
+}
+
+export async function apiFetchNews(companyId: string): Promise<NewsStory[]> {
+  const news = await request<ApiNews[]>(`/api/companies/${companyId}/news`);
+  return news.map((n) => mapNews(companyId, n));
+}
+
+export async function apiCreateNews(
+  companyId: string,
+  news: Omit<NewsStory, "id" | "companyId">
+): Promise<NewsStory> {
+  const created = await request<ApiNews>(`/api/companies/${companyId}/news`, {
+    method: "POST",
+    body: JSON.stringify(serializeNewsPatch(news))
+  });
+  return mapNews(companyId, created);
+}
+
+export async function apiPatchNews(
+  companyId: string,
+  newsId: string,
+  patch: Partial<Omit<NewsStory, "id" | "companyId">>
+): Promise<NewsStory> {
+  const updated = await request<ApiNews>(
+    `/api/companies/${companyId}/news/${newsId}`,
+    { method: "PATCH", body: JSON.stringify(serializeNewsPatch(patch)) }
+  );
+  return mapNews(companyId, updated);
+}
+
+export async function apiDeleteNews(
+  companyId: string,
+  newsId: string
+): Promise<void> {
+  await requestVoid(`/api/companies/${companyId}/news/${newsId}`);
+}
+
+// ---------------------------------------------------------------------------
+// Сезонные акции
+// ---------------------------------------------------------------------------
+
+interface ApiPromotion {
+  id: string | number;
+  sortOrder: number;
+  active: boolean;
+  title: ApiLocalized;
+  description: ApiLocalized;
+  code: string | null;
+  accentColor: string;
+}
+
+function mapPromotion(companyId: string, p: ApiPromotion): Promotion {
+  return {
+    id: String(p.id),
+    companyId,
+    sortOrder: p.sortOrder,
+    active: p.active,
+    title: mapLocalized(p.title),
+    description: mapLocalized(p.description),
+    code: p.code ?? null,
+    accentColor: p.accentColor
+  };
+}
+
+function serializePromotionPatch(
+  patch: Partial<Omit<Promotion, "id" | "companyId">>
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (patch.sortOrder !== undefined) body.sortOrder = patch.sortOrder;
+  if (patch.active !== undefined) body.active = patch.active;
+  if (patch.title !== undefined) body.title = serializeLocalized(patch.title);
+  if (patch.description !== undefined)
+    body.description = serializeLocalized(patch.description);
+  if (patch.code !== undefined) body.code = patch.code;
+  if (patch.accentColor !== undefined) body.accentColor = patch.accentColor;
+  return body;
+}
+
+export async function apiFetchPromotions(
+  companyId: string
+): Promise<Promotion[]> {
+  const promotions = await request<ApiPromotion[]>(
+    `/api/companies/${companyId}/promotions`
+  );
+  return promotions.map((p) => mapPromotion(companyId, p));
+}
+
+export async function apiCreatePromotion(
+  companyId: string,
+  promotion: Omit<Promotion, "id" | "companyId">
+): Promise<Promotion> {
+  const created = await request<ApiPromotion>(
+    `/api/companies/${companyId}/promotions`,
+    { method: "POST", body: JSON.stringify(serializePromotionPatch(promotion)) }
+  );
+  return mapPromotion(companyId, created);
+}
+
+export async function apiPatchPromotion(
+  companyId: string,
+  promotionId: string,
+  patch: Partial<Omit<Promotion, "id" | "companyId">>
+): Promise<Promotion> {
+  const updated = await request<ApiPromotion>(
+    `/api/companies/${companyId}/promotions/${promotionId}`,
+    { method: "PATCH", body: JSON.stringify(serializePromotionPatch(patch)) }
+  );
+  return mapPromotion(companyId, updated);
+}
+
+export async function apiDeletePromotion(
+  companyId: string,
+  promotionId: string
+): Promise<void> {
+  await requestVoid(`/api/companies/${companyId}/promotions/${promotionId}`);
 }

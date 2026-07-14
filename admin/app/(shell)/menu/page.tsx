@@ -33,6 +33,8 @@ interface ProductDraft {
   toppings: ModifierOption[];
   availableBranchIds: string[];
   active: boolean;
+  isBestSeller: boolean;
+  isNew: boolean;
 }
 
 function draftFromProduct(product: Product): ProductDraft {
@@ -44,7 +46,9 @@ function draftFromProduct(product: Product): ProductDraft {
     sizes: product.sizes.map((s) => ({ ...s })),
     toppings: product.toppings.map((t) => ({ ...t })),
     availableBranchIds: [...product.availableBranchIds],
-    active: product.active
+    active: product.active,
+    isBestSeller: product.isBestSeller ?? false,
+    isNew: product.isNew ?? false
   };
 }
 
@@ -149,7 +153,9 @@ function ProductPanel({
           sizes: [],
           toppings: [],
           availableBranchIds: branches.map((b) => b.id),
-          active: true
+          active: true,
+          isBestSeller: false,
+          isNew: false
         }
   );
 
@@ -176,7 +182,9 @@ function ProductPanel({
       sizes: draft.sizes.filter((s) => s.label.trim()),
       toppings: draft.toppings.filter((t) => t.label.trim()),
       availableBranchIds: draft.availableBranchIds,
-      active: draft.active
+      active: draft.active,
+      isBestSeller: draft.isBestSeller,
+      isNew: draft.isNew
     };
     if (product) {
       updateProduct(product.id, payload);
@@ -321,6 +329,34 @@ function ProductPanel({
               label="Товар активен"
             />
           </div>
+
+          {/* Витрина: попадание товара в блоки главного экрана приложения */}
+          <div className="rounded-xl border border-coffee-900/10 px-4 py-3">
+            <p className="mb-1 text-sm font-medium text-coffee-700">
+              Витрина приложения
+            </p>
+            <p className="mb-3 text-xs text-coffee-500">
+              Определяет блоки на главном экране приложения
+            </p>
+            <div className="flex items-center justify-between py-1.5">
+              <span className="text-sm text-coffee-700">Хит продаж</span>
+              <Toggle
+                checked={draft.isBestSeller}
+                onChange={(isBestSeller) =>
+                  setDraft({ ...draft, isBestSeller })
+                }
+                label="Хит продаж"
+              />
+            </div>
+            <div className="flex items-center justify-between py-1.5">
+              <span className="text-sm text-coffee-700">Новое в меню</span>
+              <Toggle
+                checked={draft.isNew}
+                onChange={(isNew) => setDraft({ ...draft, isNew })}
+                label="Новое в меню"
+              />
+            </div>
+          </div>
         </div>
 
         <footer className="flex gap-2 border-t border-coffee-900/10 px-6 py-4">
@@ -451,8 +487,24 @@ function MenuContent() {
                           style={{ backgroundColor: product.color }}
                           aria-hidden="true"
                         />
-                        <span className="font-semibold text-coffee-900">
-                          {product.name}
+                        <span className="min-w-0">
+                          <span className="block font-semibold text-coffee-900">
+                            {product.name}
+                          </span>
+                          {(product.isBestSeller || product.isNew) && (
+                            <span className="mt-0.5 flex flex-wrap gap-1">
+                              {product.isBestSeller && (
+                                <span className="rounded-full bg-candy-500/15 px-2 py-0.5 text-[10px] font-bold text-candy-700 dark:text-candy-300">
+                                  Хит
+                                </span>
+                              )}
+                              {product.isNew && (
+                                <span className="rounded-full bg-mint-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-mint-300">
+                                  Новинка
+                                </span>
+                              )}
+                            </span>
+                          )}
                         </span>
                       </span>
                     </td>
