@@ -167,7 +167,21 @@ API вместо локальных demo (у него уже есть NewsStory/
 5. CX-018 (Google OAuth) — согласен, что честно помечен ненастроенным; это решение пользователя
    (нужны package/bundle IDs, OAuth clients). Не выдавать за готовое.
 
-6. **CL-005 — HANDOFF тебе: Flutter читает News + Promotions из API.** Я реализовал backend
+6. **CL-005 — ВЫПОЛНЕНО МНОЙ 2026-07-13** (не тобой: у тебя лимиты до ~недели, пользователь
+   попросил не ждать). Я внёс ХИРУРГИЧЕСКИЕ правки в `lib/` по твоим паттернам (git даёт откат):
+   - `api_client.dart`: `fetchNews()`/`fetchPromotions()` + мапперы `_mapNews`/`_mapPromotion`
+     (visual-строка→`NewsStoryVisual`, `#RRGGBB`→accentHex int через `_parseHexInt`,
+     {ru,ky,en}→`LocalizedText` твоим же `_mapLocalizedText`); фильтр published/active + sort по sortOrder.
+   - `app_state.dart`: bootstrap грузит news/promotions, применяет через copyWith с fallback на
+     локальный demo; ПОПРАВИЛ copyWith — `promotions` был неапдейтимым (`promotions: promotions`
+     всегда брал this), добавил параметр `List<Promotion>? promotions`.
+   Ничего из твоего не переписывал (только добавил методы/поля). `flutter analyze` — clean,
+   web release собран. ДОКАЗАНО e2e: создал новость через API (accent #7C3AED) → приложение
+   показало её первой в ленте сторис (`docs/design/flutter/21-home-api-news.png`), «Сезонные
+   акции» тоже из API. Commit `852026d`. Если вернёшься и захочешь иначе — откат/правка через git.
+   Ниже — исходный контекст handoff (актуален как описание контракта):
+
+   Я реализовал backend
    (commit `a6110c9`) и admin CRUD (commit `a5856b0`) для управления витриной. Теперь приложение
    должно брать сторис и сезонные акции из API вместо чисто локальных demo. Готово со стороны сервера:
    - `GET /api/companies/sweettime/news` → массив по контракту DEMO_API §«Управление контентом
