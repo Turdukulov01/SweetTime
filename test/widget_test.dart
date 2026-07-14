@@ -702,6 +702,7 @@ Widget _testAppWithController(AppStateController controller) {
 
 class _MemoryLanguagePreferenceStore implements LanguagePreferenceStore {
   String? code;
+  String? themeMode;
 
   @override
   Future<String?> readLanguageCode() async => code;
@@ -709,5 +710,13 @@ class _MemoryLanguagePreferenceStore implements LanguagePreferenceStore {
   @override
   Future<void> writeLanguageCode(String code) async {
     this.code = code;
+  }
+
+  @override
+  Future<String?> readThemeMode() async => themeMode;
+
+  @override
+  Future<void> writeThemeMode(String value) async {
+    themeMode = value;
   }
 }

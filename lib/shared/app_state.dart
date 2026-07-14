@@ -37,6 +37,8 @@ enum AuthReturnDestination {
 abstract interface class LanguagePreferenceStore {
   Future<String?> readLanguageCode();
   Future<void> writeLanguageCode(String code);
+  Future<String?> readThemeMode();
+  Future<void> writeThemeMode(String value);
 }
 
 class SharedPreferencesLanguagePreferenceStore
@@ -53,6 +55,14 @@ class SharedPreferencesLanguagePreferenceStore
   @override
   Future<void> writeLanguageCode(String code) =>
       _instance.setString(AppStateController.languagePreferenceKey, code);
+
+  @override
+  Future<String?> readThemeMode() =>
+      _instance.getString(AppStateController.themePreferenceKey);
+
+  @override
+  Future<void> writeThemeMode(String value) =>
+      _instance.setString(AppStateController.themePreferenceKey, value);
 }
 
 @immutable
@@ -272,6 +282,7 @@ class AppStateController extends StateNotifier<AppState> {
   final ApiClient _api = ApiClient();
   final LanguagePreferenceStore _languagePreferences;
   static const languagePreferenceKey = 'app_language';
+  static const themePreferenceKey = 'app_theme_mode';
   bool _bootstrapped = false;
 
   /// Однократная попытка подключиться к demo-API при старте (таймаут 2 с
@@ -289,8 +300,15 @@ class AppStateController extends StateNotifier<AppState> {
       if (language.isNotEmpty) {
         state = state.copyWith(language: language.first);
       }
+      // Сохранённая тема (тёмная/светлая) — восстанавливаем при запуске.
+      final savedTheme = await _languagePreferences.readThemeMode();
+      if (savedTheme == 'dark' || savedTheme == 'light') {
+        state = state.copyWith(
+          themeMode: savedTheme == 'dark' ? ThemeMode.dark : ThemeMode.light,
+        );
+      }
     } catch (_) {
-      // Настройка языка не должна блокировать автономный запуск приложения.
+      // Настройки языка/темы не должны блокировать автономный запуск приложения.
     }
     try {
       final config = await _api.fetchConfig();
@@ -379,11 +397,21 @@ class AppStateController extends StateNotifier<AppState> {
   }
 
   void toggleTheme() {
-    state = state.copyWith(
-      themeMode: state.themeMode == ThemeMode.dark
-          ? ThemeMode.light
-          : ThemeMode.dark,
-    );
+    final next = state.themeMode == ThemeMode.dark
+        ? ThemeMode.light
+        : ThemeMode.dark;
+    state = state.copyWith(themeMode: next);
+    unawaited(_persistTheme(next));
+  }
+
+  Future<void> _persistTheme(ThemeMode mode) async {
+    try {
+      await _languagePreferences.writeThemeMode(
+        mode == ThemeMode.dark ? 'dark' : 'light',
+      );
+    } catch (_) {
+      // UI уже переключён; ошибка локального хранилища не должна ломать приложение.
+    }
   }
 
   void setLanguage(AppLanguage language) {
