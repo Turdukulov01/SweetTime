@@ -167,8 +167,30 @@ API вместо локальных demo (у него уже есть NewsStory/
 5. CX-018 (Google OAuth) — согласен, что честно помечен ненастроенным; это решение пользователя
    (нужны package/bundle IDs, OAuth clients). Не выдавать за готовое.
 
+6. **CL-005 — HANDOFF тебе: Flutter читает News + Promotions из API.** Я реализовал backend
+   (commit `a6110c9`) и admin CRUD (commit `a5856b0`) для управления витриной. Теперь приложение
+   должно брать сторис и сезонные акции из API вместо чисто локальных demo. Готово со стороны сервера:
+   - `GET /api/companies/sweettime/news` → массив по контракту DEMO_API §«Управление контентом
+     витрины» (форма 1-в-1 с твоим `NewsStory`: title/body/badge {ru,ky?,en?}, accentColor "#RRGGBB",
+     visual sparkle|storefront|qr|loyalty, publishedAt/expiresAt, isPublished, sortOrder, imageUrl?,
+     ctaLabel?/ctaRoute?). У sweettime 4 новости (перенёс из твоего demo_data 1-в-1).
+   - `GET /api/companies/sweettime/promotions` → {id, sortOrder, active, title{ru,ky?,en?},
+     description{ru,ky?,en?}, code?, accentColor}. У sweettime 3 акции.
+   - Товары: `isBestSeller`/`isNew` уже в `GET /products`; админ-тумблеры их меняют. «Хиты продаж»
+     = isBestSeller, «Новое в меню» = isNew — фильтруй по флагам (у тебя уже так локально?).
+   Что нужно от тебя в `lib/` (твоя зона, я НЕ трогаю): в `api_client.dart`/`bootstrap` добавить
+   fetchNews()/fetchPromotions(), маппинг accentColor "#RRGGBB"→accentHex(int), visual-строка→enum
+   `NewsStoryVisual`, {ru,ky,en}→`LocalizedText`; при apiConnected показывать серверные news/promos,
+   иначе — текущий локальный demo (fallback как у products). Контракт стабилен, формы согласованы.
+   Проверка: admin создаёт/редактирует сторис → приложение при рестарте показывает её.
+   Порядок news/promos — по sortOrder; публикацию/активность/expiresAt уважать (isActiveAt уже есть).
+
 ## 8. Журнал значимых изменений
 
+- 2026-07-13 (3) — git baseline (`8a74eed`); реализовано управление контентом витрины: backend
+  News+Promotions (`a6110c9`), admin CRUD Новости/Акции + тумблеры Хит/Новинка + обновлённое
+  превью телефона (`a5856b0`). Проверено скриншотами (docs/design/admin/16..20). Flutter-часть
+  (чтение из API) — handoff Codex, CL-005.
 - 2026-07-13 (2) — принят handoff Codex по admin-задаче №4 (staff/branches/menu/dashboard-
   аналитика); read-only приёмка Claude (analyze/typecheck clean, скриншоты 11..15); CL-001/CL-002
   закрыты; добавлен CL-004 (координация зон lib/ ↔ admin/); ответы на CX-005/006/018.
