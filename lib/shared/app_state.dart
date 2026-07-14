@@ -179,6 +179,7 @@ class AppState {
     Branch? selectedBranch,
     List<MenuCategory>? categories,
     List<Product>? products,
+    List<Promotion>? promotions,
     List<NewsStory>? newsStories,
     List<String>? favoriteIds,
     List<CartItem>? cart,
@@ -218,7 +219,7 @@ class AppState {
       selectedBranch: selectedBranch ?? this.selectedBranch,
       categories: categories ?? this.categories,
       products: products ?? this.products,
-      promotions: promotions,
+      promotions: promotions ?? this.promotions,
       newsStories: newsStories ?? this.newsStories,
       favoriteIds: favoriteIds ?? this.favoriteIds,
       cart: cart ?? this.cart,
@@ -296,6 +297,9 @@ class AppStateController extends StateNotifier<AppState> {
       if (config == null) return; // сервер недоступен — остаёмся на демо
       final products = await _api.fetchProducts();
       final branches = await _api.fetchBranches();
+      // Контент витрины из админки; при ошибке остаётся локальный demo.
+      final news = await _api.fetchNews();
+      final promotions = await _api.fetchPromotions();
 
       final nextProducts = (products == null || products.isEmpty)
           ? state.products
@@ -324,6 +328,11 @@ class AppStateController extends StateNotifier<AppState> {
         branches: nextBranches,
         selectedBranch: selected,
         categories: categories.isEmpty ? state.categories : categories,
+        // news/promotions от сервера; null или пусто — оставляем локальный demo
+        newsStories: (news == null || news.isEmpty) ? state.newsStories : news,
+        promotions: (promotions == null || promotions.isEmpty)
+            ? state.promotions
+            : promotions,
       );
     } catch (_) {
       // Любая неожиданная ошибка не должна ронять запуск приложения.

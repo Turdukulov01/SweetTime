@@ -113,6 +113,40 @@ class ApiClient {
     }
   }
 
+  /// `GET /news` — новости-сторис витрины (только опубликованные, по sortOrder).
+  /// Форма — docs/design/DEMO_API.md §«Управление контентом витрины».
+  Future<List<NewsStory>?> fetchNews() async {
+    try {
+      final json = await _getJson('/news') as List<dynamic>;
+      final stories = [
+        for (final item in json.whereType<Map<String, dynamic>>())
+          if (item['isPublished'] != false) _mapNews(item),
+      ]..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+      return stories;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// `GET /promotions` — сезонные акции (только активные, по sortOrder).
+  Future<List<Promotion>?> fetchPromotions() async {
+    try {
+      final json = await _getJson('/promotions') as List<dynamic>;
+      final maps = json
+          .whereType<Map<String, dynamic>>()
+          .where((item) => item['active'] != false)
+          .toList()
+        ..sort(
+          (a, b) => ((a['sortOrder'] as num?)?.toInt() ?? 0).compareTo(
+            (b['sortOrder'] as num?)?.toInt() ?? 0,
+          ),
+        );
+      return [for (final item in maps) _mapPromotion(item)];
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// `POST /orders` — заказ из приложения. null = офлайн/ошибка:
   /// вызывающий код оформляет заказ локально, как раньше.
   Future<CreatedOrder?> createOrder({
@@ -272,6 +306,69 @@ class ApiClient {
       isOpen: (json['isOpen'] as bool?) ?? true,
       twoGisUrl: demo?.twoGisUrl ?? 'https://2gis.kg/bishkek',
       googleMapsUrl: demo?.googleMapsUrl ?? 'https://maps.google.com',
+    );
+  }
+
+  /// `#RRGGBB` -> 0xFFRRGGBB (int для NewsStory.accentHex); [fallback] при ошибке.
+  static int _parseHexInt(String? raw, int fallback) {
+    if (raw == null) return fallback;
+    final hex = raw.trim().replaceFirst('#', '');
+    if (hex.length != 6) return fallback;
+    final value = int.tryParse(hex, radix: 16);
+    return value == null ? fallback : (0xFF000000 | value);
+  }
+
+  static NewsStory _mapNews(Map<String, dynamic> json) {
+    final visualRaw = (json['visual'] as String?)?.trim();
+    final visual = NewsStoryVisual.values.firstWhere(
+      (v) => v.name == visualRaw,
+      orElse: () => NewsStoryVisual.sparkle,
+    );
+    final ctaLabelRaw = json['ctaLabel'];
+    return NewsStory(
+      id: json['id'].toString(),
+      title: _mapLocalizedText(
+        json['title'],
+        fallback: const LocalizedText(ru: 'Новость', ky: 'Жаңылык', en: 'News'),
+      ),
+      body: _mapLocalizedText(
+        json['body'],
+        fallback: const LocalizedText(ru: '', ky: '', en: ''),
+      ),
+      badge: _mapLocalizedText(
+        json['badge'],
+        fallback: const LocalizedText(ru: '', ky: '', en: ''),
+      ),
+      accentHex: _parseHexInt(json['accentColor'] as String?, 0xFFFF5C9A),
+      visual: visual,
+      publishedAt:
+          (json['publishedAt'] as String?) ?? DateTime.now().toIso8601String(),
+      expiresAt: json['expiresAt'] as String?,
+      isPublished: (json['isPublished'] as bool?) ?? true,
+      sortOrder: (json['sortOrder'] as num?)?.toInt() ?? 0,
+      imageUrl: json['imageUrl'] as String?,
+      ctaLabel: ctaLabelRaw == null
+          ? null
+          : _mapLocalizedText(
+              ctaLabelRaw,
+              fallback: const LocalizedText(ru: '', ky: '', en: ''),
+            ),
+      ctaRoute: json['ctaRoute'] as String?,
+    );
+  }
+
+  static Promotion _mapPromotion(Map<String, dynamic> json) {
+    return Promotion(
+      id: json['id'].toString(),
+      title: _mapLocalizedText(
+        json['title'],
+        fallback: const LocalizedText(ru: 'Акция', ky: 'Акция', en: 'Promo'),
+      ),
+      description: _mapLocalizedText(
+        json['description'],
+        fallback: const LocalizedText(ru: '', ky: '', en: ''),
+      ),
+      code: (json['code'] as String?) ?? '',
     );
   }
 
