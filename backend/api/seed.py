@@ -10,6 +10,7 @@
 Пароли и хэши никогда не попадают в API-ответы.
 """
 
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -26,6 +27,46 @@ from .models import (
     Promotion,
 )
 from .security import hash_password
+
+
+class ProductionBootstrapError(ValueError):
+    """Raised when a one-shot production bootstrap is unsafe or already applied."""
+
+
+def _validate_bootstrap_input(
+    owner_email: str, owner_name: str, owner_password: str
+) -> tuple[str, str, str]:
+    email = owner_email.strip().lower()
+    name = owner_name.strip()
+    password = owner_password.rstrip("\r\n")
+    if "\n" in password or "\r" in password:
+        raise ProductionBootstrapError("Owner password file must contain one line")
+    if not email or "@" not in email or len(email) > 255:
+        raise ProductionBootstrapError("A valid owner email is required")
+    if not name or len(name) > 120:
+        raise ProductionBootstrapError("Owner name must contain 1 to 120 characters")
+    password_bytes = password.encode("utf-8")
+    if len(password_bytes) < 16 or len(password_bytes) > 72:
+        raise ProductionBootstrapError(
+            "Owner password must contain 16 to 72 UTF-8 bytes"
+        )
+    if password.lower() in {"demo", "password", "sweettime"}:
+        raise ProductionBootstrapError("Known demo passwords are forbidden")
+    return email, name, password
+
+
+def _fresh_rows(records: list, model_type: type) -> list:
+    """Clone module fixtures into new ORM instances without reusing session state."""
+
+    return [
+        model_type(
+            **{
+                column.name: deepcopy(getattr(record, column.name))
+                for column in model_type.__table__.columns
+            }
+        )
+        for record in records
+    ]
 
 
 def _iso(dt: datetime) -> str:
@@ -115,17 +156,25 @@ _SWEETTIME_BRANCHES = [
 ]
 
 _DRINK_SIZES = [
-    {"name": "S", "priceDelta": 0},
-    {"name": "M", "priceDelta": 40},
-    {"name": "L", "priceDelta": 70},
+    {"id": "s", "name": "S", "priceDelta": 0},
+    {"id": "m", "name": "M", "priceDelta": 40},
+    {"id": "l", "name": "L", "priceDelta": 70},
 ]
 
-_T_TAPIOCA = {"name": "Шарики тапиоки", "priceDelta": 40}
-_T_CHEESE = {"name": "Сырная пенка", "priceDelta": 50}
-_T_ALOE = {"name": "Желе алоэ", "priceDelta": 40}
-_T_BROWN_SUGAR = {"name": "Шарики с коричневым сахаром", "priceDelta": 50}
-_T_PUDDING = {"name": "Пудинг", "priceDelta": 45}
-_T_COFFEE_JELLY = {"name": "Кофейное желе", "priceDelta": 40}
+_T_TAPIOCA = {"id": "tapioca", "name": "Шарики тапиоки", "priceDelta": 40}
+_T_CHEESE = {"id": "cheese-foam", "name": "Сырная пенка", "priceDelta": 50}
+_T_ALOE = {"id": "aloe-jelly", "name": "Желе алоэ", "priceDelta": 40}
+_T_BROWN_SUGAR = {
+    "id": "brown-sugar-pearls",
+    "name": "Шарики с коричневым сахаром",
+    "priceDelta": 50,
+}
+_T_PUDDING = {"id": "pudding", "name": "Пудинг", "priceDelta": 45}
+_T_COFFEE_JELLY = {
+    "id": "coffee-jelly",
+    "name": "Кофейное желе",
+    "priceDelta": 40,
+}
 
 _SWEETTIME_PRODUCTS = [
     Product(
@@ -449,14 +498,18 @@ _COFFEEGO_BRANCHES = [
 ]
 
 _COFFEE_SIZES = [
-    {"name": "S (250 мл)", "priceDelta": 0},
-    {"name": "M (350 мл)", "priceDelta": 40},
-    {"name": "L (450 мл)", "priceDelta": 70},
+    {"id": "s", "name": "S (250 мл)", "priceDelta": 0},
+    {"id": "m", "name": "M (350 мл)", "priceDelta": 40},
+    {"id": "l", "name": "L (450 мл)", "priceDelta": 70},
 ]
 
-_CT_SHOT = {"name": "Доп. эспрессо-шот", "priceDelta": 60}
-_CT_ALT_MILK = {"name": "Альтернативное молоко", "priceDelta": 50}
-_CT_SYRUP = {"name": "Сироп", "priceDelta": 40}
+_CT_SHOT = {"id": "extra-shot", "name": "Доп. эспрессо-шот", "priceDelta": 60}
+_CT_ALT_MILK = {
+    "id": "alternative-milk",
+    "name": "Альтернативное молоко",
+    "priceDelta": 50,
+}
+_CT_SYRUP = {"id": "syrup", "name": "Сироп", "priceDelta": 40}
 
 _COFFEEGO_PRODUCTS = [
     Product(
@@ -468,8 +521,8 @@ _COFFEEGO_PRODUCTS = [
         price=150,
         color="#4b2d22",
         sizes=[
-            {"name": "Одинарный", "priceDelta": 0},
-            {"name": "Двойной", "priceDelta": 60},
+            {"id": "single", "name": "Одинарный", "priceDelta": 0},
+            {"id": "double", "name": "Двойной", "priceDelta": 60},
         ],
         toppings=[],
         available_branch_ids=["cg-b1", "cg-b2"],
@@ -1000,8 +1053,26 @@ def _build_customers() -> list[Customer]:
             points=1240,
             referral_code="SWEET-AIGERIM",
             invited_by_code=None,
+            # Те же 3 товара, что раньше были захардкожены в DemoData
+            # приложения (favoriteIds) — чтобы демо-экран не выглядел пустым.
+            favorite_product_ids=["p1", "p4", "p7"],
         ),
     ]
+
+
+def _link_demo_customer_orders(orders: list[Order], customer: Customer) -> list[Order]:
+    """Привязывает сид-заказы демо-клиента к его id (сид знает его лишь по имени).
+
+    Без этого история в приложении пустая: /auth/customer/me/orders выбирает
+    строго по customer_id, а не по имени — имя не идентификатор.
+    """
+    for order in orders:
+        if (
+            order.company_id == customer.company_id
+            and order.customer_name == customer.name
+        ):
+            order.customer_id = customer.id
+    return orders
 
 
 def seed_if_empty(db: Session) -> bool:
@@ -1019,13 +1090,23 @@ def seed_if_empty(db: Session) -> bool:
     db.flush()  # филиалы существуют -> FK branch_id у barista валиден
 
     db.add_all(_build_staff())
-    db.add_all(_build_customers())
+
+    customers = _build_customers()
+    db.add_all(customers)
+    db.flush()  # клиенты существуют -> FK customer_id у заказов валиден ниже
+
     db.add_all(_SWEETTIME_PRODUCTS)
     db.add_all(_COFFEEGO_PRODUCTS)
-    db.add_all(
-        _build_history("sweettime", "SW", _SWEETTIME_HISTORY_START, _SWEETTIME_HISTORY)
-    )
-    db.add_all(_build_orders("sweettime", _SWEETTIME_ORDERS))
+
+    # Заказы SweetTime собираем вместе: часть из них — заказы демо-клиента,
+    # их надо связать с ним, иначе его история в приложении будет пустой.
+    sweettime_orders = [
+        *_build_history(
+            "sweettime", "SW", _SWEETTIME_HISTORY_START, _SWEETTIME_HISTORY
+        ),
+        *_build_orders("sweettime", _SWEETTIME_ORDERS),
+    ]
+    db.add_all(_link_demo_customer_orders(sweettime_orders, customers[0]))
     db.add_all(
         _build_history("coffeego", "CG", _COFFEEGO_HISTORY_START, _COFFEEGO_HISTORY)
     )
@@ -1036,3 +1117,51 @@ def seed_if_empty(db: Session) -> bool:
     db.add_all(_COFFEEGO_PROMOTIONS)
     db.commit()
     return True
+
+
+def bootstrap_production_sweettime(
+    db: Session,
+    *,
+    owner_email: str,
+    owner_name: str,
+    owner_password: str,
+) -> None:
+    """Create the real SweetTime storefront and first owner, but no demo identities/orders."""
+
+    email, name, password = _validate_bootstrap_input(
+        owner_email, owner_name, owner_password
+    )
+    if db.scalars(select(Company.id)).first() is not None:
+        raise ProductionBootstrapError(
+            "Production bootstrap refused: a company already exists"
+        )
+
+    company = _fresh_rows([_COMPANIES[0]], Company)[0]
+    branches = _fresh_rows(_SWEETTIME_BRANCHES, Branch)
+    products = _fresh_rows(_SWEETTIME_PRODUCTS, Product)
+    news = _fresh_rows(_SWEETTIME_NEWS, News)
+    promotions = _fresh_rows(_SWEETTIME_PROMOTIONS, Promotion)
+
+    try:
+        db.add(company)
+        db.flush()
+        db.add_all(branches)
+        db.flush()
+        db.add(
+            AdminUser(
+                id="u-sw-owner",
+                company_id="sweettime",
+                email=email,
+                hashed_password=hash_password(password),
+                name=name,
+                role="owner",
+                branch_id=None,
+            )
+        )
+        db.add_all(products)
+        db.add_all(news)
+        db.add_all(promotions)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise

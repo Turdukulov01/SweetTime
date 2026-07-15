@@ -27,7 +27,9 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from . import schemas
@@ -48,14 +50,16 @@ from .deps import (
 )
 from .models import Branch, Company, Customer, News, Order, Product, Promotion
 from .seed import seed_if_empty
+from .serializers import order_out as _order_out
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # Схема создаётся Alembic-миграциями (alembic upgrade head), не здесь.
-    # Сид идемпотентный: наполняет БД только если компаний ещё нет.
-    with Session(engine) as db:
-        seed_if_empty(db)
+    # Известные demo-аккаунты допустимы только при явном локальном SEED_MODE=demo.
+    if settings.seed_mode == "demo":
+        with Session(engine) as db:
+            seed_if_empty(db)
     yield
 
 
@@ -80,6 +84,15 @@ app.add_middleware(
 # Логин/refresh/me/OTP: /api/companies/{companyId}/auth/...
 app.include_router(auth_global_router)
 app.include_router(auth_router)
+
+# В production `/media/*` отдаёт nginx напрямую. Локально nginx обычно нет,
+# поэтому dev-only mount позволяет проверить загруженный URL на телефоне/ПК.
+if settings.environment.lower() != "production":
+    app.mount(
+        "/media",
+        StaticFiles(directory=settings.media_root, check_dir=False),
+        name="media",
+    )
 
 # Роли: контент/меню/настройки правят владелец и менеджер; бариста — только
 # статусы заказов (см. ADMIN_PANEL.md).
@@ -132,22 +145,7 @@ def _branch_out(b: Branch) -> schemas.BranchOut:
     )
 
 
-def _order_out(o: Order) -> schemas.OrderOut:
-    return schemas.OrderOut(
-        id=o.id,
-        number=o.number,
-        customerName=o.customer_name,
-        branchId=o.branch_id,
-        type=o.type,
-        status=o.status,
-        readyTime=o.ready_time,
-        items=o.items,
-        total=o.total,
-        paymentMethod=o.payment_method,
-        pointsUsed=o.points_used,
-        pointsEarned=o.points_earned,
-        createdAt=o.created_at,
-    )
+# Форма заказа общая с историей клиента (api.serializers.order_out).
 
 
 def _news_out(n: News) -> schemas.NewsOut:
@@ -187,6 +185,17 @@ def _promotion_out(p: Promotion) -> schemas.PromotionOut:
 
 @app.get("/health", response_model=schemas.HealthOut, tags=["health"])
 def health() -> schemas.HealthOut:
+    return schemas.HealthOut()
+
+
+@app.get("/ready", response_model=schemas.HealthOut, tags=["health"])
+def readiness(db: Session = Depends(get_db)) -> schemas.HealthOut:
+    """Report readiness only while the API can reach PostgreSQL."""
+
+    try:
+        db.execute(select(1))
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="database unavailable") from exc
     return schemas.HealthOut()
 
 
@@ -272,8 +281,8 @@ def create_product(
         description=_localized_or_text(body.description),
         price=body.price,
         color=body.color,
-        sizes=[s.model_dump() for s in body.sizes],
-        toppings=[t.model_dump() for t in body.toppings],
+        sizes=_normalize_modifier_options(body.sizes, "size"),
+        toppings=_normalize_modifier_options(body.toppings, "topping"),
         available_branch_ids=body.availableBranchIds,
         active=body.active,
         is_new=body.isNew,
@@ -311,7 +320,15 @@ def patch_product(
     }
     for api_field, orm_field in field_map.items():
         if api_field in data:
-            setattr(product, orm_field, data[api_field])
+            if api_field == "sizes":
+                value = _normalize_modifier_options(patch.sizes or [], "size")
+            elif api_field == "toppings":
+                value = _normalize_modifier_options(
+                    patch.toppings or [], "topping"
+                )
+            else:
+                value = data[api_field]
+            setattr(product, orm_field, value)
     db.add(product)
     db.commit()
     return _product_out(product)
@@ -322,6 +339,29 @@ def _localized_or_text(value):
     if isinstance(value, schemas.LocalizedText):
         return value.model_dump()
     return value
+
+
+def _normalize_modifier_options(
+    options: list[schemas.ModifierOptionWrite], prefix: str
+) -> list[dict]:
+    """Assign an opaque ID once; renames/reordering preserve supplied IDs."""
+    normalized: list[dict] = []
+    seen: set[str] = set()
+    for option in options:
+        option_id = (option.id or f"{prefix}-{uuid4().hex[:12]}").strip()
+        if option_id in seen:
+            raise HTTPException(
+                status_code=422, detail=f"Duplicate {prefix} id: {option_id}"
+            )
+        seen.add(option_id)
+        normalized.append(
+            {
+                "id": option_id,
+                "name": _localized_or_text(option.name),
+                "priceDelta": option.priceDelta,
+            }
+        )
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +468,85 @@ def _next_order_number(db: Session, company: Company) -> tuple[str, int]:
     return f"{company.order_prefix}-{seq}", seq
 
 
+def _display_text(value: dict | str) -> str:
+    if isinstance(value, str):
+        return value
+    for language in ("ru", "ky", "en"):
+        text = value.get(language)
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    return ""
+
+
+def _modifier_by_id(options: list, option_id: str) -> dict | None:
+    for option in options:
+        if isinstance(option, dict) and option.get("id") == option_id:
+            return option
+    return None
+
+
+def _build_order_items_v2(
+    body: schemas.OrderCreate,
+    company: Company,
+    branch: Branch,
+    db: Session,
+) -> tuple[list[dict], int]:
+    stored_items: list[dict] = []
+    subtotal = 0
+    for requested in body.items:
+        product = db.get(Product, requested.productId)
+        if product is None or product.company_id != company.id:
+            raise HTTPException(status_code=400, detail="Unknown productId")
+        if not product.active:
+            raise HTTPException(status_code=400, detail="Product is inactive")
+        if branch.id not in product.available_branch_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="Product is unavailable in the selected branch",
+            )
+
+        size: dict | None = None
+        if product.sizes:
+            if requested.sizeId is None:
+                raise HTTPException(status_code=400, detail="sizeId is required")
+            size = _modifier_by_id(product.sizes, requested.sizeId)
+            if size is None:
+                raise HTTPException(status_code=400, detail="Unknown sizeId")
+        elif requested.sizeId is not None:
+            raise HTTPException(
+                status_code=400, detail="sizeId is not allowed for this product"
+            )
+
+        toppings: list[dict] = []
+        for topping_id in requested.toppingIds:
+            topping = _modifier_by_id(product.toppings, topping_id)
+            if topping is None:
+                raise HTTPException(status_code=400, detail="Unknown toppingId")
+            toppings.append(topping)
+
+        unit_price = product.price
+        if size is not None:
+            unit_price += int(size.get("priceDelta", 0))
+        unit_price += sum(int(item.get("priceDelta", 0)) for item in toppings)
+        line_total = unit_price * requested.quantity
+        subtotal += line_total
+        stored_items.append(
+            {
+                "productId": product.id,
+                "productName": _display_text(product.name),
+                "sizeId": requested.sizeId,
+                "size": _display_text(size["name"]) if size is not None else None,
+                "toppingIds": list(requested.toppingIds),
+                "sugarPercent": requested.sugarPercent,
+                "ice": requested.ice,
+                "quantity": requested.quantity,
+                "unitPrice": unit_price,
+                "total": line_total,
+            }
+        )
+    return stored_items, subtotal
+
+
 @app.get(
     "/api/companies/{companyId}/orders",
     response_model=list[schemas.OrderOut],
@@ -462,6 +581,15 @@ def create_order(
     if branch is None or branch.company_id != company.id:
         raise HTTPException(status_code=404, detail="Branch not found")
 
+    stored_items, subtotal = _build_order_items_v2(body, company, branch, db)
+    max_points = min(
+        customer.points,
+        int(subtotal * company.loyalty["maxSpendShare"]),
+    )
+    if body.pointsUsed > max_points:
+        raise HTTPException(status_code=400, detail="Too many points used")
+    payable_total = subtotal - body.pointsUsed
+
     number, seq = _next_order_number(db, company)
     now = datetime.now(timezone.utc)
     order = Order(
@@ -476,12 +604,13 @@ def create_order(
         # Заказ уже оплачен демо-оплатой — сразу preparing
         status="preparing",
         ready_time=body.readyTime,
-        items=[item.model_dump() for item in body.items],
-        total=body.total,
+        items_version=2,
+        items=stored_items,
+        total=payable_total,
         payment_method=body.paymentMethod,
         points_used=body.pointsUsed,
         # Серверный расчёт: earnRate компании (5% SweetTime, 3% CoffeeGo)
-        points_earned=round(body.total * company.loyalty["earnRate"]),
+        points_earned=round(payable_total * company.loyalty["earnRate"]),
         created_at=now.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
     )
     db.add(order)

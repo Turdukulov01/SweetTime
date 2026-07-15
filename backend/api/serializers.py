@@ -1,0 +1,29 @@
+"""Сериализация ORM → схемы контракта, общая для нескольких модулей.
+
+Здесь живут только те функции, которые нужны И в `main.py`, И в `auth.py`
+(например, форма заказа: очередь админки и история клиента обязаны отдавать
+один и тот же OrderOut). Прямой импорт из `main` в `auth` невозможен —
+получился бы цикл (main импортирует auth).
+"""
+
+from . import schemas
+from .models import Order
+
+
+def order_out(o: Order) -> schemas.OrderOut:
+    return schemas.OrderOut(
+        id=o.id,
+        number=o.number,
+        customerName=o.customer_name,
+        branchId=o.branch_id,
+        type=o.type,
+        status=o.status,
+        readyTime=o.ready_time,
+        itemsVersion=o.items_version,
+        items=o.items,
+        total=o.total,
+        paymentMethod=o.payment_method,
+        pointsUsed=o.points_used,
+        pointsEarned=o.points_earned,
+        createdAt=o.created_at,
+    )

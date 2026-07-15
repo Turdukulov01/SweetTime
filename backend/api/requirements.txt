@@ -11,3 +11,5 @@ passlib[bcrypt]
 # (detect_wrap_bug падает на строке > 72 байт). 4.0.1 — стабильно.
 bcrypt==4.0.1
 pyjwt
+python-multipart
+Pillow==11.1.0

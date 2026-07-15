@@ -20,9 +20,11 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Date,
+    DateTime,
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -47,6 +49,35 @@ class Company(Base):
     order_start: Mapped[int]
 
 
+class MediaFile(Base):
+    """Метаданные варианта изображения; сам файл лежит вне контейнера.
+
+    `storage_key` всегда относительный (`tenants/.../medium.webp`). Tenant и
+    entity записываются отдельно, чтобы удаление/аудит не зависели от разбора
+    пути. Для одного upload создаются три строки: original/medium/thumbnail.
+    """
+
+    __tablename__ = "media_files"
+    __table_args__ = (
+        UniqueConstraint("storage_key", name="uq_media_file_storage_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id"), index=True
+    )
+    entity_type: Mapped[str] = mapped_column(String(50), index=True)
+    entity_id: Mapped[str] = mapped_column(String(64), index=True)
+    storage_key: Mapped[str] = mapped_column(Text)
+    original_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mime_type: Mapped[str] = mapped_column(String(100), default="image/webp")
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    variant: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 class AdminUser(Base):
     """Сотрудник админки (owner|manager|barista). Логин — email + пароль (S2).
 
@@ -96,6 +127,13 @@ class Customer(Base):
     referral_code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     invited_by_code: Mapped[str | None] = mapped_column(
         String(64), nullable=True, default=None
+    )
+    # Избранное — данные аккаунта, а не устройства (S5.3): ["p1", "p4", ...].
+    # Список id товаров ЭТОЙ компании; целиком заменяется через PUT favorites.
+    favorite_product_ids: Mapped[list] = mapped_column(JSON, default=list)
+    # Не URL: смена домена/CDN не должна требовать миграцию профилей.
+    avatar_storage_key: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
     )
 
 
@@ -197,7 +235,8 @@ class Order(Base):
     # new | preparing | ready | done | cancelled
     status: Mapped[str]
     ready_time: Mapped[str | None] = mapped_column(default=None)
-    # [{"productName": ..., "size": ..., "quantity": ..., "total": ...}]
+    # V1: display-only legacy JSON. V2: stable product/modifier IDs + snapshots.
+    items_version: Mapped[int] = mapped_column(Integer, default=1)
     items: Mapped[list] = mapped_column(JSON, default=list)
     total: Mapped[int]
     # mock | cash | qr — демо-способ оплаты (для аналитики админки)
@@ -209,6 +248,47 @@ class Order(Base):
     # Привязка к клиенту (для лояльности/рефералки S2/S3); null для demo-заказов
     customer_id: Mapped[str | None] = mapped_column(
         ForeignKey("customers.id"), nullable=True, default=None
+    )
+
+
+class RecurringOrder(Base):
+    """Постоянный заказ клиента — предоплаченная подписка «любимый напиток».
+
+    У клиента ОДНА подписка (так устроен UI приложения); гарантируется
+    уникальным индексом по customer_id: PUT обновляет строку на месте, DELETE
+    только снимает `active`. Строку не удаляем: по ней видно, что и до какой
+    даты было оплачено (деньги — не черновик).
+
+    `paid_until` считает сервер по `plan` (single/week/month), а не клиент:
+    срок оплаты — не то, что можно присылать с устройства.
+    """
+
+    __tablename__ = "recurring_orders"
+    __table_args__ = (
+        UniqueConstraint("customer_id", name="uq_recurring_order_customer"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id"), index=True
+    )
+    customer_id: Mapped[str] = mapped_column(
+        ForeignKey("customers.id"), index=True
+    )
+    # ["p1", "p4"] — id товаров этой же компании (проверяется на PUT)
+    product_ids: Mapped[list] = mapped_column(JSON, default=list)
+    # Время выдачи "HH:MM" (локальное время кофейни)
+    time: Mapped[str] = mapped_column(String(5))
+    branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"))
+    # single | week | month
+    plan: Mapped[str] = mapped_column(String(16))
+    # Оплачено до (UTC); null — подписка без оплаты
+    paid_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 

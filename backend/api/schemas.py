@@ -89,8 +89,17 @@ class CompanyPatch(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class ModifierOption(BaseModel):
-    name: str
+class ModifierOptionOut(BaseModel):
+    id: str
+    name: LocalizedOrText
+    priceDelta: int
+
+
+class ModifierOptionWrite(BaseModel):
+    """Admin may omit id only for a brand-new option; the API assigns it once."""
+
+    id: str | None = Field(default=None, min_length=1, max_length=64)
+    name: LocalizedOrText
     priceDelta: int
 
 
@@ -101,8 +110,8 @@ class ProductOut(BaseModel):
     description: LocalizedOrText
     price: int
     color: str
-    sizes: list[ModifierOption]
-    toppings: list[ModifierOption]
+    sizes: list[ModifierOptionOut]
+    toppings: list[ModifierOptionOut]
     availableBranchIds: list[str]
     active: bool
     isNew: bool
@@ -115,8 +124,8 @@ class ProductCreate(BaseModel):
     description: LocalizedOrText = ""
     price: int = Field(ge=0)
     color: str = "#FF5C9A"
-    sizes: list[ModifierOption] = []
-    toppings: list[ModifierOption] = []
+    sizes: list[ModifierOptionWrite] = []
+    toppings: list[ModifierOptionWrite] = []
     availableBranchIds: list[str] = []
     active: bool = True
     isNew: bool = False
@@ -131,8 +140,8 @@ class ProductPatch(BaseModel):
     description: LocalizedOrText | None = None
     price: int | None = Field(default=None, ge=0)
     color: str | None = None
-    sizes: list[ModifierOption] | None = None
-    toppings: list[ModifierOption] | None = None
+    sizes: list[ModifierOptionWrite] | None = None
+    toppings: list[ModifierOptionWrite] | None = None
     availableBranchIds: list[str] | None = None
     active: bool | None = None
     isNew: bool | None = None
@@ -194,11 +203,43 @@ class BranchPatch(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class OrderItem(BaseModel):
+IceLevel = Literal["none", "less", "regular", "extra"]
+SugarPercent = Literal[0, 30, 50, 70, 100]
+
+
+class OrderItemCreate(BaseModel):
+    """Stable V2 selection. Display names and prices are server-owned."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    productId: str = Field(min_length=1, max_length=64)
+    sizeId: str | None = Field(default=None, max_length=64)
+    toppingIds: list[str] = Field(default_factory=list, max_length=20)
+    sugarPercent: SugarPercent
+    ice: IceLevel
+    quantity: int = Field(ge=1, le=99)
+
+    @field_validator("toppingIds")
+    @classmethod
+    def unique_topping_ids(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("toppingIds must be unique")
+        if any(not topping_id.strip() for topping_id in value):
+            raise ValueError("toppingIds must not contain blank ids")
+        return value
+
+
+class OrderItemOut(BaseModel):
     productName: str
     size: str | None = None
     quantity: int = Field(ge=1)
     total: int = Field(ge=0)
+    productId: str | None = None
+    sizeId: str | None = None
+    toppingIds: list[str] | None = None
+    sugarPercent: SugarPercent | None = None
+    ice: IceLevel | None = None
+    unitPrice: int | None = Field(default=None, ge=0)
 
 
 class OrderOut(BaseModel):
@@ -209,7 +250,8 @@ class OrderOut(BaseModel):
     type: OrderType
     status: OrderStatus
     readyTime: str | None = None
-    items: list[OrderItem]
+    itemsVersion: Literal[1, 2] = 1
+    items: list[OrderItemOut]
     total: int
     paymentMethod: PaymentMethod
     pointsUsed: int
@@ -220,13 +262,15 @@ class OrderOut(BaseModel):
 class OrderCreate(BaseModel):
     """Тело POST /orders. customerName/customerId сюда НЕ входят: с S2 заказ
     создаётся только по токену клиента, и имя берётся из его профиля (клиенту
-    нельзя дать представиться кем угодно). Лишние поля игнорируются."""
+    нельзя дать представиться кем угодно). Цены и display names сервер считает
+    по stable IDs; лишние поля запрещены."""
+
+    model_config = ConfigDict(extra="forbid")
 
     branchId: str
     type: OrderType
     readyTime: str | None = None
-    items: list[OrderItem] = Field(min_length=1)
-    total: int = Field(ge=0)
+    items: list[OrderItemCreate] = Field(min_length=1, max_length=50)
     # Optional: старые клиенты поля не шлют — по умолчанию демо-оплата
     paymentMethod: PaymentMethod = "mock"
     pointsUsed: int = Field(default=0, ge=0)
@@ -395,6 +439,7 @@ class CustomerOut(BaseModel):
     points: int
     referralCode: str
     invitedByCode: str | None = None
+    avatarUrl: str | None = None
 
 
 class CustomerProfilePatch(BaseModel):
@@ -407,6 +452,57 @@ class CustomerProfilePatch(BaseModel):
 
 class CustomerLoginOut(TokenPair):
     user: CustomerOut
+
+
+# ---------------------------------------------------------------------------
+# Личные данные клиента (S5.3): избранное и постоянный заказ
+# ---------------------------------------------------------------------------
+
+
+class FavoritesOut(BaseModel):
+    """Избранное клиента. Ответ — то, что РЕАЛЬНО сохранено на сервере:
+    неизвестные/чужие id PUT отбрасывает, и клиент видит это по ответу."""
+
+    productIds: list[str]
+
+
+class FavoritesPut(BaseModel):
+    """PUT заменяет список целиком (идемпотентно, без гонок инкрементов).
+
+    max_length — защита от мусорного тела; в меню компании товаров сильно
+    меньше сотни.
+    """
+
+    productIds: list[str] = Field(default_factory=list, max_length=100)
+
+
+RecurringPlan = Literal["single", "week", "month"]
+
+# "HH:MM" в 24-часовом формате: 00:00–23:59
+HourMinute = Annotated[str, StringConstraints(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
+
+
+class RecurringOrderOut(BaseModel):
+    """Постоянный заказ (подписка). paidUntil — ISO-8601 UTC, считает сервер."""
+
+    productIds: list[str]
+    time: HourMinute
+    branchId: str
+    plan: RecurringPlan
+    paidUntil: str | None = None
+    active: bool
+
+
+class RecurringOrderPut(BaseModel):
+    """Создание/замена подписки. Срок оплаты (paidUntil) клиент НЕ присылает —
+    сервер считает его сам по plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    productIds: list[str] = Field(min_length=1, max_length=20)
+    time: HourMinute
+    branchId: str
+    plan: RecurringPlan
 
 
 # ---------------------------------------------------------------------------
