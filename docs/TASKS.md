@@ -68,9 +68,10 @@ below remains authoritative; this section records the current execution order.
   Compose mapping intentionally exposes container Nginx as `127.0.0.1:8080:80`, then proxies API traffic
   to backend port 8000; it must not be replaced with a direct `8080:8000` mapping. Host Nginx now limits
   uploads to 11 MiB and denies `/media/temp/`; its syntax/reload and free loopback port were verified by
-  the owner. The final media alias should omit `try_files $uri` because the `alias` itself already returns
-  404 for missing files. Upload/build, real `.env` secrets, migrations, one-shot production bootstrap,
-  firewall/port checks and end-to-end HTTPS smoke tests remain undone.
+  the owner. The final media alias uses `^~`, disables autoindex, omits the incompatible `try_files $uri`
+  and sends immutable/nosniff headers. UUID-versioned media URLs make the 30-day immutable cache safe.
+  Upload/build, real `.env` secrets, migrations, one-shot production bootstrap, firewall/port checks and
+  end-to-end HTTPS smoke tests remain undone.
 
 ## Audit Snapshot — 2026-07-12
 

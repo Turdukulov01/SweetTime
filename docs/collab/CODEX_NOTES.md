@@ -902,3 +902,9 @@ rollout config`). На момент коммита tests: backend 42/42, Flutter
 `.env`, `android/key.properties` и keystore в snapshot нет. Следующая операция — сформировать архив уже
 из финального HEAD после этой записи, передать его владельцу для интерактивного `scp` и сверить SHA-256
 на сервере до распаковки в `/srv/projects/sweetime`.
+
+Владелец затем показал окончательный media-блок: `location ^~ /media/`, корректный `alias`,
+`autoindex off`, без `try_files`, с `Cache-Control: public, immutable` и `nosniff`. Конфиг соответствует
+эталону репозитория. Immutable-кэш безопасен для текущего storage: `save_image()` создаёт новый UUID и
+новый URL при каждой замене изображения, после чего старые варианты удаляются. После последней правки
+на хосте нужно ещё раз выполнить `sudo nginx -t && sudo systemctl reload nginx`.
