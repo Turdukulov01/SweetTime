@@ -84,12 +84,34 @@ py -m uvicorn api.main:app --port 8010
   `PATCH .../customer/me` (сохранить своё имя/фамилию/др). Staff-токен на профиль клиента → 401.
   Проверено: PATCH → новый вход по OTP → профиль на месте (в БД `Айгерим|Осмонова|1998-03-14`).
   Коммит `363fe9a`.
-- [ ] **S5.1 админка на JWT** (агент admin-frontend, в работе): реальный вход, Bearer, refresh на
-  401, сессия переживает перезагрузку, /staff остаётся на моках (API сотрудников ещё нет).
-- [ ] **S5.2b Flutter**: хранить токены на устройстве (secure storage), при старте восстанавливать
-  сессию через `customer/me`, OTP через API (mock-код 1111), профиль читать/сохранять на сервере,
-  Bearer на POST /orders. ВАЖНО: `lib/` — свежий код Codex (локализация, guest-gate,
-  AuthReturnDestination) — править ХИРУРГИЧЕСКИ, не переписывать (см. CLAUDE_NOTES CL-004).
+- [x] **S5.1 админка на JWT** — ПРИНЯТА. Реальный вход через `/api/auth/staff/login`, токен+user в
+  localStorage (сессия переживает F5), Bearer во всех запросах, single-flight refresh на 401,
+  logout+редирект при протухшем refresh. Мок-фолбэка больше НЕТ (удалён `admin/lib/data.ts`;
+  демо-остатки — в честном `admin/lib/demo-data.ts`); API не ответил → экран ошибки, не тихая
+  подмена. 403 → тост «Недостаточно прав» + откат оптимистичного изменения. `/staff` и карточка
+  «Постоянные заказы» помечены как демо (серверных ручек нет). Дефект, найденный агентом:
+  `branchId: null` от API молча ронял сессию → разлогин; исправлено в `parseAdminUser`.
+  Проверено агентом в реальном Chrome (CDP) + curl; мной: typecheck OK.
+- [x] **S5.2b Flutter** — ПРИНЯТ. `flutter_secure_storage` возвращён; `lib/core/auth_store.dart`
+  (интерфейс + Keystore/Keychain, для тестов — in-memory фейк). `bootstrap()` восстанавливает
+  сессию через `auth/customer/me` (+refresh на 401); **офлайн НЕ разлогинивает**. Вход по OTP через
+  API, профиль читается/сохраняется на сервере, Bearer на `POST /orders`. Дефолт `API_BASE` →
+  `http://127.0.0.1:8010`. Хорошее решение агента: `ApiResult{ok|rejected|unavailable}` — отказ
+  сервера и офлайн различаются. Проверки: analyze 0, **тесты 27/27** (3 новых), build web+APK.
+  Код Codex не переписан (локализация, guest-gate, +996, отсутствие фейкового Google сохранены).
+
+**Итог S5: жалоба пользователя закрыта** — приложение хранит сессию (токен на устройстве) и личные
+данные (на сервере: переживают переустановку/смену телефона). Коммит `7cae65e`.
+
+### Проверка на физическом телефоне (Redmi, USB)
+`adb reverse tcp:8010 tcp:8010` — телефон ходит на API ПК через USB (firewall/LAN не нужны):
+```powershell
+$adb = "C:\Users\user\AppData\Local\Android\Sdk\platform-tools\adb.exe"
+& $adb -s f3bff2a5 reverse tcp:8010 tcp:8010
+& $adb -s f3bff2a5 shell "curl -s http://127.0.0.1:8010/health"   # -> {"status":"ok"}
+```
+Проверено: с устройства `/health` отвечает; profile-APK установлен (`kg.sweettime.demo`).
+Проброс слетает при переподключении USB/перезапуске adb — повторить команду.
 
 ### Грабли (записаны, чтобы не наступать снова)
 - **Кириллица в inline-JSON через Git Bash curl** → 400 «error parsing the body». Это артефакт
