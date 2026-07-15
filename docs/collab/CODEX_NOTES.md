@@ -962,3 +962,10 @@ Production owner login проверен безопасным host-side Python pr
 удалением `/srv/sweetime/secrets/bootstrap-owner-password` владелец должен явно подтвердить, что случайный
 пароль сохранён в password manager: после удаления plaintext восстановить из bcrypt hash невозможно.
 Следом нужны initial backup + restore drill, затем физический Android Google→contact→checkout HTTPS QA.
+
+Владелец подтвердил сохранение owner password вне сервера и удалил plaintext bootstrap-файл. Каталог
+`/srv/sweetime/secrets` остаётся закрытым и пустым. Перед первым backup повторно просмотрены скрипты:
+backup останавливает только SweetTime backend/nginx, делает PostgreSQL custom dump + media snapshot,
+проверяет SHA-256/tar/pg_restore list и через trap возобновляет ранее работавшие сервисы; Nton не входит
+в Compose и не затрагивается. На загруженном snapshot shell-файлы mode 664, поэтому текущий запуск должен
+быть через `bash`; executable-биты исправляются в локальном Git для будущих deployment-архивов.

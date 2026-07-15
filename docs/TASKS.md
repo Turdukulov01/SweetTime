@@ -82,8 +82,8 @@ below remains authoritative; this section records the current execution order.
   return 200, company config returns the real SweetTime tenant and `/media/temp/` returns 403. Redis/nginx
   subsequently became healthy. Global staff login returned 200 for the real owner with role `owner`,
   company `sweettime` and both token types present without exposing their values. After the owner confirms
-  the generated password is stored safely, bootstrap-secret removal, initial backup/restore checks and
-  mobile Google HTTPS QA remain undone.
+  the generated password is stored safely, the plaintext bootstrap secret was removed. Initial verified
+  backup/restore checks, an independent off-host copy and mobile Google HTTPS QA remain undone.
 
 ## Audit Snapshot — 2026-07-12
 
