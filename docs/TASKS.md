@@ -16,12 +16,13 @@ Updated: 2026-07-15. Work is sequential unless the owner explicitly approves a s
 This is the short operational list shared by Claude Code and Codex. Detailed phase acceptance
 below remains authoritative; this section records the current execution order.
 
-- [ ] **S5.3 backend — customer persistence.** **[partial—verified locally]** Production API now
+- [ ] **S5.3 backend — customer persistence.** **[partial—verified on production]** Production API now
   has customer favorites, order history, recurring orders and server avatar storage, with Alembic
   revisions and manual auth/tenant checks. Product sizes/toppings and OrderItem V2 now use stable
   IDs; new order prices/display snapshots are server-owned, while legacy V1 orders remain readable.
-  Before release: add isolated PostgreSQL endpoint tests, commit the shared dirty worktree and
-  deploy/migrate the server.
+  The revision is committed, deployed and migrated through `b91e7c4a2d10`; physical Android QA
+  confirmed profile/avatar/favorites/history/recurring persistence and full account deletion.
+  Remaining acceptance gap: isolated PostgreSQL endpoint tests for these customer flows.
 - [x] **S5.3 Flutter — personal data and device draft.** **[verified locally]** Server avatar
   and favorites are connected. Cart is stored locally by stable IDs, restored after the current
   catalog loads, repriced from current catalog data and covered by restart/stale-data tests. Server
@@ -33,7 +34,7 @@ below remains authoritative; this section records the current execution order.
   replace the active notice instead of building a queue, and the controller rejects unavailable or
   stale selections before reporting success. Flutter checks pass locally; server rollout remains S7.
   Photo is intentionally server-side now, not a device-only picker file.
-- [ ] **S5.4 — Google identity + required contact phone.** **[partial—verified locally]** Backend now
+- [x] **S5.4 — Google identity + required contact phone.** **[verified Android production pilot]** Backend now
   verifies Google ID tokens with `google-auth`, checks the configured `aud`/`azp`, keys identities by
   stable tenant/provider/`sub`, and issues SweetTime tokens without persisting the Google credential.
   Google-only customers start with `phone=null`; strict Kyrgyz contact entry is required before
@@ -44,9 +45,7 @@ below remains authoritative; this section records the current execution order.
   Compose config pass locally. The real Web, Android debug and Android release OAuth clients now exist;
   Flutter/backend use the Web client as the token audience and authorize both Android presenters. The
   final Android/iOS identifier is `kg.sweettime.app`; release signing is fail-closed and no longer falls
-  back to the debug key. Before acceptance: create the ignored local `android/key.properties`, build and
-  verify a release signed by the existing upload key, deploy migration `f5a9c2e41d07`, then run a
-  physical-device HTTPS Google sign-in/contact/checkout test. A production release APK was successfully
+  back to the debug key. A production release APK was successfully
   built with the upload keystore, verified as package `kg.sweettime.app` and release SHA-1
   `51:DC:A2:E5:1D:37:6E:BB:B1:B7:E8:A8:A8:77:8A:2D:D4:92:16:54`, installed and launched on the Redmi
   Note 9 Pro. Physical QA confirmed Google profile/contact/avatar/history/recurring persistence, then
@@ -54,12 +53,13 @@ below remains authoritative; this section records the current execution order.
   R8. The fixes now add transactional server deletion (profile/identity/media removed; financial ledgers
   anonymized), invalidate old tokens, recreate the same Google subject as a fresh phone-less customer,
   and keep nested ML Kit classes in release builds. Backend 43 tests, Flutter 52 tests, analyze, a
-  disposable PostgreSQL migration to `b91e7c4a2d10`, and signed release APK build pass locally. Remaining
-  acceptance: deploy/migrate this revision and repeat delete→Google login/contact. The rebuilt APK already
+  disposable PostgreSQL migration to `b91e7c4a2d10`, and signed release APK build pass locally. The revision
+  is deployed and physical QA confirmed delete→same Google login→required contact creates a clean account
+  without previous profile/avatar/favorites/history/recurring data. The rebuilt APK also
   passed Redmi release smoke for QR preview initialization, torch, tab leave/re-entry, and launching the
   external profile camera without an ML Kit crash. An iOS OAuth client and URL scheme remain future iOS-release work. SMS
   verification remains a later task.
-- [ ] **S6 — Ubuntu deployment artifacts.** **[partial—verified locally]** `backend/api/Dockerfile`
+- [ ] **S6 — Ubuntu deployment artifacts.** **[next: production admin deployment]** `backend/api/Dockerfile`
   and `deploy/production/` contain PostgreSQL, Redis, backend, nginx, media volume and an environment
   example. PostgreSQL/backend/nginx now have ordered healthchecks; `/ready` probes the real database.
   Production config rejects placeholder secrets, wildcard/non-HTTPS CORS, mock OTP and demo seed;
@@ -69,13 +69,14 @@ below remains authoritative; this section records the current execution order.
   restore drill; off-host copy is append-only and requires an explicit target. Still required: real
   production secrets, execution of the locally verified one-shot real owner/catalog bootstrap on the
   target, a real independent off-host destination with retention/encryption policy, avatar privacy
-  decision, fully pinned Docker runtime dependencies/image digests, admin deployment decision, and
-  validation on the target Ubuntu host. The TLS/domain/loopback-port topology is now approved and active.
-- [ ] **S7 — deploy to physical server.** **[in progress]** Target is
+  decision and fully pinned Docker runtime dependencies/image digests. Backend validation, TLS/domain,
+  loopback routing, backup and restore drill are complete on the target. The Next.js admin is API-connected
+  in code but still has no Dockerfile or production service; `/`, `/login` and `/admin` are not served yet.
+- [x] **S7 — deploy backend to physical server.** **[verified production]** Target is
   `ranex@81.88.192.41`; `/srv/sweetime/media`, `/srv/sweetime/backups` and
   `/srv/projects/sweetime` are prepared. Host Nginx and the valid Let's Encrypt certificate now route
-  `lnp-corporation.duckdns.org` to loopback `127.0.0.1:8080`; HTTP returns the expected HTTPS redirect
-  and HTTPS currently returns the expected `502` because the SweetTime stack has not started. The repo's
+  `lnp-corporation.duckdns.org` to loopback `127.0.0.1:8080`; HTTP redirects to HTTPS and the live
+  SweetTime backend is available through the production TLS route. The repo's
   Compose mapping intentionally exposes container Nginx as `127.0.0.1:8080:80`, then proxies API traffic
   to backend port 8000; it must not be replaced with a direct `8080:8000` mapping. Host Nginx now limits
   uploads to 11 MiB and denies `/media/temp/`; its syntax/reload and free loopback port were verified by
@@ -97,8 +98,11 @@ below remains authoritative; this section records the current execution order.
   snapshot `20260715T125752Z` was created with a valid PostgreSQL custom dump at Alembic `f5a9c2e41d07`,
   a valid empty-media archive and checksums; all services returned healthy and public `/ready` returned
   200. A disposable PostgreSQL restore drill then passed at the same Alembic head/media count, removed its
-  temporary container and left production healthy. An independent off-host copy remains a later resilience
-  task; the active release blocker is physical Android Google HTTPS/contact/checkout QA.
+  temporary container and left production healthy. Revision `761b7b6` is deployed at Alembic
+  `b91e7c4a2d10`; public `/ready` returns 200 and physical Android Google/contact/account-deletion QA passed.
+  Archive extraction under a strict shell umask exposed unreadable image sources; commit `b9f1e46` now
+  hardens backend image permissions and uses an absolute Alembic config path. An independent off-host copy
+  remains a later resilience task.
 
 ## Audit Snapshot — 2026-07-12
 

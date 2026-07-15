@@ -1021,5 +1021,14 @@ Revision `761b7b6` развёрнут на production; Alembic=`b91e7c4a2d10`, �
 из-за чего backend-файлы внутри Docker image стали `600 root:root`, а migrate под UID/GID 1000 не мог
 прочитать `alembic.ini` и сообщал `No 'script_location'`. На сервере права восстановлены через `a+rX`;
 локально `backend/api/Dockerfile` теперь всегда выполняет `chmod -R a+rX /app/api`, а Compose использует
-абсолютный `/app/api/alembic.ini`. Осталась ручная destructive acceptance-проверка:
-delete account → guest state → вход тем же Google → обязательный phone prompt и пустой новый профиль.
+абсолютный `/app/api/alembic.ini`. Ручная destructive acceptance-проверка пройдена: удаление вернуло
+guest state, вход тем же Google снова потребовал телефон, а прежние фото, дата рождения, избранное,
+история и recurring не восстановились.
+
+Следующая operational-задача — production deployment custom Next.js admin. Код `admin/` уже использует
+боевой JWT API для config/products/branches/news/promotions, но в `deploy/production` нет admin service,
+у `admin/` нет Dockerfile, а production `/`, `/login` и `/admin` возвращают 404. Flutter читает этот
+контент только один раз в `bootstrap`; pull-to-refresh/resume refresh отсутствует, а пустые server
+news/promotions сейчас ошибочно заменяются DemoData. Перед end-to-end admin→API→mobile acceptance нужно
+развернуть admin, исправить mobile refresh/empty semantics и отдельно добавить product media/category
+contracts; staff и admin recurring по-прежнему явно demo-only.
