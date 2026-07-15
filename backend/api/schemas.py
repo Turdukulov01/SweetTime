@@ -384,11 +384,25 @@ class OtpVerifyIn(BaseModel):
 
 
 class CustomerOut(BaseModel):
+    """Профиль клиента. Хранится на сервере — переживает переустановку приложения."""
+
     id: str
     phone: str
     name: str
+    firstName: str = ""
+    lastName: str = ""
+    birthDate: str | None = None  # ISO YYYY-MM-DD
     points: int
     referralCode: str
+    invitedByCode: str | None = None
+
+
+class CustomerProfilePatch(BaseModel):
+    """Частичное обновление профиля клиентом (только свои поля)."""
+
+    firstName: str | None = Field(default=None, max_length=120)
+    lastName: str | None = Field(default=None, max_length=120)
+    birthDate: str | None = None  # ISO YYYY-MM-DD или "" для очистки
 
 
 class CustomerLoginOut(TokenPair):

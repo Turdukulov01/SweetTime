@@ -11,6 +11,7 @@ OTP пока **mock**: SMS-провайдер не подключён (нуже�
 выпущенный токен несёт её company_id (claim `cid`).
 """
 
+from datetime import date
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -20,7 +21,7 @@ from sqlalchemy.orm import Session
 from . import schemas
 from .config import settings
 from .database import get_db
-from .deps import get_company, get_current_staff
+from .deps import get_company, get_current_customer, get_current_staff
 from .models import AdminUser, Company, Customer
 from .security import TokenError, create_token_pair, decode_token, verify_password
 
@@ -52,8 +53,12 @@ def customer_out(customer: Customer) -> schemas.CustomerOut:
         id=customer.id,
         phone=customer.phone,
         name=customer.name,
+        firstName=customer.first_name or "",
+        lastName=customer.last_name or "",
+        birthDate=customer.birth_date.isoformat() if customer.birth_date else None,
         points=customer.points,
         referralCode=customer.referral_code,
+        invitedByCode=customer.invited_by_code,
     )
 
 
@@ -299,3 +304,57 @@ def otp_verify(
     return schemas.CustomerLoginOut(
         accessToken=access, refreshToken=refresh, user=customer_out(customer)
     )
+
+
+# ---------------------------------------------------------------------------
+# Профиль клиента (хранится на сервере, а не на устройстве)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/customer/me",
+    response_model=schemas.CustomerOut,
+    summary="Профиль клиента (по access-токену) — для восстановления сессии",
+)
+def customer_me(
+    customer: Customer = Depends(get_current_customer),
+) -> schemas.CustomerOut:
+    return customer_out(customer)
+
+
+@router.patch(
+    "/customer/me",
+    response_model=schemas.CustomerOut,
+    summary="Обновление своего профиля (имя, фамилия, дата рождения)",
+)
+def customer_update_me(
+    body: schemas.CustomerProfilePatch,
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+) -> schemas.CustomerOut:
+    data = body.model_dump(exclude_unset=True)
+
+    if "firstName" in data and data["firstName"] is not None:
+        customer.first_name = data["firstName"].strip()
+    if "lastName" in data and data["lastName"] is not None:
+        customer.last_name = data["lastName"].strip()
+    if "birthDate" in data:
+        raw = (data["birthDate"] or "").strip()
+        if not raw:
+            customer.birth_date = None
+        else:
+            try:
+                customer.birth_date = date.fromisoformat(raw)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400, detail="birthDate must be ISO YYYY-MM-DD"
+                ) from exc
+
+    # display-имя держим согласованным с именем/фамилией
+    full = f"{customer.first_name} {customer.last_name}".strip()
+    if full:
+        customer.name = full
+
+    db.commit()
+    db.refresh(customer)
+    return customer_out(customer)

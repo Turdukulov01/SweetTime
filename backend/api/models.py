@@ -14,9 +14,17 @@
 в S1 эндпоинтов авторизации ещё нет, таблицы только заводятся и сидируются.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Date,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -80,6 +88,10 @@ class Customer(Base):
     )
     phone: Mapped[str] = mapped_column(String(32), index=True)
     name: Mapped[str]
+    # Профиль клиента живёт на сервере: переживает переустановку и смену телефона.
+    first_name: Mapped[str] = mapped_column(String(120), default="")
+    last_name: Mapped[str] = mapped_column(String(120), default="")
+    birth_date: Mapped[date | None] = mapped_column(Date, nullable=True, default=None)
     points: Mapped[int] = mapped_column(Integer, default=0)
     referral_code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     invited_by_code: Mapped[str | None] = mapped_column(
