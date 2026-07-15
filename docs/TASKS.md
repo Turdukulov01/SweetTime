@@ -78,8 +78,10 @@ below remains authoritative; this section records the current execution order.
   and passes `docker compose config --quiet`; UID/GID match `ranex` at 1000:1000. The backend image built
   successfully as `sweettime-backend:local`. PostgreSQL started healthy, Alembic migrations completed and
   the fail-closed one-shot bootstrap created the real SweetTime tenant/catalog and first owner with exit
-  0. Main backend/Redis/nginx startup, owner-login verification, bootstrap-secret removal and end-to-end
-  HTTPS smoke tests remain undone.
+  0. The main stack then started successfully: backend is healthy, loopback and public HTTPS `/ready`
+  return 200, company config returns the real SweetTime tenant and `/media/temp/` returns 403. Redis/nginx
+  were still completing their initial health start when first listed. Owner-login verification,
+  bootstrap-secret removal, initial backup/restore checks and mobile Google HTTPS QA remain undone.
 
 ## Audit Snapshot — 2026-07-12
 

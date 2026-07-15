@@ -946,3 +946,12 @@ SweetTime для реального owner. Пароль хранится тол�
 Bootstrap повторно не запускать: его fail-closed поведение при существующей компании является защитой.
 Следующий шаг — базовый `docker compose up -d`, проверки service health, loopback/HTTPS `/ready`, company
 config и host deny `/media/temp/`, затем owner auth test и удаление bootstrap secret.
+
+Базовый production stack запущен (`up_exit=0`). `production-backend-1` healthy, PostgreSQL healthy,
+container nginx опубликован только как `127.0.0.1:8080->80`. Loopback `/ready`=200, внешний
+`https://lnp-corporation.duckdns.org/ready`=200, company config=200 с tenant `sweettime`, а host deny
+`/media/temp/probe`=403. Тем самым прежний ожидаемый 502 устранён без изменения Nton.
+
+До удаления bootstrap secret требуется безопасно проверить global staff login. Нельзя печатать JSON
+ответ целиком, потому что он содержит access/refresh tokens; проверка должна читать password file
+локально, отправлять HTTPS JSON и выводить только HTTP status, user role/company и boolean наличия токенов.
