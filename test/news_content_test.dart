@@ -143,12 +143,12 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 16));
       final before = tester
-          .widget<FractionallySizedBox>(progressFinder)
-          .widthFactor!;
+          .widget<LinearProgressIndicator>(progressFinder)
+          .value!;
       await tester.pump(const Duration(milliseconds: 600));
       final moving = tester
-          .widget<FractionallySizedBox>(progressFinder)
-          .widthFactor!;
+          .widget<LinearProgressIndicator>(progressFinder)
+          .value!;
       expect(moving, greaterThan(before));
 
       final gestureFinder = find.byKey(
@@ -158,19 +158,19 @@ void main() {
       final hold = await tester.startGesture(gestureRect.center);
       await tester.pump(const Duration(milliseconds: 600));
       final held = tester
-          .widget<FractionallySizedBox>(progressFinder)
-          .widthFactor!;
+          .widget<LinearProgressIndicator>(progressFinder)
+          .value!;
       await tester.pump(const Duration(seconds: 1));
       final stillHeld = tester
-          .widget<FractionallySizedBox>(progressFinder)
-          .widthFactor!;
+          .widget<LinearProgressIndicator>(progressFinder)
+          .value!;
       expect(stillHeld, closeTo(held, 0.0001));
       await hold.up();
       await tester.pump(const Duration(milliseconds: 16));
       await tester.pump(const Duration(milliseconds: 500));
       final resumed = tester
-          .widget<FractionallySizedBox>(progressFinder)
-          .widthFactor!;
+          .widget<LinearProgressIndicator>(progressFinder)
+          .value!;
       expect(resumed, greaterThan(stillHeld));
 
       await tester.tapAt(

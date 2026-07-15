@@ -499,28 +499,19 @@ class _StoryProgress extends StatelessWidget {
       children: [
         for (var index = 0; index < count; index++) ...[
           Expanded(
-            child: ClipRRect(
+            child: LinearProgressIndicator(
+              key: index == currentIndex
+                  ? const ValueKey('story-progress-current')
+                  : null,
+              value: index < currentIndex
+                  ? 1
+                  : index == currentIndex
+                  ? currentValue
+                  : 0,
+              minHeight: 4,
+              color: Colors.white,
+              backgroundColor: Colors.white.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(999),
-              child: SizedBox(
-                height: 4,
-                child: ColoredBox(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: FractionallySizedBox(
-                      key: index == currentIndex
-                          ? const ValueKey('story-progress-current')
-                          : null,
-                      widthFactor: index < currentIndex
-                          ? 1
-                          : index == currentIndex
-                          ? currentValue
-                          : 0,
-                      child: const ColoredBox(color: Colors.white),
-                    ),
-                  ),
-                ),
-              ),
             ),
           ),
           if (index != count - 1) const SizedBox(width: 3),
