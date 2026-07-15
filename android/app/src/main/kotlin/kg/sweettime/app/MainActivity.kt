@@ -1,4 +1,4 @@
-package com.example.sweettime
+package kg.sweettime.app
 
 import io.flutter.embedding.android.FlutterActivity
 

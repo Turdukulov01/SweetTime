@@ -14,9 +14,9 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
   String get smsCodeTitle => _pick('Код из SMS', 'SMS коду', 'SMS code');
 
   String get authIntro => _pick(
-    'Аккаунт создаётся автоматически при первом входе. Пришлём код в SMS (в демо — без SMS).',
-    'Биринчи жолу киргенде аккаунт автоматтык түрдө түзүлөт. Кодду SMS аркылуу жөнөтөбүз (демодо — SMS жок).',
-    'An account is created automatically on first sign-in. We’ll send a code by SMS (demo mode does not send SMS).',
+    'Войдите через Google. Аккаунт SweetTime создаст backend после безопасной проверки Google ID token.',
+    'Google аркылуу кириңиз. SweetTime аккаунтун backend Google ID token коопсуз текшергенден кийин түзөт.',
+    'Continue with Google. SweetTime creates the account only after the backend securely verifies the Google ID token.',
   );
 
   String demoCodeSent(String phone, String code) => _pick(
@@ -61,10 +61,61 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
     'Google sign-in is not available yet. OAuth must be configured for the app and backend.',
   );
 
+  String get googleSignInFailed => _pick(
+    'Не удалось войти через Google. Попробуйте ещё раз.',
+    'Google аркылуу кирүү ишке ашкан жок. Кайра аракет кылыңыз.',
+    'Could not sign in with Google. Please try again.',
+  );
+
+  String get googleSignInRejected => _pick(
+    'Backend не принял Google-вход. Проверьте настройку OAuth.',
+    'Backend Google аркылуу кирүүнү кабыл алган жок. OAuth жөндөөлөрүн текшериңиз.',
+    'The backend rejected Google sign-in. Check the OAuth configuration.',
+  );
+
+  String get smsTemporarilyUnavailable => _pick(
+    'Вход по SMS временно недоступен',
+    'SMS аркылуу кирүү убактылуу жеткиликсиз',
+    'SMS sign-in is temporarily unavailable',
+  );
+
+  String get smsUnavailableHint => _pick(
+    'Мы подключим SMS-провайдера позже. Публичного демо-кода больше нет.',
+    'SMS провайдерин кийин кошобуз. Ачык демо-код мындан ары жок.',
+    'We will add an SMS provider later. The public demo code has been removed.',
+  );
+
+  String get contactPhoneTitle => _pick(
+    'Добавьте телефон для связи',
+    'Байланыш үчүн телефон кошуңуз',
+    'Add a contact phone',
+  );
+
+  String get contactPhoneIntro => _pick(
+    'Номер обязателен перед оформлением заказа. Он используется только для связи по заказу.',
+    'Заказды тариздөөдөн мурун номер милдеттүү. Ал заказ боюнча байланыш үчүн гана колдонулат.',
+    'A phone number is required before checkout and is used only to contact you about the order.',
+  );
+
+  String get contactPhoneUnverified => _pick(
+    'SMS-подтверждение добавим позже. Пока номер не считается подтверждённым.',
+    'SMS тастыктоону кийин кошобуз. Азырынча номер тастыкталган деп эсептелбейт.',
+    'SMS verification will be added later. For now, this number is not verified.',
+  );
+
+  String get saveContactAndContinue =>
+      _pick('Сохранить и продолжить', 'Сактап, улантуу', 'Save and continue');
+
+  String get contactPhoneSaveFailed => _pick(
+    'Не удалось сохранить номер. Проверьте соединение и попробуйте снова.',
+    'Номер сакталган жок. Тармакты текшерип, кайра аракет кылыңыз.',
+    'Could not save the phone number. Check your connection and try again.',
+  );
+
   String get authProvidersDemoNotice => _pick(
-    'SMS-код сейчас работает в демо-режиме. Вход через Google станет доступен после настройки OAuth.',
-    'SMS коду азыр демо режимде иштейт. Google аркылуу кирүү OAuth жөндөлгөндөн кийин жеткиликтүү болот.',
-    'SMS code is currently in demo mode. Google sign-in will be available after OAuth is configured.',
+    'Телефон после Google-входа сохраняется как контактный, без SMS-подтверждения.',
+    'Google аркылуу киргенден кийин телефон SMS тастыктоосуз байланыш номери катары сакталат.',
+    'After Google sign-in, the phone is stored as an unverified contact number.',
   );
 
   String get emptyCartTitle =>

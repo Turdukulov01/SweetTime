@@ -427,11 +427,18 @@ class OtpVerifyIn(BaseModel):
     code: str = Field(min_length=1, max_length=16)
 
 
+class GoogleLoginIn(BaseModel):
+    """Google ID token obtained by the official native/web SDK."""
+
+    idToken: str = Field(min_length=1, max_length=16_384)
+
+
 class CustomerOut(BaseModel):
     """Профиль клиента. Хранится на сервере — переживает переустановку приложения."""
 
     id: str
-    phone: str
+    phone: str | None = None
+    phoneVerified: bool = False
     name: str
     firstName: str = ""
     lastName: str = ""
@@ -448,6 +455,12 @@ class CustomerProfilePatch(BaseModel):
     firstName: str | None = Field(default=None, max_length=120)
     lastName: str | None = Field(default=None, max_length=120)
     birthDate: str | None = None  # ISO YYYY-MM-DD или "" для очистки
+
+
+class CustomerContactPatch(BaseModel):
+    """Contact number; it remains unverified until a real SMS challenge."""
+
+    phone: str = Field(min_length=9, max_length=32)
 
 
 class CustomerLoginOut(TokenPair):

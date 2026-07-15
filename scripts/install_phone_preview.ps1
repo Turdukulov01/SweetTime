@@ -1,5 +1,7 @@
 param(
   [string]$DeviceId = "",
+  [string]$ApiBase = "https://lnp-corporation.duckdns.org",
+  [string]$GoogleWebClientId = "23205820785-ap4kgng4fef97ie9l69e5erlufjc8v2i.apps.googleusercontent.com",
   [switch]$BuildOnly,
   [switch]$Debug
 )
@@ -11,7 +13,7 @@ $Flutter = Join-Path $FlutterBin "flutter.bat"
 $JdkRoot = "C:\Users\user\dev-tools\jdk-17"
 $SdkRoot = Join-Path $env:LOCALAPPDATA "Android\Sdk"
 $Adb = Join-Path $SdkRoot "platform-tools\adb.exe"
-$PackageName = "com.example.sweettime"
+$PackageName = "kg.sweettime.app"
 
 $env:JAVA_HOME = $JdkRoot
 $env:ANDROID_HOME = $SdkRoot
@@ -36,7 +38,9 @@ if (-not (Test-Path $Adb)) {
 & $Flutter config --jdk-dir="$JdkRoot" | Out-Null
 
 $mode = if ($Debug) { "debug" } else { "release" }
-& $Flutter build apk "--$mode"
+& $Flutter build apk "--$mode" `
+  "--dart-define=API_BASE=$ApiBase" `
+  "--dart-define=GOOGLE_WEB_CLIENT_ID=$GoogleWebClientId"
 if ($LASTEXITCODE -ne 0) {
   throw "Flutter APK build failed."
 }

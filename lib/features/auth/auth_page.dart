@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,8 +5,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/localization/app_localizations.dart';
 import '../../shared/app_state.dart';
-import '../../shared/demo_data.dart';
 import '../../shared/widgets/common.dart';
+
+enum _AuthStep { signIn, contactPhone }
 
 class AuthPage extends ConsumerStatefulWidget {
   const AuthPage({super.key});
@@ -19,10 +18,7 @@ class AuthPage extends ConsumerStatefulWidget {
 
 class _AuthPageState extends ConsumerState<AuthPage> {
   final _phoneController = TextEditingController();
-  final _codeController = TextEditingController();
-  bool _codeStep = false;
-
-  /// Проверка кода уходит на сервер: блокируем повторные нажатия.
+  late _AuthStep _step;
   bool _submitting = false;
   String? _error;
 
@@ -31,54 +27,92 @@ class _AuthPageState extends ConsumerState<AuthPage> {
 
   String get _normalizedPhone => '+996$_subscriberDigits';
 
-  String get _displayPhone => '+996 ${_phoneController.text.trim()}';
+  @override
+  void initState() {
+    super.initState();
+    final state = ref.read(appStateProvider);
+    _step = !state.isGuest && !state.hasContactPhone
+        ? _AuthStep.contactPhone
+        : _AuthStep.signIn;
+  }
 
   @override
   void dispose() {
     _phoneController.dispose();
-    _codeController.dispose();
     super.dispose();
   }
 
-  void _requestCode() {
+  Future<void> _signInWithGoogle() async {
+    if (_submitting) return;
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+
+    final controller = ref.read(appStateProvider.notifier);
+    final result = await controller.loginWithGoogle();
+    if (!mounted) return;
+    switch (result) {
+      case GoogleLoginResult.success:
+        _finishAuthentication();
+      case GoogleLoginResult.needsContact:
+        setState(() {
+          _step = _AuthStep.contactPhone;
+          _submitting = false;
+        });
+      case GoogleLoginResult.cancelled:
+        // Closing Google's account chooser is a normal user action.
+        setState(() => _submitting = false);
+      case GoogleLoginResult.notConfigured:
+        setState(() {
+          _submitting = false;
+          _error = AppLocalizations.of(context).googleSignInUnavailableMessage;
+        });
+      case GoogleLoginResult.rejected:
+        setState(() {
+          _submitting = false;
+          _error = AppLocalizations.of(context).googleSignInRejected;
+        });
+      case GoogleLoginResult.unavailable:
+      case GoogleLoginResult.busy:
+        setState(() {
+          _submitting = false;
+          _error = AppLocalizations.of(context).googleSignInFailed;
+        });
+    }
+  }
+
+  Future<void> _saveContactPhone() async {
+    if (_submitting) return;
     if (_subscriberDigits.length != 9) {
       setState(
         () => _error = AppLocalizations.of(context).phoneIncompleteError,
       );
       return;
     }
-    // Просим сервер выслать код. SMS-провайдера нет (код всегда демо-1111),
-    // поэтому шаг ввода кода не ждёт ответа и работает офлайн.
-    unawaited(ref.read(appStateProvider.notifier).requestOtp(_normalizedPhone));
     setState(() {
+      _submitting = true;
       _error = null;
-      _codeStep = true;
+    });
+
+    final result = await ref
+        .read(appStateProvider.notifier)
+        .saveContactPhone(_normalizedPhone);
+    if (!mounted) return;
+    if (result == ContactSaveResult.success) {
+      _finishAuthentication();
+      return;
+    }
+    setState(() {
+      _submitting = false;
+      _error = result == ContactSaveResult.rejected
+          ? AppLocalizations.of(context).phoneIncompleteError
+          : AppLocalizations.of(context).contactPhoneSaveFailed;
     });
   }
 
-  Future<void> _confirm() async {
-    if (_submitting) return;
-    final strings = AppLocalizations.of(context);
+  void _finishAuthentication() {
     final controller = ref.read(appStateProvider.notifier);
-    setState(() {
-      _error = null;
-      _submitting = true;
-    });
-
-    final signedIn = await controller.loginWithOtp(
-      _normalizedPhone,
-      _codeController.text.trim(),
-    );
-    if (!mounted) return;
-    if (!signedIn) {
-      setState(() {
-        _submitting = false;
-        _error = strings.invalidDemoCodeError(DemoData.demoOtpCode);
-      });
-      return;
-    }
-
-    setState(() => _submitting = false);
     final destination = controller.takePendingAuthReturn();
     if (!mounted) return;
     context.go(destination?.location ?? '/profile');
@@ -96,19 +130,6 @@ class _AuthPageState extends ConsumerState<AuthPage> {
     );
   }
 
-  void _showGoogleSignInUnavailable() {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            AppLocalizations.of(context).googleSignInUnavailableMessage,
-          ),
-        ),
-      );
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -116,6 +137,8 @@ class _AuthPageState extends ConsumerState<AuthPage> {
     final appName = ref.watch(
       appStateProvider.select((state) => state.appName),
     );
+    final contactStep = _step == _AuthStep.contactPhone;
+
     return PopScope<void>(
       canPop: context.canPop(),
       onPopInvokedWithResult: (didPop, result) {
@@ -130,7 +153,7 @@ class _AuthPageState extends ConsumerState<AuthPage> {
           leading: IconButton(
             icon: const Icon(Icons.close),
             tooltip: strings.close,
-            onPressed: _cancelAndClose,
+            onPressed: _submitting ? null : _cancelAndClose,
           ),
         ),
         body: ListView(
@@ -148,22 +171,68 @@ class _AuthPageState extends ConsumerState<AuthPage> {
             ),
             const SizedBox(height: 4),
             Text(
-              _codeStep ? strings.smsCodeTitle : strings.signInTitle(appName),
+              contactStep
+                  ? strings.contactPhoneTitle
+                  : strings.signInTitle(appName),
               style: theme.textTheme.headlineMedium,
             ),
             const SizedBox(height: 8),
             Text(
-              _codeStep
-                  ? strings.demoCodeSent(_displayPhone, DemoData.demoOtpCode)
-                  : strings.authIntro,
+              contactStep ? strings.contactPhoneIntro : strings.authIntro,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 24),
-            if (!_codeStep) ...[
+            if (!contactStep) ...[
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _submitting ? null : _signInWithGoogle,
+                  icon: _submitting
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.g_mobiledata_rounded),
+                  label: Text(strings.continueWithGoogle),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.sms_outlined),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              strings.smsTemporarilyUnavailable,
+                              style: theme.textTheme.titleSmall,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              strings.smsUnavailableHint,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ] else ...[
               TextField(
                 controller: _phoneController,
+                enabled: !_submitting,
                 keyboardType: TextInputType.phone,
                 textInputAction: TextInputAction.done,
                 autofillHints: const [AutofillHints.telephoneNumberNational],
@@ -171,7 +240,7 @@ class _AuthPageState extends ConsumerState<AuthPage> {
                 onChanged: (_) {
                   if (_error != null) setState(() => _error = null);
                 },
-                onSubmitted: (_) => _requestCode(),
+                onSubmitted: (_) => _saveContactPhone(),
                 decoration: InputDecoration(
                   labelText: strings.phoneNumber,
                   hintText: '555 123 456',
@@ -180,55 +249,25 @@ class _AuthPageState extends ConsumerState<AuthPage> {
                   prefixIcon: const Icon(Icons.phone_outlined),
                 ),
               ),
-              if (_error != null) _ErrorText(_error!),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: _requestCode,
-                icon: const Icon(Icons.sms_outlined),
-                label: Text(strings.requestCode),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _showGoogleSignInUnavailable,
-                  icon: const Icon(Icons.g_mobiledata_rounded),
-                  label: Text(strings.continueWithGoogle),
+              const SizedBox(height: 10),
+              Text(
+                strings.contactPhoneUnverified,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
-            ] else ...[
-              TextField(
-                controller: _codeController,
-                keyboardType: TextInputType.number,
-                inputFormatters: [
-                  LengthLimitingTextInputFormatter(4),
-                  FilteringTextInputFormatter.digitsOnly,
-                ],
-                textAlign: TextAlign.center,
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  letterSpacing: 12,
-                ),
-                decoration: const InputDecoration(hintText: '••••'),
-              ),
-              if (_error != null) _ErrorText(_error!),
               const SizedBox(height: 16),
               FilledButton(
-                onPressed: _submitting ? null : _confirm,
-                child: Text(strings.confirmAndSignIn),
-              ),
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: _submitting
-                    ? null
-                    : () => setState(() {
-                        _codeStep = false;
-                        _codeController.clear();
-                        _error = null;
-                      }),
-                icon: const Icon(Icons.arrow_back),
-                label: Text(strings.changePhoneNumber),
+                onPressed: _submitting ? null : _saveContactPhone,
+                child: _submitting
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(strings.saveContactAndContinue),
               ),
             ],
+            if (_error case final error?) _ErrorText(error),
             const SizedBox(height: 24),
             Row(
               children: [
@@ -266,14 +305,9 @@ class _KyrgyzSubscriberNumberFormatter extends TextInputFormatter {
     TextEditingValue newValue,
   ) {
     var digits = newValue.text.replaceAll(_nonDigits, '');
-
-    // Autofill and paste may include the country code even though +996 is fixed
-    // in the field UI. Keep only the nine-digit subscriber number.
     if (digits.length > 9 && digits.startsWith('996')) {
       digits = digits.substring(3);
     } else if (digits.length > 9 && digits.startsWith('0')) {
-      // A copied local Kyrgyz number is often written as 0XXX XXX XXX.
-      // The field already owns +996, so discard the trunk prefix.
       digits = digits.substring(1);
     }
     if (digits.length > 9) digits = digits.substring(0, 9);
@@ -284,7 +318,6 @@ class _KyrgyzSubscriberNumberFormatter extends TextInputFormatter {
       groups.add(digits.substring(start, end));
     }
     final formatted = groups.join(' ');
-
     return TextEditingValue(
       text: formatted,
       selection: TextSelection.collapsed(offset: formatted.length),

@@ -6,7 +6,7 @@
 
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     otp_mode: Literal["disabled", "mock"] = "mock"
     otp_mock_code: str = "1111"
 
+    # Google Sign-In is fail-closed.  Client IDs are public OAuth identifiers,
+    # but accepting a token without checking its audience would let a token
+    # issued for somebody else's application authenticate here.
+    google_auth_enabled: bool = False
+    google_oauth_web_client_id: str = ""
+    google_oauth_authorized_party_ids: list[str] = Field(default_factory=list)
+
     # Демо-сид удобен только локально. Production должен явно стартовать без
     # известных demo-аккаунтов; первичный owner создаётся отдельной процедурой.
     seed_mode: Literal["none", "demo"] = "demo"
@@ -49,6 +56,30 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_safety(self) -> "Settings":
+        self.google_oauth_web_client_id = self.google_oauth_web_client_id.strip()
+        self.google_oauth_authorized_party_ids = [
+            client_id.strip()
+            for client_id in self.google_oauth_authorized_party_ids
+            if client_id.strip()
+        ]
+        if self.google_auth_enabled:
+            client_ids = [
+                self.google_oauth_web_client_id,
+                *self.google_oauth_authorized_party_ids,
+            ]
+            if not self.google_oauth_web_client_id:
+                raise ValueError(
+                    "GOOGLE_OAUTH_WEB_CLIENT_ID is required when "
+                    "GOOGLE_AUTH_ENABLED is true"
+                )
+            if any(
+                not client_id.endswith(".apps.googleusercontent.com")
+                or "placeholder" in client_id.lower()
+                or "replace" in client_id.lower()
+                for client_id in client_ids
+            ):
+                raise ValueError("Google OAuth client IDs must be explicit Google client IDs")
+
         if self.environment.lower() != "production":
             return self
 

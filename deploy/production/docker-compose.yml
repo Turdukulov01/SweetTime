@@ -38,6 +38,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in deploy/production/.env}
       CORS_ORIGINS: ${CORS_ORIGINS:?Set HTTPS CORS_ORIGINS in deploy/production/.env}
       OTP_MODE: disabled
+      GOOGLE_AUTH_ENABLED: ${GOOGLE_AUTH_ENABLED:-false}
+      GOOGLE_OAUTH_WEB_CLIENT_ID: ${GOOGLE_OAUTH_WEB_CLIENT_ID:-}
+      GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS: ${GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS:-[]}
       SEED_MODE: none
     command: ["alembic", "-c", "api/alembic.ini", "upgrade", "head"]
     depends_on:
@@ -57,6 +60,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in deploy/production/.env}
       CORS_ORIGINS: ${CORS_ORIGINS:?Set HTTPS CORS_ORIGINS in deploy/production/.env}
       OTP_MODE: disabled
+      GOOGLE_AUTH_ENABLED: ${GOOGLE_AUTH_ENABLED:-false}
+      GOOGLE_OAUTH_WEB_CLIENT_ID: ${GOOGLE_OAUTH_WEB_CLIENT_ID:-}
+      GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS: ${GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS:-[]}
       SEED_MODE: none
       MEDIA_ROOT: /app/media
       MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:-/media}

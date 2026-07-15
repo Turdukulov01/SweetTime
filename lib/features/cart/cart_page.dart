@@ -118,7 +118,7 @@ class CartPage extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
           child: FilledButton(
             onPressed: () {
-              if (state.isGuest) {
+              if (!state.accountReady) {
                 controller.requestAuthentication(
                   AuthReturnDestination.checkout,
                 );

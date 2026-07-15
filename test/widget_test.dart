@@ -7,6 +7,7 @@ import 'package:sweettime/core/api_client.dart';
 import 'package:sweettime/core/auth_store.dart';
 import 'package:sweettime/core/cart_store.dart';
 import 'package:sweettime/core/format.dart';
+import 'package:sweettime/core/google_identity.dart';
 import 'package:sweettime/core/localization/app_localizations.dart';
 import 'package:sweettime/core/router.dart';
 import 'package:sweettime/core/theme/app_theme.dart';
@@ -876,6 +877,41 @@ void main() {
     expect(authStore.clearCount, 1);
   });
 
+  test(
+    'offline OTP and cancelled Google do not create a local session',
+    () async {
+      final google = _FakeGoogleIdentityProvider(
+        result: const GoogleIdentityResult.cancelled(),
+      );
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(),
+        api: _OfflineApiClient(),
+        googleIdentity: google,
+      );
+
+      expect(await controller.loginWithOtp('+996700123456', '1111'), isFalse);
+      expect(await controller.loginWithGoogle(), GoogleLoginResult.cancelled);
+      expect(controller.state.isGuest, isTrue);
+      expect(controller.state.customerId, isNull);
+      expect(google.signOutCalls, 0);
+    },
+  );
+
+  test('Google provider is signed out when backend exchange fails', () async {
+    final google = _FakeGoogleIdentityProvider();
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(),
+      api: _OfflineApiClient(),
+      googleIdentity: google,
+    );
+
+    expect(await controller.loginWithGoogle(), GoogleLoginResult.unavailable);
+    expect(controller.state.isGuest, isTrue);
+    expect(google.signOutCalls, 1);
+  });
+
   test('rapid favorite toggles serialize writes and keep newest set', () async {
     final api = _ControlledFavoritesApiClient(
       profile: const CustomerProfile(
@@ -1112,65 +1148,75 @@ void main() {
     expect(find.textContaining('Пожелания бариста'), findsNothing);
   });
 
-  testWidgets(
-    'guest signs in with a bounded Kyrgyz phone and returns to checkout',
-    (WidgetTester tester) async {
-      // Сервер недоступен: проверяем автономный демо-вход (APK без API).
-      final controller =
-          AppStateController(
-              languagePreferences: _MemoryLanguagePreferenceStore(),
-              authStore: _MemoryAuthStore(),
-              api: _OfflineApiClient(),
-            )
-            ..setLanguage(AppLanguage.en)
-            ..seedDemo(cart: true);
-      await tester.pumpWidget(_testAppWithController(controller));
-      await tester.pump(const Duration(milliseconds: 900));
+  testWidgets('Google sign-in collects an unverified contact before checkout', (
+    WidgetTester tester,
+  ) async {
+    final google = _FakeGoogleIdentityProvider();
+    final api = _FakeAuthApiClient(
+      profile: const CustomerProfile(
+        id: 'google-customer',
+        phone: null,
+        phoneVerified: false,
+        firstName: 'Google',
+        lastName: 'Customer',
+        birthDate: null,
+        points: 0,
+        referralCode: null,
+        invitedByCode: null,
+      ),
+    );
+    final controller =
+        AppStateController(
+            languagePreferences: _MemoryLanguagePreferenceStore(),
+            authStore: _MemoryAuthStore(),
+            api: api,
+            googleIdentity: google,
+          )
+          ..setLanguage(AppLanguage.en)
+          ..seedDemo(cart: true);
+    await tester.pumpWidget(_testAppWithController(controller));
+    await tester.pump(const Duration(milliseconds: 900));
 
-      await _openNavigationTab(tester, 'Cart');
-      await tester.tap(find.textContaining('Checkout').last);
-      await tester.pumpAndSettle();
+    await _openNavigationTab(tester, 'Cart');
+    await tester.tap(find.textContaining('Checkout').last);
+    await tester.pumpAndSettle();
 
-      expect(find.text('Sign in or register'), findsOneWidget);
-      await tester.tap(find.text('Continue with Google'));
-      await tester.pump();
-      expect(
-        find.text(
-          'Google sign-in is not available yet. OAuth must be configured for the app and backend.',
-        ),
-        findsOneWidget,
-      );
-      expect(controller.state.isGuest, isTrue);
-      expect(find.text('SMS code'), findsNothing);
+    expect(find.text('Sign in or register'), findsOneWidget);
+    expect(find.text('SMS sign-in is temporarily unavailable'), findsOneWidget);
+    await tester.tap(find.text('Continue with Google'));
+    await tester.pumpAndSettle();
 
-      final phoneField = find.byType(TextField).first;
-      await tester.enterText(phoneField, '+996 708 381 382 999');
-      expect(
-        tester.widget<TextField>(phoneField).controller!.text,
-        '708 381 382',
-      );
-      await tester.enterText(phoneField, '0708 381 382');
-      expect(
-        tester.widget<TextField>(phoneField).controller!.text,
-        '708 381 382',
-      );
+    expect(google.authenticateCalls, 1);
+    expect(api.googleIdTokens, ['google-id-token']);
+    expect(controller.state.isGuest, isFalse);
+    expect(controller.state.accountReady, isFalse);
+    expect(find.text('Add a contact phone'), findsOneWidget);
+    expect(find.textContaining('this number is not verified'), findsOneWidget);
 
-      await tester.tap(find.text('Get code'));
-      await tester.pumpAndSettle();
-      expect(find.text('SMS code'), findsOneWidget);
-      await tester.enterText(
-        find.byType(TextField).first,
-        DemoData.demoOtpCode,
-      );
-      await tester.tap(find.text('Confirm and sign in'));
-      await tester.pumpAndSettle();
+    final phoneField = find.byType(TextField);
+    expect(phoneField, findsOneWidget);
+    await tester.enterText(phoneField, '+996 708 381 382 999');
+    expect(
+      tester.widget<TextField>(phoneField).controller!.text,
+      '708 381 382',
+    );
+    await tester.enterText(phoneField, '0708 381 382');
+    expect(
+      tester.widget<TextField>(phoneField).controller!.text,
+      '708 381 382',
+    );
 
-      expect(controller.state.isGuest, isFalse);
-      expect(controller.state.userContact, '+996708381382');
-      expect(controller.state.cart, isNotEmpty);
-      expect(find.text('Fulfillment method'), findsOneWidget);
-    },
-  );
+    await tester.tap(find.text('Save and continue'));
+    await tester.pumpAndSettle();
+
+    expect(controller.state.isGuest, isFalse);
+    expect(controller.state.userContact, '+996708381382');
+    expect(controller.state.phoneVerified, isFalse);
+    expect(controller.state.accountReady, isTrue);
+    expect(api.contactPhoneCalls, ['+996708381382']);
+    expect(controller.state.cart, isNotEmpty);
+    expect(find.text('Fulfillment method'), findsOneWidget);
+  });
 
   testWidgets('guest direct checkout route is redirected to auth', (
     WidgetTester tester,
@@ -1527,6 +1573,30 @@ class _MemoryAuthStore implements AuthStore {
   }
 }
 
+class _FakeGoogleIdentityProvider implements GoogleIdentityProvider {
+  _FakeGoogleIdentityProvider({
+    this.result = const GoogleIdentityResult.success('google-id-token'),
+  });
+
+  GoogleIdentityResult result;
+  int authenticateCalls = 0;
+  int signOutCalls = 0;
+
+  @override
+  bool get isConfigured => result.status != GoogleIdentityStatus.notConfigured;
+
+  @override
+  Future<GoogleIdentityResult> authenticate() async {
+    authenticateCalls++;
+    return result;
+  }
+
+  @override
+  Future<void> signOut() async {
+    signOutCalls++;
+  }
+}
+
 /// API недоступен: все запросы отвечают как офлайн.
 /// Даёт детерминированность — тест не зависит от того, поднят ли реальный :8010.
 class _OfflineApiClient extends ApiClient {
@@ -1538,6 +1608,16 @@ class _OfflineApiClient extends ApiClient {
     String phone,
     String code,
   ) async => const ApiResult<CustomerSession>.unavailable();
+
+  @override
+  Future<ApiResult<CustomerSession>> googleSignIn(String idToken) async =>
+      const ApiResult<CustomerSession>.unavailable();
+
+  @override
+  Future<ApiResult<CustomerProfile>> patchCustomerContact(
+    String accessToken,
+    String phone,
+  ) async => const ApiResult<CustomerProfile>.unavailable();
 
   @override
   Future<ApiResult<CustomerProfile>> fetchCustomerMe(
@@ -1624,6 +1704,8 @@ class _FakeAuthApiClient extends ApiClient {
   final List<String> favoriteGetCalls = [];
   final List<String> orderGetCalls = [];
   final List<String> recurringGetCalls = [];
+  final List<String> googleIdTokens = [];
+  final List<String> contactPhoneCalls = [];
   final List<List<String>> recurringPutCalls = [];
   int recurringDeleteCalls = 0;
   final List<List<String>> favoritePutCalls = [];
@@ -1651,6 +1733,31 @@ class _FakeAuthApiClient extends ApiClient {
         tokens: const TokenPair(accessToken: 'good', refreshToken: 'fresh'),
         profile: profile,
       ),
+    );
+  }
+
+  @override
+  Future<ApiResult<CustomerSession>> googleSignIn(String idToken) async {
+    googleIdTokens.add(idToken);
+    return ApiResult<CustomerSession>.ok(
+      CustomerSession(
+        tokens: const TokenPair(accessToken: 'good', refreshToken: 'fresh'),
+        profile: profile,
+      ),
+    );
+  }
+
+  @override
+  Future<ApiResult<CustomerProfile>> patchCustomerContact(
+    String accessToken,
+    String phone,
+  ) async {
+    contactPhoneCalls.add(phone);
+    if (accessToken != 'good') {
+      return const ApiResult<CustomerProfile>.rejected();
+    }
+    return ApiResult<CustomerProfile>.ok(
+      profile.copyWith(phone: phone, phoneVerified: false),
     );
   }
 

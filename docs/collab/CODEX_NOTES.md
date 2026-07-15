@@ -1,6 +1,6 @@
 # Заметки Codex
 
-Обновлено: 2026-07-13. Владелец файла — Codex; Claude Code читает, но не редактирует.
+Обновлено: 2026-07-15. Владелец файла — Codex; Claude Code читает, но не редактирует.
 
 Правила обмена: `docs/collab/README.md`. Канонический backlog и статус приёмки:
 `docs/TASKS.md`.
@@ -789,3 +789,101 @@ read-only аудит. До получения вывода нельзя выби
 
 Финальная локальная проверка этого цикла: backend 29/29, Flutter analyze clean, Bash syntax clean,
 `git diff --check` без новых whitespace ошибок (только существующие CRLF warnings).
+## Обновление Codex — 2026-07-15: Google auth + обязательный контакт до checkout
+
+По решению владельца SMS-провайдер отложен. Реальный вход теперь строится через Google, а кыргызский
+номер до будущего SMS challenge является только неподтверждённым контактом.
+
+Backend:
+
+- `POST /api/companies/{companyId}/auth/google` принимает только `idToken`; `google-auth==2.56.0`
+  проверяет подпись/issuer/expiry, затем allowlist `aud`/`azp`. SweetTime использует стабильный Google
+  `sub`, не email, выдаёт собственные access/refresh токены и не хранит Google credential.
+- Добавлена `customer_identities` с tenant/provider/subject unique. Email/name — только метаданные,
+  auto-link по email и staff escalation отсутствуют; одинаковый verified email с разными `sub` не
+  склеивает аккаунты.
+- `customers.phone` nullable; `phone_verified_at` server-owned. Неподтверждённые одинаковые контакты
+  разрешены, partial unique действует только для подтверждённых номеров, чтобы до SMS нельзя было
+  зарезервировать чужой телефон.
+- `PATCH .../auth/customer/me/contact` принимает только нормализуемый KG `+996` + 9 цифр и всегда
+  оставляет номер unverified. Миграция `f5a9c2e41d07` идёт после `d42f10c8b6e1`.
+
+Flutter:
+
+- Добавлен `google_sign_in ^7.2.0` и адаптер с `GOOGLE_WEB_CLIENT_ID` через dart-define. Устройство
+  передаёт backend только ID token.
+- После Google-входа клиент без номера остаётся authenticated, но `accountReady=false`; Cart, прямой
+  `/checkout` и сам checkout требуют `accountReady`. После сохранения контакта typed pending return
+  возвращает в checkout, корзина не теряется.
+- Публичный offline fallback `1111` удалён. SMS честно показан временно недоступным. Cancel Google не
+  ошибка; двойные нажатия/races защищены; provider sign-out выполняется best-effort при backend failure,
+  logout и delete.
+
+Deployment/docs:
+
+- Compose передаёт `GOOGLE_AUTH_ENABLED` и JSON `GOOGLE_OAUTH_CLIENT_IDS`; `.env.example` остаётся
+  fail-closed. `deploy/production/README.md` содержит порядок Android/Web OAuth setup и команды запуска.
+- Текущий local Android package: `kg.sweettime.demo`; debug SHA-1
+  `F6:B6:ED:07:AD:1A:D9:C0:74:12:2B:4C:58:08:27:E1:5A:13:C6:35`. Это не production credential:
+  release всё ещё подписан debug key, поэтому финальный package/signing и отдельный OAuth client нужны
+  до публикации.
+
+Изменённые зоны: `backend/api/{auth,config,google_auth,models,schemas}`, новая миграция/тесты,
+Flutter auth/API/state/router/cart/checkout/localizations/tests/dependencies, `deploy/production/*`,
+`docs/{PROJECT_BRIEF,FEATURE_PRIORITIES,TASKS}.md` и этот файл.
+
+Проверки: backend `42 passed`; Flutter `50/50`, analyze clean, debug APK built; PostgreSQL migration
+applied locally; OpenAPI построен; production Compose config valid с тестовыми env; backend Docker
+image с `google-auth==2.56.0` собран; `git diff --check` clean кроме существующего CRLF notice для
+pubspec.
+
+Осталось/для Claude Code: не возвращать mock OTP в публичный flow и не считать contact verified.
+До live QA владелец должен создать Android + Web OAuth clients, передать Web client ID в backend и
+Flutter, применить migration на сервере и проверить Google → contact → checkout по HTTPS. iOS требует
+отдельный окончательный bundle ID/client/URL scheme. SMS verification/login остаётся отдельной будущей
+provider-задачей.
+
+## Обновление Codex — 2026-07-15: OAuth-клиенты и домен готовы к S7
+
+Прочитаны свежие заметки Claude и приняты переданные владельцем результаты настройки Google Cloud и
+физического сервера. Это обновление заменяет прежние сведения выше о временном package ID и отсутствии
+OAuth-клиентов.
+
+- Финальный Android/iOS identifier: `kg.sweettime.app`. Android debug APK подтверждён через manifest.
+- Web/backend OAuth client (единственный допустимый `aud`):
+  `23205820785-ap4kgng4fef97ie9l69e5erlufjc8v2i.apps.googleusercontent.com`.
+- Android debug presenter:
+  `23205820785-3qsqi30tcbppsfhqifr92ro3idiqg8kh.apps.googleusercontent.com`.
+- Android release presenter:
+  `23205820785-thvputte60b3ig74n6pek45o0vm8ft29.apps.googleusercontent.com`.
+- Backend теперь разделяет `GOOGLE_OAUTH_WEB_CLIENT_ID` и
+  `GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS`: Web ID проверяется как `aud`, Android IDs — как `azp`, если claim
+  присутствует. Flutter по умолчанию запрашивает ID token для Web client, с возможностью безопасного
+  переопределения через `GOOGLE_WEB_CLIENT_ID`.
+- Android release использует существующий `C:/Users/user/sweettime-upload.jks`, alias `upload`, и
+  fail-closed конфигурацию: без игнорируемого `android/key.properties` release build намеренно падает,
+  debug signing как production fallback запрещён. Пароли нельзя записывать в repo/заметки или отправлять
+  другому агенту. Добавлен только `android/key.properties.example`.
+- Внешний Nginx на `lnp-corporation.duckdns.org` успешно переключён владельцем на
+  `127.0.0.1:8080`: HTTP=301, HTTPS=502 при свободном 8080 — ожидаемое состояние до запуска Compose.
+  Репозиторий использует цепочку host Nginx → `127.0.0.1:8080` → container Nginx:80 → backend:8000;
+  прямой mapping `8080:8000` неверен и обходит внутреннюю политику Nginx.
+- В host-конфиг до запуска трафика обязательно добавить `location ^~ /media/temp/ { deny all; }` перед
+  публичным `/media/` alias. Иначе host alias обойдёт уже существующий запрет временных upload-файлов во
+  внутреннем Nginx. Эталон: `deploy/production/host-nginx.conf.example`.
+
+Изменённые в этом продолжении файлы: backend Google config/verifier/tests, Flutter Google audience,
+Android/iOS identifiers и release signing, production Compose/env/README/host-Nginx example,
+`scripts/install_phone_preview.ps1`, `.gitignore`, `docs/TASKS.md` и этот файл. Чужой
+`docs/collab/CLAUDE_NOTES.md` не редактировался Codex; его текущие изменения нужно сохранить.
+
+Проверки: backend 42/42; Flutter 50/50; analyze clean; debug APK собран и имеет package
+`kg.sweettime.app`; production Compose config валиден; HTTP 301 и HTTPS `/ready` 502 подтверждены снаружи.
+Release build отдельно проверен на fail-closed и закономерно остановился из-за отсутствующего локального
+`android/key.properties`.
+
+Следующий шаг S7: владелец локально создаёт `android/key.properties` и проверяет release-подпись; на
+сервере добавляет запрет `/media/temp/`; затем код загружается в `/srv/projects/sweetime`, создаётся
+непубликуемый production `.env`, запускаются build/migrations/one-shot bootstrap и HTTPS smoke tests.
+После смены Android package со старого demo ID приложение установится как другое приложение, поэтому
+старые локальные preferences/cart автоматически не мигрируют.

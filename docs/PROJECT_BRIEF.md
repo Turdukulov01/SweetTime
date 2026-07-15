@@ -24,7 +24,7 @@ The pilot must be understandable in one owner demo and useful for a live cafe tr
 - **Branch Manager:** manages branch operations, availability, schedule, orders, and staff within assigned scope.
 - **Barista/Cashier:** sees the assigned branch queue and advances allowed order statuses.
 
-P0 customer authentication uses phone OTP as the primary path and email one-time code as an alternative. Kyrgyz phone input is normalized to `+996` plus exactly nine subscriber digits. The prototype uses explicitly named `MockPhoneOtpProvider` and `MockEmailOtpProvider`. Google Sign-In is an owner-approved addition, but it is not production-ready until final app identifiers/signing, Google OAuth clients and a backend ID-token exchange are configured; other social providers and production messaging remain future integrations.
+The current pilot authentication path is Google Sign-In with a backend ID-token exchange. A customer must add a Kyrgyz contact number normalized to `+996` plus exactly nine subscriber digits before checkout; until a real SMS provider is connected, that number is explicitly unverified and is never accepted as a login factor. Phone OTP stays disabled outside local provider tests, and the old public demo-code fallback must not create a session. Production Google Sign-In still requires final app identifiers/signing, registered Google OAuth clients and configured backend audiences; other social providers and production messaging remain future integrations.
 
 ## Canonical Product Decisions
 

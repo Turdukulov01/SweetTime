@@ -8,6 +8,7 @@ dependencies = [
   "celery==5.4.0",
   "email-validator==2.2.0",
   "fastapi==0.115.6",
+  "google-auth==2.56.0",
   "httpx==0.28.1",
   "passlib[bcrypt]==1.7.4",
   "psycopg[binary]==3.2.3",
@@ -16,6 +17,7 @@ dependencies = [
   "python-multipart==0.0.19",
   "pillow==11.1.0",
   "redis==5.2.1",
+  "requests==2.32.3",
   "sqlalchemy==2.0.36",
   "uvicorn[standard]==0.34.0",
 ]

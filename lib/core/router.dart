@@ -121,10 +121,10 @@ class _ProtectedCheckoutRoute extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isGuest = ref.watch(
-      appStateProvider.select((state) => state.isGuest),
+    final accountReady = ref.watch(
+      appStateProvider.select((state) => state.accountReady),
     );
-    return isGuest
+    return !accountReady
         ? const _AuthenticationRedirect(
             destination: AuthReturnDestination.checkout,
           )

@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/api_client.dart';
 import '../core/auth_store.dart';
 import '../core/cart_store.dart';
+import '../core/google_identity.dart';
 import '../core/theme/app_theme.dart';
 import 'app_models.dart';
 import 'demo_data.dart';
@@ -36,6 +37,18 @@ enum AuthReturnDestination {
   String get authLocation =>
       Uri(path: '/auth', queryParameters: {'returnTo': queryValue}).toString();
 }
+
+enum GoogleLoginResult {
+  success,
+  needsContact,
+  cancelled,
+  notConfigured,
+  rejected,
+  unavailable,
+  busy,
+}
+
+enum ContactSaveResult { success, rejected, unavailable, busy }
 
 abstract interface class LanguagePreferenceStore {
   Future<String?> readLanguageCode();
@@ -87,6 +100,7 @@ class AppState {
     required this.birthDate,
     required this.avatarUrl,
     required this.userContact,
+    required this.phoneVerified,
     required this.userCode,
     required this.invitedByCode,
     required this.points,
@@ -130,6 +144,10 @@ class AppState {
   final DateTime? birthDate;
   final String? avatarUrl;
   final String userContact;
+  final bool phoneVerified;
+
+  bool get hasContactPhone => userContact.trim().isNotEmpty;
+  bool get accountReady => !isGuest && hasContactPhone;
 
   String get userName => '$firstName $lastName'.trim();
 
@@ -195,6 +213,7 @@ class AppState {
     DateTime? birthDate,
     String? avatarUrl,
     String? userContact,
+    bool? phoneVerified,
     String? invitedByCode,
     int? points,
     List<Branch>? branches,
@@ -235,6 +254,7 @@ class AppState {
       birthDate: clearBirthDate ? null : (birthDate ?? this.birthDate),
       avatarUrl: clearAvatarUrl ? null : (avatarUrl ?? this.avatarUrl),
       userContact: userContact ?? this.userContact,
+      phoneVerified: phoneVerified ?? this.phoneVerified,
       userCode: userCode,
       invitedByCode: clearInvitedByCode
           ? null
@@ -262,6 +282,7 @@ class AppStateController extends StateNotifier<AppState> {
     AuthStore? authStore,
     CartStore? cartStore,
     ApiClient? api,
+    GoogleIdentityProvider? googleIdentity,
   }) : _languagePreferences =
            languagePreferences ?? SharedPreferencesLanguagePreferenceStore(),
        _authStore = authStore ?? SecureAuthStore(),
@@ -269,6 +290,7 @@ class AppStateController extends StateNotifier<AppState> {
            cartStore ??
            SharedPreferencesCartStore(companyId: api?.companyId ?? 'sweettime'),
        _api = api ?? ApiClient(),
+       _googleIdentity = googleIdentity ?? PluginGoogleIdentityProvider(),
        super(
          AppState(
            apiConnected: false,
@@ -287,6 +309,7 @@ class AppStateController extends StateNotifier<AppState> {
            birthDate: null,
            avatarUrl: null,
            userContact: '',
+           phoneVerified: false,
            userCode: DemoData.demoUserCode,
            invitedByCode: null,
            points: DemoData.demoPoints,
@@ -306,6 +329,7 @@ class AppStateController extends StateNotifier<AppState> {
        );
 
   final ApiClient _api;
+  final GoogleIdentityProvider _googleIdentity;
   final LanguagePreferenceStore _languagePreferences;
   final CartStore _cartStore;
 
@@ -315,6 +339,8 @@ class AppStateController extends StateNotifier<AppState> {
   static const themePreferenceKey = 'app_theme_mode';
   bool _bootstrapped = false;
   int _accountEpoch = 0;
+  bool _authInProgress = false;
+  bool _contactSaveInProgress = false;
   bool _favoritesSyncRunning = false;
   bool _favoritesSyncDirty = false;
   Completer<void>? _favoritesSyncCompleter;
@@ -481,15 +507,21 @@ class AppStateController extends StateNotifier<AppState> {
   /// остаёмся гостем. Сеть недоступна -> ничего не трогаем: офлайн не должен
   /// разлогинивать пользователя.
   Future<void> _restoreSession() async {
+    final epoch = _accountEpoch;
     try {
       final accessToken = await _authStore.readAccessToken();
-      if (accessToken == null || accessToken.isEmpty) return;
+      if (epoch != _accountEpoch ||
+          accessToken == null ||
+          accessToken.isEmpty) {
+        return;
+      }
 
       var result = await _api.fetchCustomerMe(accessToken);
       if (result.isRejected) {
         final refreshed = await _refreshAccessToken();
         if (refreshed != null) result = await _api.fetchCustomerMe(refreshed);
       }
+      if (epoch != _accountEpoch) return;
       switch (result.status) {
         case ApiAuthStatus.ok:
           _applyCustomerProfile(result.value!);
@@ -537,7 +569,8 @@ class AppStateController extends StateNotifier<AppState> {
       lastName: profile.lastName,
       birthDate: profile.birthDate,
       clearBirthDate: profile.birthDate == null,
-      userContact: profile.phone,
+      userContact: profile.phone ?? '',
+      phoneVerified: profile.phoneVerified,
       points: profile.points,
       avatarUrl: profile.avatarUrl,
       clearAvatarUrl: profile.avatarUrl == null,
@@ -589,47 +622,127 @@ class AppStateController extends StateNotifier<AppState> {
         : state.copyWith(recurring: recurring);
   }
 
-  /// Вход по OTP через API: токены сохраняются на устройстве, профиль
-  /// приходит с сервера. true — вошли.
-  ///
-  /// Сервер отверг код -> false (UI показывает ошибку). Сервер недоступен ->
-  /// прежний локальный демо-вход (APK обязан работать автономно), но токенов
-  /// нет: заказ на сервер такой сессией не отправить.
+  /// Вход по OTP работает только через backend. Публичного fallback с кодом
+  /// 1111 нет: недоступный SMS/backend не должен создавать локальную сессию.
   Future<bool> loginWithOtp(String phone, String code) async {
-    final result = await _api.otpVerify(phone, code);
-    switch (result.status) {
-      case ApiAuthStatus.ok:
-        final session = result.value!;
-        try {
-          await _authStore.writeTokens(
-            accessToken: session.tokens.accessToken,
-            refreshToken: session.tokens.refreshToken,
-          );
-        } catch (_) {
-          // Хранилище недоступно: сессия останется только до перезапуска.
-        }
-        login(phone);
-        _applyCustomerProfile(session.profile);
-        await _loadCustomerFavorites();
-        await _loadCustomerOrders();
-        await _loadCustomerRecurring();
-        return true;
-      case ApiAuthStatus.rejected:
-        return false;
-      case ApiAuthStatus.unavailable:
-        if (code != DemoData.demoOtpCode) return false;
-        login(phone);
-        return true;
+    if (_authInProgress) return false;
+    _authInProgress = true;
+    final epoch = _accountEpoch;
+    try {
+      final result = await _api.otpVerify(phone, code);
+      if (!result.isOk || epoch != _accountEpoch) return false;
+      return _installCustomerSession(result.value!, epoch);
+    } finally {
+      _authInProgress = false;
     }
   }
 
-  /// Просьба к серверу выслать код. SMS-провайдера нет: код всегда `1111`,
-  /// поэтому отказ/офлайн не блокирует шаг ввода кода.
-  Future<void> requestOtp(String phone) async {
+  Future<bool> _installCustomerSession(
+    CustomerSession session,
+    int expectedEpoch,
+  ) async {
+    if (expectedEpoch != _accountEpoch) return false;
     try {
-      await _api.otpRequest(phone);
+      await _authStore.writeTokens(
+        accessToken: session.tokens.accessToken,
+        refreshToken: session.tokens.refreshToken,
+      );
     } catch (_) {
-      // Демо-код работает и без сервера.
+      return false;
+    }
+    if (expectedEpoch != _accountEpoch) {
+      await _clearTokens();
+      return false;
+    }
+    login(session.profile.phone ?? '');
+    _applyCustomerProfile(session.profile);
+    await _loadCustomerFavorites();
+    await _loadCustomerOrders();
+    await _loadCustomerRecurring();
+    return true;
+  }
+
+  Future<GoogleLoginResult> loginWithGoogle() async {
+    if (_authInProgress) return GoogleLoginResult.busy;
+    _authInProgress = true;
+    final epoch = _accountEpoch;
+    try {
+      final identity = await _googleIdentity.authenticate();
+      if (epoch != _accountEpoch) {
+        await _googleIdentity.signOut();
+        return GoogleLoginResult.cancelled;
+      }
+      switch (identity.status) {
+        case GoogleIdentityStatus.cancelled:
+          return GoogleLoginResult.cancelled;
+        case GoogleIdentityStatus.notConfigured:
+          return GoogleLoginResult.notConfigured;
+        case GoogleIdentityStatus.unavailable:
+          return GoogleLoginResult.unavailable;
+        case GoogleIdentityStatus.success:
+          break;
+      }
+
+      final result = await _api.googleSignIn(identity.idToken!);
+      if (epoch != _accountEpoch) {
+        await _googleIdentity.signOut();
+        return GoogleLoginResult.cancelled;
+      }
+      if (result.isRejected) {
+        await _googleIdentity.signOut();
+        return GoogleLoginResult.rejected;
+      }
+      if (!result.isOk) {
+        await _googleIdentity.signOut();
+        return GoogleLoginResult.unavailable;
+      }
+      final installed = await _installCustomerSession(result.value!, epoch);
+      if (!installed) {
+        await _googleIdentity.signOut();
+        return GoogleLoginResult.unavailable;
+      }
+      return state.hasContactPhone
+          ? GoogleLoginResult.success
+          : GoogleLoginResult.needsContact;
+    } finally {
+      _authInProgress = false;
+    }
+  }
+
+  Future<ContactSaveResult> saveContactPhone(String phone) async {
+    if (_contactSaveInProgress) return ContactSaveResult.busy;
+    if (!RegExp(r'^\+996\d{9}$').hasMatch(phone)) {
+      return ContactSaveResult.rejected;
+    }
+    final epoch = _accountEpoch;
+    final customerId = state.customerId;
+    if (state.isGuest || customerId == null) {
+      return ContactSaveResult.rejected;
+    }
+    _contactSaveInProgress = true;
+    try {
+      final result = await _withCustomerToken(
+        (token) => _api.patchCustomerContact(token, phone),
+      );
+      if (epoch != _accountEpoch || state.customerId != customerId) {
+        return ContactSaveResult.unavailable;
+      }
+      if (result.isRejected) return ContactSaveResult.rejected;
+      if (!result.isOk) return ContactSaveResult.unavailable;
+      _applyCustomerProfile(result.value!);
+      return state.hasContactPhone
+          ? ContactSaveResult.success
+          : ContactSaveResult.unavailable;
+    } finally {
+      _contactSaveInProgress = false;
+    }
+  }
+
+  Future<bool> requestOtp(String phone) async {
+    try {
+      return await _api.otpRequest(phone);
+    } catch (_) {
+      return false;
     }
   }
 
@@ -732,6 +845,7 @@ class AppStateController extends StateNotifier<AppState> {
       clearBirthDate: true,
       clearAvatarUrl: true,
       userContact: phone,
+      phoneVerified: phone.trim().isNotEmpty,
       clearInvitedByCode: true,
       points: 0,
       favoriteIds: const [],
@@ -872,6 +986,7 @@ class AppStateController extends StateNotifier<AppState> {
     _accountEpoch++;
     _favoritesSyncDirty = false;
     unawaited(_clearTokens());
+    unawaited(_googleIdentity.signOut());
     state = state.copyWith(
       isGuest: true,
       clearCustomerId: true,
@@ -880,6 +995,7 @@ class AppStateController extends StateNotifier<AppState> {
       clearBirthDate: true,
       clearAvatarUrl: true,
       userContact: '',
+      phoneVerified: false,
       clearPendingAuthReturn: true,
       clearInvitedByCode: true,
       points: 0,
@@ -908,6 +1024,7 @@ class AppStateController extends StateNotifier<AppState> {
     _accountEpoch++;
     _favoritesSyncDirty = false;
     unawaited(_clearTokens());
+    unawaited(_googleIdentity.signOut());
     state = state.copyWith(
       isGuest: true,
       clearCustomerId: true,
@@ -916,6 +1033,7 @@ class AppStateController extends StateNotifier<AppState> {
       clearBirthDate: true,
       clearAvatarUrl: true,
       userContact: '',
+      phoneVerified: false,
       clearPendingAuthReturn: true,
       clearInvitedByCode: true,
       points: 0,
@@ -1351,6 +1469,7 @@ class AppStateController extends StateNotifier<AppState> {
         clearBirthDate: true,
         clearAvatarUrl: true,
         userContact: DemoData.demoUserPhone,
+        phoneVerified: true,
       );
     }
     if (cart) {

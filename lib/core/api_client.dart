@@ -8,9 +8,10 @@ import 'package:http_parser/http_parser.dart';
 import '../shared/app_models.dart';
 import '../shared/demo_data.dart';
 
-/// Базовый URL боевого API (`backend/api`, порт 8010). Переопределяется при сборке:
+/// Базовый URL API. Для локальной разработки backend обычно слушает порт 8010;
+/// production-сборка должна явно указывать HTTPS-домен:
 /// `flutter build apk --dart-define=API_BASE=http://10.0.2.2:8010` (эмулятор) или
-/// `--dart-define=API_BASE=http://<ip-сервера>:8010` (телефон/деплой).
+/// `--dart-define=API_BASE=https://lnp-corporation.duckdns.org` (телефон/релиз).
 const String apiBase = String.fromEnvironment(
   'API_BASE',
   defaultValue: 'http://127.0.0.1:8010',
@@ -68,6 +69,7 @@ class CustomerProfile {
   const CustomerProfile({
     required this.id,
     required this.phone,
+    this.phoneVerified = false,
     required this.firstName,
     required this.lastName,
     required this.birthDate,
@@ -78,7 +80,8 @@ class CustomerProfile {
   });
 
   final String id;
-  final String phone;
+  final String? phone;
+  final bool phoneVerified;
   final String firstName;
   final String lastName;
   final DateTime? birthDate;
@@ -93,7 +96,8 @@ class CustomerProfile {
     if (id == null) return null;
     return CustomerProfile(
       id: id.toString(),
-      phone: (raw['phone'] as String?) ?? '',
+      phone: raw['phone'] as String?,
+      phoneVerified: (raw['phoneVerified'] as bool?) ?? false,
       firstName: (raw['firstName'] as String?) ?? '',
       lastName: (raw['lastName'] as String?) ?? '',
       birthDate: DateTime.tryParse((raw['birthDate'] as String?) ?? ''),
@@ -104,10 +108,16 @@ class CustomerProfile {
     );
   }
 
-  CustomerProfile copyWith({String? avatarUrl, bool clearAvatarUrl = false}) {
+  CustomerProfile copyWith({
+    String? phone,
+    bool? phoneVerified,
+    String? avatarUrl,
+    bool clearAvatarUrl = false,
+  }) {
     return CustomerProfile(
       id: id,
-      phone: phone,
+      phone: phone ?? this.phone,
+      phoneVerified: phoneVerified ?? this.phoneVerified,
       firstName: firstName,
       lastName: lastName,
       birthDate: birthDate,
@@ -413,6 +423,7 @@ class ApiClient {
   final String companyId;
 
   static const Duration _timeout = Duration(seconds: 2);
+  static const Duration _googleAuthTimeout = Duration(seconds: 15);
   static const Duration _uploadTimeout = Duration(seconds: 30);
 
   Uri _uri(String path) => Uri.parse('$apiBase/api/companies/$companyId$path');
@@ -561,6 +572,65 @@ class ApiClient {
       );
     } catch (_) {
       return const ApiResult<CustomerSession>.unavailable();
+    }
+  }
+
+  /// Exchanges a Google OpenID Connect ID token for SweetTime's own session.
+  /// Email/name from the device are deliberately not sent or trusted.
+  Future<ApiResult<CustomerSession>> googleSignIn(String idToken) async {
+    try {
+      final response = await http
+          .post(
+            _uri('/auth/google'),
+            headers: _jsonHeader,
+            body: jsonEncode({'idToken': idToken}),
+          )
+          .timeout(_googleAuthTimeout);
+      if (response.statusCode == 400 ||
+          response.statusCode == 401 ||
+          response.statusCode == 403) {
+        return const ApiResult<CustomerSession>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<CustomerSession>.unavailable();
+      }
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! Map<String, dynamic>) {
+        return const ApiResult<CustomerSession>.unavailable();
+      }
+      final tokens = TokenPair.tryParse(decoded);
+      final parsedProfile = CustomerProfile.tryParse(decoded['user']);
+      final profile = parsedProfile == null
+          ? null
+          : _resolveProfileMedia(parsedProfile);
+      if (tokens == null || profile == null) {
+        return const ApiResult<CustomerSession>.unavailable();
+      }
+      return ApiResult<CustomerSession>.ok(
+        CustomerSession(tokens: tokens, profile: profile),
+      );
+    } catch (_) {
+      return const ApiResult<CustomerSession>.unavailable();
+    }
+  }
+
+  /// Saves a contact number for a signed-in customer. This endpoint does not
+  /// verify ownership; [CustomerProfile.phoneVerified] remains server-owned.
+  Future<ApiResult<CustomerProfile>> patchCustomerContact(
+    String accessToken,
+    String phone,
+  ) async {
+    try {
+      final response = await http
+          .patch(
+            _uri('/auth/customer/me/contact'),
+            headers: {..._bearer(accessToken), ..._jsonHeader},
+            body: jsonEncode({'phone': phone}),
+          )
+          .timeout(_timeout);
+      return _parseProfileResponse(response);
+    } catch (_) {
+      return const ApiResult<CustomerProfile>.unavailable();
     }
   }
 

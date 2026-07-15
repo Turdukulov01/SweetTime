@@ -264,7 +264,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
 
   Future<void> _placeOrder(AppState state) async {
     final controller = ref.read(appStateProvider.notifier);
-    if (state.isGuest) {
+    if (!state.accountReady) {
       _requestAuthentication(controller);
       return;
     }
@@ -300,7 +300,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     if (order == null) {
       if (!mounted) return;
       final currentState = ref.read(appStateProvider);
-      if (currentState.isGuest) {
+      if (!currentState.accountReady) {
         _requestAuthentication(controller);
       } else {
         context.go('/cart');

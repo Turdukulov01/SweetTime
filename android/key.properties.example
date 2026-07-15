@@ -1,0 +1,6 @@
+# Copy to android/key.properties and replace both password placeholders locally.
+# android/key.properties and *.jks are ignored by Git.
+storeFile=C:/Users/user/sweettime-upload.jks
+storePassword=replace-locally
+keyAlias=upload
+keyPassword=replace-locally

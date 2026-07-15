@@ -22,10 +22,12 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -110,14 +112,26 @@ class Customer(Base):
 
     __tablename__ = "customers"
     __table_args__ = (
-        UniqueConstraint("company_id", "phone", name="uq_customer_company_phone"),
+        Index(
+            "uq_customer_company_verified_phone",
+            "company_id",
+            "phone",
+            unique=True,
+            postgresql_where=text("phone_verified_at IS NOT NULL"),
+            sqlite_where=text("phone_verified_at IS NOT NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     company_id: Mapped[str] = mapped_column(
         ForeignKey("companies.id"), index=True
     )
-    phone: Mapped[str] = mapped_column(String(32), index=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    # A contact entered in profile is not an authentication factor.  Only a
+    # future real SMS provider may populate this timestamp.
+    phone_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     name: Mapped[str]
     # Профиль клиента живёт на сервере: переживает переустановку и смену телефона.
     first_name: Mapped[str] = mapped_column(String(120), default="")
@@ -134,6 +148,51 @@ class Customer(Base):
     # Не URL: смена домена/CDN не должна требовать миграцию профилей.
     avatar_storage_key: Mapped[str | None] = mapped_column(
         Text, nullable=True, default=None
+    )
+
+
+class CustomerIdentity(Base):
+    """External login identity scoped to one white-label company.
+
+    `subject` is the provider's stable identifier (Google `sub`).  Email is
+    metadata only and is deliberately neither unique nor used for linking.
+    """
+
+    __tablename__ = "customer_identities"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "provider",
+            "subject",
+            name="uq_customer_identity_company_provider_subject",
+        ),
+        UniqueConstraint(
+            "customer_id",
+            "provider",
+            name="uq_customer_identity_customer_provider",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id"), index=True
+    )
+    customer_id: Mapped[str] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(32))
+    subject: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    picture_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    last_login_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 

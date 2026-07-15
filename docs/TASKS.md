@@ -11,7 +11,7 @@ Updated: 2026-07-15. Work is sequential unless the owner explicitly approves a s
 - `[ ] [blocked—owner input]` requires a business decision or asset.
 - Demo screenshots, routes, mocks, or extension points alone do not prove production completion.
 
-## Current Execution Queue — S5.3 to S7
+## Current Execution Queue — S5.3/S5.4 to S7
 
 This is the short operational list shared by Claude Code and Codex. Detailed phase acceptance
 below remains authoritative; this section records the current execution order.
@@ -33,6 +33,21 @@ below remains authoritative; this section records the current execution order.
   replace the active notice instead of building a queue, and the controller rejects unavailable or
   stale selections before reporting success. Flutter checks pass locally; server rollout remains S7.
   Photo is intentionally server-side now, not a device-only picker file.
+- [ ] **S5.4 — Google identity + required contact phone.** **[partial—verified locally]** Backend now
+  verifies Google ID tokens with `google-auth`, checks the configured `aud`/`azp`, keys identities by
+  stable tenant/provider/`sub`, and issues SweetTime tokens without persisting the Google credential.
+  Google-only customers start with `phone=null`; strict Kyrgyz contact entry is required before
+  checkout but remains unverified and is not a login factor until a real SMS provider exists. Flutter
+  uses `google_sign_in` v7, removes the offline `1111` session fallback, preserves the cart/typed return
+  to checkout, blocks duplicate/racing auth actions and signs the provider out best-effort on failures
+  or logout. Backend 42 tests, Flutter 50 tests, analyze, debug APK build, PostgreSQL migration and
+  Compose config pass locally. The real Web, Android debug and Android release OAuth clients now exist;
+  Flutter/backend use the Web client as the token audience and authorize both Android presenters. The
+  final Android/iOS identifier is `kg.sweettime.app`; release signing is fail-closed and no longer falls
+  back to the debug key. Before acceptance: create the ignored local `android/key.properties`, build and
+  verify a release signed by the existing upload key, deploy migration `f5a9c2e41d07`, then run a
+  physical-device HTTPS Google sign-in/contact/checkout test. An iOS OAuth client and URL scheme remain
+  future iOS-release work. SMS verification remains a later provider task.
 - [ ] **S6 — Ubuntu deployment artifacts.** **[partial—verified locally]** `backend/api/Dockerfile`
   and `deploy/production/` contain PostgreSQL, Redis, backend, nginx, media volume and an environment
   example. PostgreSQL/backend/nginx now have ordered healthchecks; `/ready` probes the real database.
@@ -42,14 +57,19 @@ below remains authoritative; this section records the current execution order.
   media snapshots now use a short write-maintenance window, checksums and a non-destructive disposable
   restore drill; off-host copy is append-only and requires an explicit target. Still required: real
   production secrets, execution of the locally verified one-shot real owner/catalog bootstrap on the
-  target, a real independent off-host destination with retention/encryption policy, approved TLS/domain
-  topology, avatar privacy decision, admin deployment decision, and validation on the target Ubuntu host.
-- [ ] **S7 — deploy to physical server.** **[ready, not started]** Target is
+  target, a real independent off-host destination with retention/encryption policy, avatar privacy
+  decision, fully pinned Docker runtime dependencies/image digests, admin deployment decision, and
+  validation on the target Ubuntu host. The TLS/domain/loopback-port topology is now approved and active.
+- [ ] **S7 — deploy to physical server.** **[in progress]** Target is
   `ranex@81.88.192.41`; `/srv/sweetime/media`, `/srv/sweetime/backups` and
-  `/srv/projects/sweetime` are prepared. A read-only `server-preflight.sh` now covers OS/Docker,
-  proxy/TLS, listeners, firewall, directory ownership, disk and inodes, but the first non-interactive
-  SSH attempt was rejected because no key/agent is available; no server command ran. Upload/build,
-  `.env`, migrations, nginx integration, firewall/port checks and end-to-end smoke tests remain undone.
+  `/srv/projects/sweetime` are prepared. Host Nginx and the valid Let's Encrypt certificate now route
+  `lnp-corporation.duckdns.org` to loopback `127.0.0.1:8080`; HTTP returns the expected HTTPS redirect
+  and HTTPS currently returns the expected `502` because the SweetTime stack has not started. The repo's
+  Compose mapping intentionally exposes container Nginx as `127.0.0.1:8080:80`, then proxies API traffic
+  to backend port 8000; it must not be replaced with a direct `8080:8000` mapping. Before traffic, add the
+  documented host-Nginx denial for `/media/temp/` so the direct media alias cannot expose temporary
+  uploads. Upload/build, real `.env` secrets, migrations, one-shot production bootstrap, firewall/port
+  checks and end-to-end HTTPS smoke tests remain undone.
 
 ## Audit Snapshot — 2026-07-12
 
@@ -99,9 +119,10 @@ below remains authoritative; this section records the current execution order.
   order creation. Auth preserves the cart and returns to Checkout through a closed typed destination.
   Kyrgyz phone input owns `+996`, accepts exactly nine subscriber digits, formats `XXX XXX XXX`, and
   normalizes to `+996XXXXXXXXX`. The misleading Apple action is removed and Google no longer starts
-  demo SMS or creates a local session. Real Google Sign-In remains blocked on final app identifiers,
-  signing SHA/OAuth clients and a backend ID-token exchange. All 24 Flutter tests and a fresh
-  profile APK pass; it is installed on the Redmi Note 9 Pro for physical owner review.
+  demo SMS or creates a local session. A 2026-07-15 follow-up implements the backend Google ID-token
+  exchange, provider identity migration, required unverified contact step and checkout gate; live
+  Google Sign-In now remains blocked only on final identifiers/signing, real OAuth clients, deployment
+  configuration and physical HTTPS QA. All 50 Flutter tests, analyze and a fresh debug APK build pass.
 
 ## Phase 0 — Product And Design
 

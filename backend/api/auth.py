@@ -17,21 +17,29 @@ OTP пока **mock**: SMS-провайдер не подключён (нуже�
 """
 
 from datetime import date, datetime, timedelta, timezone
+import re
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import schemas
 from .config import settings
 from .database import get_db
 from .deps import get_company, get_current_customer, get_current_staff
+from .google_auth import (
+    GoogleProviderUnavailableError,
+    GoogleTokenVerificationError,
+    verify_google_id_token,
+)
 from .models import (
     AdminUser,
     Branch,
     Company,
     Customer,
+    CustomerIdentity,
     MediaFile,
     Order,
     Product,
@@ -68,6 +76,7 @@ def customer_out(customer: Customer) -> schemas.CustomerOut:
     return schemas.CustomerOut(
         id=customer.id,
         phone=customer.phone,
+        phoneVerified=customer.phone_verified_at is not None,
         name=customer.name,
         firstName=customer.first_name or "",
         lastName=customer.last_name or "",
@@ -84,10 +93,28 @@ def customer_out(customer: Customer) -> schemas.CustomerOut:
 # ---------------------------------------------------------------------------
 
 
-def _normalize_phone(phone: str) -> str:
+def _normalize_phone(phone: str | None) -> str:
     """+996 555 123 456 / 0555-123-456 → компактная форма для сравнения."""
+    if phone is None:
+        return ""
     digits = "".join(ch for ch in phone if ch.isdigit())
     return f"+{digits}" if digits else ""
+
+
+def _normalize_kg_phone(phone: str) -> str:
+    """Normalize a Kyrgyz mobile/contact number to +996XXXXXXXXX."""
+    raw = phone.strip()
+    if not re.fullmatch(r"[+0-9\s()\-]+", raw):
+        raise HTTPException(status_code=422, detail="Invalid Kyrgyz phone number")
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if len(digits) == 10 and digits.startswith("0"):
+        digits = "996" + digits[1:]
+    if len(digits) != 12 or not digits.startswith("996"):
+        raise HTTPException(
+            status_code=422,
+            detail="Phone must contain Kyrgyz country code +996 and 9 digits",
+        )
+    return f"+{digits}"
 
 
 def _find_customer(db: Session, company_id: str, phone: str) -> Customer | None:
@@ -291,6 +318,7 @@ def otp_request(
     company: Company = Depends(get_company),
 ) -> schemas.OtpRequestOut:
     _require_mock_otp_enabled()
+    _normalize_kg_phone(body.phone)
     # Провайдера нет: код фиксированный и возвращается открыто. Телефон не
     # проверяем на существование — иначе ответ выдал бы базу клиентов.
     return schemas.OtpRequestOut(sent=True, demoCode=settings.otp_mock_code, mode="mock")
@@ -310,7 +338,7 @@ def otp_verify(
     if body.code.strip() != settings.otp_mock_code:
         raise HTTPException(status_code=400, detail="Invalid code")
 
-    phone = body.phone.strip()
+    phone = _normalize_kg_phone(body.phone)
     customer = _find_customer(db, company.id, phone)
     if customer is None:
         customer = Customer(
@@ -331,6 +359,120 @@ def otp_verify(
     return schemas.CustomerLoginOut(
         accessToken=access, refreshToken=refresh, user=customer_out(customer)
     )
+
+
+# ---------------------------------------------------------------------------
+# Клиент приложения: Google ID-token exchange
+# ---------------------------------------------------------------------------
+
+
+def _customer_login_out(customer: Customer) -> schemas.CustomerLoginOut:
+    access, refresh = create_token_pair(
+        subject=customer.id, typ="customer", company_id=customer.company_id
+    )
+    return schemas.CustomerLoginOut(
+        accessToken=access, refreshToken=refresh, user=customer_out(customer)
+    )
+
+
+@router.post(
+    "/google",
+    response_model=schemas.CustomerLoginOut,
+    summary="Проверить Google ID token и выдать сессию клиента SweetTime",
+)
+def google_login(
+    body: schemas.GoogleLoginIn,
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> schemas.CustomerLoginOut:
+    if not settings.google_auth_enabled or not settings.google_oauth_web_client_id:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google authentication is not configured",
+        )
+
+    try:
+        claims = verify_google_id_token(body.idToken)
+    except GoogleProviderUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google authentication is temporarily unavailable",
+        ) from exc
+    except GoogleTokenVerificationError as exc:
+        # Do not expose whether signature, audience, issuer or expiry failed.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Google credential",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    identity = db.scalars(
+        select(CustomerIdentity).where(
+            CustomerIdentity.company_id == company.id,
+            CustomerIdentity.provider == "google",
+            CustomerIdentity.subject == claims.subject,
+        )
+    ).first()
+    if identity is not None:
+        customer = db.get(Customer, identity.customer_id)
+        if customer is None or customer.company_id != company.id:
+            raise HTTPException(status_code=409, detail="Google identity is inconsistent")
+        identity.last_login_at = datetime.now(timezone.utc)
+        db.commit()
+        return _customer_login_out(customer)
+
+    now = datetime.now(timezone.utc)
+    customer = Customer(
+        id=f"c-{uuid4().hex[:10]}",
+        company_id=company.id,
+        phone=None,
+        phone_verified_at=None,
+        name=claims.display_name or "Гость",
+        first_name=claims.given_name or "",
+        last_name=claims.family_name or "",
+        points=0,
+        referral_code=_new_referral_code(db, company),
+        invited_by_code=None,
+    )
+    identity = CustomerIdentity(
+        id=f"ci-{uuid4().hex[:16]}",
+        company_id=company.id,
+        customer_id=customer.id,
+        provider="google",
+        subject=claims.subject,
+        email=claims.email,
+        email_verified_at=now if claims.email is not None else None,
+        display_name=claims.display_name,
+        picture_url=claims.picture_url,
+        created_at=now,
+        last_login_at=now,
+    )
+    db.add_all([customer, identity])
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        # Two simultaneous first logins may race.  The tenant/provider/sub
+        # unique constraint decides the winner; the loser returns that same
+        # account rather than producing a duplicate or a 500.
+        db.rollback()
+        identity = db.scalars(
+            select(CustomerIdentity).where(
+                CustomerIdentity.company_id == company.id,
+                CustomerIdentity.provider == "google",
+                CustomerIdentity.subject == claims.subject,
+            )
+        ).first()
+        if identity is None:
+            raise HTTPException(
+                status_code=409, detail="Google account could not be linked"
+            ) from exc
+        customer = db.get(Customer, identity.customer_id)
+        if customer is None or customer.company_id != company.id:
+            raise HTTPException(
+                status_code=409, detail="Google identity is inconsistent"
+            ) from exc
+
+    return _customer_login_out(customer)
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +524,25 @@ def customer_update_me(
     if full:
         customer.name = full
 
+    db.commit()
+    db.refresh(customer)
+    return customer_out(customer)
+
+
+@router.patch(
+    "/customer/me/contact",
+    response_model=schemas.CustomerOut,
+    summary="Сохранить контактный телефон (без подтверждения)",
+)
+def customer_update_contact(
+    body: schemas.CustomerContactPatch,
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+) -> schemas.CustomerOut:
+    customer.phone = _normalize_kg_phone(body.phone)
+    # Entering or changing a number never proves possession.  A future real
+    # SMS verification endpoint is the only place allowed to set this field.
+    customer.phone_verified_at = None
     db.commit()
     db.refresh(customer)
     return customer_out(customer)

@@ -11,7 +11,7 @@ P0 is a **single-chain SweetTime pilot**. `company_id` remains in the architectu
 - Branded five-tab shell: Home, Catalog, QR, Cart, Profile.
 - Persistent RU/KG/EN application-language selection available to guests and authenticated customers; complete static-copy localization is required before pilot acceptance.
 - Guest branch selection, menu browsing, product configuration, and local cart.
-- Authentication gate before checkout or personal data; phone OTP primary with strict `+996` + nine-digit normalization, email one-time code alternative through named mock providers, and owner-approved Google Sign-In only after registered OAuth clients and backend token verification/session exchange exist.
+- Authentication gate before checkout or personal data; Google Sign-In uses a backend-verified ID-token/session exchange, followed by a required strict `+996` + nine-digit contact number before checkout. The number remains unverified and cannot be used for login until a real SMS provider is connected; no public demo OTP may create a customer session.
 - Catalog, independent multi-select categories, search, a composable filled-heart Favorites filter/product hearts, product details, sizes, sugar, ice, toppings, allergens, and branch-specific availability.
 - Branch information: address, hours, phone, open state, and 2GIS/Google Maps links.
 - Cart, promo-code validation, loyalty estimate, and checkout.

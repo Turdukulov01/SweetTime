@@ -1,6 +1,7 @@
 # SweetTime боевой backend (backend/api) — зависимости.
 # Установка: py -m pip install -r backend/api/requirements.txt
 fastapi
+google-auth==2.56.0
 uvicorn[standard]
 sqlalchemy
 alembic
@@ -11,5 +12,6 @@ passlib[bcrypt]
 # (detect_wrap_bug падает на строке > 72 байт). 4.0.1 — стабильно.
 bcrypt==4.0.1
 pyjwt
+requests==2.32.3
 python-multipart
 Pillow==11.1.0
