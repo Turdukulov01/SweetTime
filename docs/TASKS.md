@@ -74,8 +74,10 @@ below remains authoritative; this section records the current execution order.
   it was extracted into `/srv/projects/sweetime`. Target preflight passed: Ubuntu, Docker/Compose,
   Nginx/TLS, writable storage, 21 TiB free space and the free loopback port are suitable. UFW is inactive
   while existing services expose ports 3000 and 9090; any firewall hardening needs a separate audited
-  change so Nton, Cockpit and SSH are not broken. Image build, real `.env` secrets, migrations, one-shot
-  production bootstrap and end-to-end HTTPS smoke tests remain undone.
+  change so Nton, Cockpit and SSH are not broken. Production `.env` is mode 600, contains no placeholders
+  and passes `docker compose config --quiet`; UID/GID match `ranex` at 1000:1000. The backend image built
+  successfully as `sweettime-backend:local`. Migrations, one-shot production bootstrap and end-to-end
+  HTTPS smoke tests remain undone.
 
 ## Audit Snapshot — 2026-07-12
 

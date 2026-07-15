@@ -83,12 +83,16 @@ protection in the container nginx. Validate every change with `sudo nginx -t` be
 
 ## One-shot production bootstrap
 
-After migrations and before public traffic, create a root-readable password file outside the repo:
+After migrations and before public traffic, create an owner-readable password file outside the repo.
+The bootstrap container runs as `SWEETIME_UID:SWEETIME_GID`, so a `root:root` mode-600 file would be
+unreadable inside that container:
 
 ```bash
-sudo install -d -m 700 /srv/sweetime/secrets
-openssl rand -base64 36 | sudo tee /srv/sweetime/secrets/bootstrap-owner-password >/dev/null
-sudo chmod 600 /srv/sweetime/secrets/bootstrap-owner-password
+install -d -m 700 /srv/sweetime/secrets
+umask 077
+openssl rand -base64 36 > /srv/sweetime/secrets/bootstrap-owner-password
+chmod 600 /srv/sweetime/secrets/bootstrap-owner-password
+stat -c '%a %u:%g %n' /srv/sweetime/secrets/bootstrap-owner-password
 ```
 
 Run the explicit overlay once:

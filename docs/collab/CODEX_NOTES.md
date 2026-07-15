@@ -928,3 +928,13 @@ Docker active; `ranex` входит в `docker`, sudo noninteractive досту�
 провайдерский firewall, чтобы не сломать Nton/Cockpit/доступ. Следующий безопасный шаг — создать mode 600
 production `.env` с отдельными случайными PostgreSQL/JWT secrets и проверить `docker compose config -q`
 без печати конфигурации или секретов.
+
+Production `.env` создан владельцем на сервере с mode 600; placeholder scan пуст, Compose config exit 0,
+а `SWEETIME_UID/GID=1000:1000` совпадают с `ranex`. Backend image `sweettime-backend:local` успешно
+собран; итоговый manifest list `sha256:19f515f613d9278c19207eae9ff15bc39bd892aed0c95a0951de68b2887940e4`.
+
+До bootstrap исправлена ошибка документации: Compose запускает bootstrap как 1000:1000, поэтому
+`root:root 600` password file был бы нечитаем. Secret directory/file должны принадлежать deploy-owner
+`ranex` (1000:1000), с mode 700/600. Пароль генерируется вне repo, сохраняется владельцем в password
+manager и не передаётся агентам. Следующий шаг — dependency-driven migrate + one-shot bootstrap на
+свежей БД, затем проверка результата до запуска nginx/backend.
