@@ -83,7 +83,9 @@ below remains authoritative; this section records the current execution order.
   subsequently became healthy. Global staff login returned 200 for the real owner with role `owner`,
   company `sweettime` and both token types present without exposing their values. After the owner confirms
   the generated password is stored safely, the plaintext bootstrap secret was removed. Initial verified
-  backup/restore checks, an independent off-host copy and mobile Google HTTPS QA remain undone.
+  snapshot `20260715T125752Z` was created with a valid PostgreSQL custom dump at Alembic `f5a9c2e41d07`,
+  a valid empty-media archive and checksums; all services returned healthy and public `/ready` returned
+  200. The disposable restore drill, an independent off-host copy and mobile Google HTTPS QA remain undone.
 
 ## Audit Snapshot — 2026-07-12
 

@@ -969,3 +969,10 @@ backup останавливает только SweetTime backend/nginx, дела
 проверяет SHA-256/tar/pg_restore list и через trap возобновляет ранее работавшие сервисы; Nton не входит
 в Compose и не затрагивается. На загруженном snapshot shell-файлы mode 664, поэтому текущий запуск должен
 быть через `bash`; executable-биты исправляются в локальном Git для будущих deployment-архивов.
+
+Первый production snapshot успешно создан: `/srv/sweetime/backups/snapshots/20260715T125752Z`.
+`database.dump`, `media.tar.gz`, `metadata.env` проходят SHA-256; Alembic=`f5a9c2e41d07`, media_files=0
+(до пользовательских upload это ожидаемо). Backup корректно остановил только SweetTime nginx/backend,
+повторно прогнал idempotent migrate при resume и вернул backend/nginx/postgres/redis healthy; внешний
+`/ready` снова 200. Это пока local same-host snapshot, не независимая защита. Следующий шаг — disposable
+`restore-drill.sh`, который не подключается к production DB и удаляет временный контейнер после проверки.
