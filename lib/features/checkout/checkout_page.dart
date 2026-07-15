@@ -289,7 +289,6 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     // Снимок данных для API до локального оформления (checkout очищает корзину).
     final cartItems = state.cart;
     final branch = state.selectedBranch;
-    final total = state.total;
     final pointsUsed = state.bonusApplied;
 
     // Локальное оформление — как раньше: заказ и баллы живут и без сервера.
@@ -317,8 +316,8 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         readyTime: apiReadyTime,
         items: cartItems,
         branch: branch,
-        total: total,
         pointsUsed: pointsUsed,
+        paymentMethod: _payment,
       );
     }
 

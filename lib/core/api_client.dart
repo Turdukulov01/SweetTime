@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 import '../shared/app_models.dart';
 import '../shared/demo_data.dart';
@@ -73,6 +74,7 @@ class CustomerProfile {
     required this.points,
     required this.referralCode,
     required this.invitedByCode,
+    this.avatarUrl,
   });
 
   final String id;
@@ -83,6 +85,7 @@ class CustomerProfile {
   final int points;
   final String? referralCode;
   final String? invitedByCode;
+  final String? avatarUrl;
 
   static CustomerProfile? tryParse(dynamic raw) {
     if (raw is! Map<String, dynamic>) return null;
@@ -97,6 +100,21 @@ class CustomerProfile {
       points: (raw['points'] as num?)?.toInt() ?? 0,
       referralCode: raw['referralCode'] as String?,
       invitedByCode: raw['invitedByCode'] as String?,
+      avatarUrl: raw['avatarUrl'] as String?,
+    );
+  }
+
+  CustomerProfile copyWith({String? avatarUrl, bool clearAvatarUrl = false}) {
+    return CustomerProfile(
+      id: id,
+      phone: phone,
+      firstName: firstName,
+      lastName: lastName,
+      birthDate: birthDate,
+      points: points,
+      referralCode: referralCode,
+      invitedByCode: invitedByCode,
+      avatarUrl: clearAvatarUrl ? null : (avatarUrl ?? this.avatarUrl),
     );
   }
 }
@@ -126,6 +144,257 @@ class CustomerSession {
   final CustomerProfile profile;
 }
 
+/// Strict parser for the versioned customer order-history contract.
+///
+/// A malformed response is rejected as unavailable by [ApiClient] instead of
+/// being mistaken for a valid empty history. V1 is intentionally display-only;
+/// only V2 carries the stable selection needed for exact reorder.
+OrderHistoryEntry? parseCustomerOrderHistoryEntry(dynamic raw) {
+  if (raw is! Map<String, dynamic>) return null;
+  final id = _requiredString(raw['id']);
+  final number = _requiredString(raw['number']);
+  final branchId = _requiredString(raw['branchId']);
+  final type = _orderType(raw['type']);
+  final status = _orderStatus(raw['status']);
+  final paymentMethod = _paymentMethod(raw['paymentMethod']);
+  final itemsVersion = _wholeInt(raw['itemsVersion']);
+  final total = _nonNegativeInt(raw['total']);
+  final pointsUsed = _nonNegativeInt(raw['pointsUsed']);
+  final pointsEarned = _nonNegativeInt(raw['pointsEarned']);
+  final createdAtRaw = raw['createdAt'];
+  final createdAt = createdAtRaw is String
+      ? DateTime.tryParse(createdAtRaw)
+      : null;
+  final rawItems = raw['items'];
+  if (id == null ||
+      number == null ||
+      branchId == null ||
+      type == null ||
+      status == null ||
+      paymentMethod == null ||
+      (itemsVersion != 1 && itemsVersion != 2) ||
+      total == null ||
+      pointsUsed == null ||
+      pointsEarned == null ||
+      createdAt == null ||
+      rawItems is! List<dynamic> ||
+      rawItems.isEmpty) {
+    return null;
+  }
+
+  final items = <OrderHistoryItem>[];
+  for (final rawItem in rawItems) {
+    final item = _parseOrderHistoryItem(rawItem, itemsVersion!);
+    if (item == null) return null;
+    items.add(item);
+  }
+
+  final readyTimeRaw = raw['readyTime'];
+  if (readyTimeRaw != null && readyTimeRaw is! String) return null;
+  final readyTimeValue = (readyTimeRaw as String?)?.trim();
+  final readyTime = switch (type) {
+    OrderType.scheduled => OrderReadyTime(
+      kind: OrderReadyTimeKind.scheduled,
+      value: readyTimeValue,
+    ),
+    OrderType.qrCafe => OrderReadyTime(
+      kind: OrderReadyTimeKind.table,
+      value: readyTimeValue,
+    ),
+    OrderType.pickup =>
+      readyTimeValue == null ||
+              readyTimeValue.isEmpty ||
+              readyTimeValue == 'asap'
+          ? const OrderReadyTime(kind: OrderReadyTimeKind.asap)
+          : OrderReadyTime(
+              kind: OrderReadyTimeKind.scheduled,
+              value: readyTimeValue,
+            ),
+  };
+
+  return OrderHistoryEntry(
+    id: id,
+    number: number,
+    branchId: branchId,
+    type: type,
+    status: status,
+    paymentMethod: paymentMethod,
+    readyTime: readyTime,
+    itemsVersion: itemsVersion!,
+    items: List.unmodifiable(items),
+    total: total,
+    pointsUsed: pointsUsed,
+    pointsEarned: pointsEarned,
+    createdAt: createdAt,
+  );
+}
+
+OrderHistoryItem? _parseOrderHistoryItem(dynamic raw, int itemsVersion) {
+  if (raw is! Map<String, dynamic>) return null;
+  final productName = _localizedSnapshot(raw['productName']);
+  final quantity = _positiveInt(raw['quantity']);
+  final total = _nonNegativeInt(raw['total']);
+  final sizeName = _localizedSnapshot(raw['sizeName'] ?? raw['size']);
+  if (productName == null || quantity == null || total == null) return null;
+
+  if (itemsVersion == 1) {
+    return OrderHistoryItem(
+      productName: productName,
+      sizeName: sizeName,
+      quantity: quantity,
+      total: total,
+    );
+  }
+
+  final productId = _requiredString(raw['productId']);
+  final sizeIdRaw = raw['sizeId'];
+  final sizeId = sizeIdRaw == null ? null : _requiredString(sizeIdRaw);
+  final toppingIds = _stringList(raw['toppingIds']);
+  final sugarPercent = _wholeInt(raw['sugarPercent']);
+  final ice = _iceLevel(raw['ice']);
+  final unitPrice = _nonNegativeInt(raw['unitPrice']);
+  if (productId == null ||
+      (sizeIdRaw != null && sizeId == null) ||
+      toppingIds == null ||
+      toppingIds.length != toppingIds.toSet().length ||
+      !const [0, 30, 50, 70, 100].contains(sugarPercent) ||
+      ice == null ||
+      unitPrice == null) {
+    return null;
+  }
+  return OrderHistoryItem(
+    productName: productName,
+    sizeName: sizeName,
+    quantity: quantity,
+    total: total,
+    productId: productId,
+    sizeId: sizeId,
+    toppingIds: List.unmodifiable(toppingIds),
+    sugarPercent: sugarPercent,
+    ice: ice,
+    unitPrice: unitPrice,
+  );
+}
+
+String? _requiredString(dynamic raw) {
+  if (raw is! String || raw.trim().isEmpty) return null;
+  return raw.trim();
+}
+
+int? _wholeInt(dynamic raw) {
+  if (raw is! num || raw.isNaN || raw.isInfinite) return null;
+  final value = raw.toInt();
+  return value == raw ? value : null;
+}
+
+int? _positiveInt(dynamic raw) {
+  final value = _wholeInt(raw);
+  return value != null && value > 0 ? value : null;
+}
+
+int? _nonNegativeInt(dynamic raw) {
+  final value = _wholeInt(raw);
+  return value != null && value >= 0 ? value : null;
+}
+
+List<String>? _stringList(dynamic raw) {
+  if (raw is! List<dynamic>) return null;
+  final values = <String>[];
+  for (final value in raw) {
+    final parsed = _requiredString(value);
+    if (parsed == null) return null;
+    values.add(parsed);
+  }
+  return values;
+}
+
+LocalizedText? _localizedSnapshot(dynamic raw) {
+  if (raw == null) return null;
+  if (raw is String) {
+    final value = _requiredString(raw);
+    return value == null
+        ? null
+        : LocalizedText(ru: value, ky: value, en: value);
+  }
+  if (raw is! Map<String, dynamic>) return null;
+  final ru = _requiredString(raw['ru']);
+  final ky = _requiredString(raw['ky']);
+  final en = _requiredString(raw['en']);
+  if (ru == null || ky == null || en == null) return null;
+  return LocalizedText(ru: ru, ky: ky, en: en);
+}
+
+OrderType? _orderType(dynamic raw) => switch (raw) {
+  'pickup' => OrderType.pickup,
+  'scheduled' => OrderType.scheduled,
+  'qr' => OrderType.qrCafe,
+  _ => null,
+};
+
+OrderStatus? _orderStatus(dynamic raw) => switch (raw) {
+  'new' => OrderStatus.created,
+  'awaiting_payment' => OrderStatus.awaitingPayment,
+  'paid' => OrderStatus.paid,
+  'accepted' => OrderStatus.accepted,
+  'preparing' => OrderStatus.preparing,
+  'ready' => OrderStatus.ready,
+  'done' || 'completed' => OrderStatus.completed,
+  'cancelled' => OrderStatus.cancelled,
+  _ => null,
+};
+
+PaymentMethod? _paymentMethod(dynamic raw) => switch (raw) {
+  'mock' => PaymentMethod.mock,
+  'cash' => PaymentMethod.cash,
+  'qr' => PaymentMethod.qrDemo,
+  _ => null,
+};
+
+IceLevel? _iceLevel(dynamic raw) => switch (raw) {
+  'none' => IceLevel.none,
+  'less' => IceLevel.less,
+  'regular' => IceLevel.regular,
+  'extra' => IceLevel.extra,
+  _ => null,
+};
+
+RecurringOrder? parseCustomerRecurringOrder(dynamic raw) {
+  if (raw is! Map<String, dynamic>) return null;
+  final productIds = _stringList(raw['productIds']);
+  final time = _requiredString(raw['time']);
+  final branchId = _requiredString(raw['branchId']);
+  final plan = _recurringPlan(raw['plan']);
+  final paidUntilRaw = raw['paidUntil'];
+  final paidUntil = paidUntilRaw is String
+      ? DateTime.tryParse(paidUntilRaw)
+      : null;
+  if (productIds == null ||
+      productIds.isEmpty ||
+      productIds.length != productIds.toSet().length ||
+      time == null ||
+      !RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(time) ||
+      branchId == null ||
+      plan == null ||
+      (paidUntilRaw != null && paidUntil == null) ||
+      raw['active'] != true) {
+    return null;
+  }
+  return RecurringOrder(
+    productIds: List.unmodifiable(productIds),
+    time: time,
+    branchId: branchId,
+    plan: plan,
+    paidUntil: paidUntil,
+  );
+}
+
+RecurringPlan? _recurringPlan(dynamic raw) => switch (raw) {
+  'single' => RecurringPlan.single,
+  'week' => RecurringPlan.week,
+  'month' => RecurringPlan.month,
+  _ => null,
+};
+
 /// Разбор цвета `#RRGGBB` из API; null при любом другом формате.
 Color? parseHexColor(String? raw) {
   if (raw == null) return null;
@@ -144,6 +413,7 @@ class ApiClient {
   final String companyId;
 
   static const Duration _timeout = Duration(seconds: 2);
+  static const Duration _uploadTimeout = Duration(seconds: 30);
 
   Uri _uri(String path) => Uri.parse('$apiBase/api/companies/$companyId$path');
 
@@ -220,15 +490,16 @@ class ApiClient {
   Future<List<Promotion>?> fetchPromotions() async {
     try {
       final json = await _getJson('/promotions') as List<dynamic>;
-      final maps = json
-          .whereType<Map<String, dynamic>>()
-          .where((item) => item['active'] != false)
-          .toList()
-        ..sort(
-          (a, b) => ((a['sortOrder'] as num?)?.toInt() ?? 0).compareTo(
-            (b['sortOrder'] as num?)?.toInt() ?? 0,
-          ),
-        );
+      final maps =
+          json
+              .whereType<Map<String, dynamic>>()
+              .where((item) => item['active'] != false)
+              .toList()
+            ..sort(
+              (a, b) => ((a['sortOrder'] as num?)?.toInt() ?? 0).compareTo(
+                (b['sortOrder'] as num?)?.toInt() ?? 0,
+              ),
+            );
       return [for (final item in maps) _mapPromotion(item)];
     } catch (_) {
       return null;
@@ -255,7 +526,10 @@ class ApiClient {
 
   /// `POST /auth/otp/verify` — вход по коду. 400 -> [ApiAuthStatus.rejected]
   /// (неверный код), ошибка сети -> [ApiAuthStatus.unavailable].
-  Future<ApiResult<CustomerSession>> otpVerify(String phone, String code) async {
+  Future<ApiResult<CustomerSession>> otpVerify(
+    String phone,
+    String code,
+  ) async {
     try {
       final response = await http
           .post(
@@ -275,7 +549,10 @@ class ApiClient {
         return const ApiResult<CustomerSession>.unavailable();
       }
       final tokens = TokenPair.tryParse(json);
-      final profile = CustomerProfile.tryParse(json['user']);
+      final parsedProfile = CustomerProfile.tryParse(json['user']);
+      final profile = parsedProfile == null
+          ? null
+          : _resolveProfileMedia(parsedProfile);
       if (tokens == null || profile == null) {
         return const ApiResult<CustomerSession>.unavailable();
       }
@@ -327,6 +604,216 @@ class ApiClient {
     }
   }
 
+  /// `PUT /auth/customer/me/avatar` — multipart WebP/JPEG/PNG; tenant и
+  /// владелец берутся сервером из JWT, путь/slug клиент не присылает.
+  Future<ApiResult<CustomerProfile>> uploadCustomerAvatar(
+    String accessToken, {
+    required List<int> bytes,
+    required String filename,
+    required String contentType,
+  }) async {
+    try {
+      final request = http.MultipartRequest(
+        'PUT',
+        _uri('/auth/customer/me/avatar'),
+      )..headers.addAll(_bearer(accessToken));
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          bytes,
+          filename: filename,
+          contentType: MediaType.parse(contentType),
+        ),
+      );
+      final streamed = await request.send().timeout(_uploadTimeout);
+      final response = await http.Response.fromStream(streamed);
+      return _parseProfileResponse(response);
+    } catch (_) {
+      return const ApiResult<CustomerProfile>.unavailable();
+    }
+  }
+
+  /// `DELETE /auth/customer/me/avatar` — идемпотентное удаление.
+  Future<ApiResult<bool>> deleteCustomerAvatar(String accessToken) async {
+    try {
+      final response = await http
+          .delete(
+            _uri('/auth/customer/me/avatar'),
+            headers: _bearer(accessToken),
+          )
+          .timeout(_timeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<bool>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<bool>.unavailable();
+      }
+      return const ApiResult<bool>.ok(true);
+    } catch (_) {
+      return const ApiResult<bool>.unavailable();
+    }
+  }
+
+  /// `GET /auth/customer/me/favorites` — серверный список избранного клиента.
+  /// Пустой список является полноценным успешным ответом и не заменяется demo-данными.
+  Future<ApiResult<List<String>>> fetchCustomerFavorites(
+    String accessToken,
+  ) async {
+    try {
+      final response = await http
+          .get(
+            _uri('/auth/customer/me/favorites'),
+            headers: _bearer(accessToken),
+          )
+          .timeout(_timeout);
+      return _parseFavoritesResponse(response);
+    } catch (_) {
+      return const ApiResult<List<String>>.unavailable();
+    }
+  }
+
+  /// Полностью заменяет избранное. Серверный ответ авторитетен: API удаляет
+  /// дубли, неизвестные товары и ID другой компании.
+  /// `GET /auth/customer/me/orders` — newest customer orders first.
+  ///
+  /// An empty list is authoritative. Any malformed order makes the response
+  /// unavailable so corrupted payloads are never presented as an empty history.
+  Future<ApiResult<List<OrderHistoryEntry>>> fetchCustomerOrders(
+    String accessToken,
+  ) async {
+    try {
+      final response = await http
+          .get(_uri('/auth/customer/me/orders'), headers: _bearer(accessToken))
+          .timeout(_timeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<List<OrderHistoryEntry>>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<List<OrderHistoryEntry>>.unavailable();
+      }
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! List<dynamic>) {
+        return const ApiResult<List<OrderHistoryEntry>>.unavailable();
+      }
+      final orders = <OrderHistoryEntry>[];
+      for (final rawOrder in decoded) {
+        final order = parseCustomerOrderHistoryEntry(rawOrder);
+        if (order == null) {
+          return const ApiResult<List<OrderHistoryEntry>>.unavailable();
+        }
+        orders.add(order);
+      }
+      return ApiResult<List<OrderHistoryEntry>>.ok(List.unmodifiable(orders));
+    } catch (_) {
+      return const ApiResult<List<OrderHistoryEntry>>.unavailable();
+    }
+  }
+
+  /// `GET /auth/customer/me/recurring` — `null` is the authoritative
+  /// no-active-subscription state.
+  Future<ApiResult<RecurringOrder?>> fetchCustomerRecurring(
+    String accessToken,
+  ) async {
+    try {
+      final response = await http
+          .get(
+            _uri('/auth/customer/me/recurring'),
+            headers: _bearer(accessToken),
+          )
+          .timeout(_timeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<RecurringOrder?>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<RecurringOrder?>.unavailable();
+      }
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded == null) return const ApiResult<RecurringOrder?>.ok(null);
+      final recurring = parseCustomerRecurringOrder(decoded);
+      return recurring == null
+          ? const ApiResult<RecurringOrder?>.unavailable()
+          : ApiResult<RecurringOrder?>.ok(recurring);
+    } catch (_) {
+      return const ApiResult<RecurringOrder?>.unavailable();
+    }
+  }
+
+  Future<ApiResult<RecurringOrder?>> replaceCustomerRecurring(
+    String accessToken, {
+    required List<String> productIds,
+    required String time,
+    required String branchId,
+    required RecurringPlan plan,
+  }) async {
+    try {
+      final response = await http
+          .put(
+            _uri('/auth/customer/me/recurring'),
+            headers: {..._bearer(accessToken), ..._jsonHeader},
+            body: jsonEncode({
+              'productIds': productIds,
+              'time': time,
+              'branchId': branchId,
+              'plan': plan.name,
+            }),
+          )
+          .timeout(_timeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<RecurringOrder?>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<RecurringOrder?>.unavailable();
+      }
+      final recurring = parseCustomerRecurringOrder(
+        jsonDecode(utf8.decode(response.bodyBytes)),
+      );
+      return recurring == null
+          ? const ApiResult<RecurringOrder?>.unavailable()
+          : ApiResult<RecurringOrder?>.ok(recurring);
+    } catch (_) {
+      return const ApiResult<RecurringOrder?>.unavailable();
+    }
+  }
+
+  Future<ApiResult<bool>> deleteCustomerRecurring(String accessToken) async {
+    try {
+      final response = await http
+          .delete(
+            _uri('/auth/customer/me/recurring'),
+            headers: _bearer(accessToken),
+          )
+          .timeout(_timeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<bool>.rejected();
+      }
+      if (response.statusCode != 204) {
+        return const ApiResult<bool>.unavailable();
+      }
+      return const ApiResult<bool>.ok(true);
+    } catch (_) {
+      return const ApiResult<bool>.unavailable();
+    }
+  }
+
+  /// Fully replaces favorites with the server-authoritative ID list.
+  Future<ApiResult<List<String>>> replaceCustomerFavorites(
+    String accessToken,
+    List<String> productIds,
+  ) async {
+    try {
+      final response = await http
+          .put(
+            _uri('/auth/customer/me/favorites'),
+            headers: {..._bearer(accessToken), ..._jsonHeader},
+            body: jsonEncode({'productIds': productIds}),
+          )
+          .timeout(_timeout);
+      return _parseFavoritesResponse(response);
+    } catch (_) {
+      return const ApiResult<List<String>>.unavailable();
+    }
+  }
+
   /// `POST /auth/refresh` — новая пара токенов, когда access протух.
   Future<ApiResult<TokenPair>> refreshTokens(String refreshToken) async {
     try {
@@ -361,12 +848,56 @@ class ApiClient {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       return const ApiResult<CustomerProfile>.unavailable();
     }
-    final profile = CustomerProfile.tryParse(
+    final parsedProfile = CustomerProfile.tryParse(
       jsonDecode(utf8.decode(response.bodyBytes)),
     );
+    final profile = parsedProfile == null
+        ? null
+        : _resolveProfileMedia(parsedProfile);
     return profile == null
         ? const ApiResult<CustomerProfile>.unavailable()
         : ApiResult<CustomerProfile>.ok(profile);
+  }
+
+  ApiResult<List<String>> _parseFavoritesResponse(http.Response response) {
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      return const ApiResult<List<String>>.rejected();
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      return const ApiResult<List<String>>.unavailable();
+    }
+    try {
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! Map<String, dynamic>) {
+        return const ApiResult<List<String>>.unavailable();
+      }
+      final rawIds = decoded['productIds'];
+      if (rawIds is! List<dynamic>) {
+        return const ApiResult<List<String>>.unavailable();
+      }
+      final ids = <String>[];
+      for (final rawId in rawIds) {
+        if (rawId is! String) {
+          return const ApiResult<List<String>>.unavailable();
+        }
+        ids.add(rawId);
+      }
+      return ApiResult<List<String>>.ok(List.unmodifiable(ids));
+    } catch (_) {
+      return const ApiResult<List<String>>.unavailable();
+    }
+  }
+
+  CustomerProfile _resolveProfileMedia(CustomerProfile profile) {
+    final raw = profile.avatarUrl?.trim();
+    if (raw == null || raw.isEmpty) {
+      return profile.copyWith(clearAvatarUrl: true);
+    }
+    final parsed = Uri.tryParse(raw);
+    if (parsed != null && parsed.hasScheme) return profile;
+    final base = Uri.parse(apiBase.endsWith('/') ? apiBase : '$apiBase/');
+    final relative = raw.startsWith('/') ? raw.substring(1) : raw;
+    return profile.copyWith(avatarUrl: base.resolve(relative).toString());
   }
 
   static const Map<String, String> _jsonHeader = {
@@ -384,8 +915,8 @@ class ApiClient {
     required String branchId,
     required String type, // pickup | scheduled | qr
     required String readyTime,
-    required List<Map<String, Object>> items,
-    required int total,
+    required List<Map<String, Object?>> items,
+    required String paymentMethod,
     required int pointsUsed,
     String? accessToken,
   }) async {
@@ -402,7 +933,7 @@ class ApiClient {
               'type': type,
               'readyTime': readyTime,
               'items': items,
-              'total': total,
+              'paymentMethod': paymentMethod,
               'pointsUsed': pointsUsed,
             }),
           )

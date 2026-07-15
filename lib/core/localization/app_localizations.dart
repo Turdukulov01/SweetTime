@@ -86,6 +86,11 @@ class AppLocalizations {
     '$name себетке кошулду',
     '$name added to cart',
   );
+  String get orderAddedToCart => _pick(
+    'Заказ добавлен в корзину',
+    'Заказ себетке кошулду',
+    'Order added to cart',
+  );
   String get addToCart => _pick('В корзину', 'Себетке', 'Add to cart');
   String get newBadge => _pick('Новинка', 'Жаңы', 'New');
   String get hitBadge => _pick('Хит', 'Хит', 'Hit');

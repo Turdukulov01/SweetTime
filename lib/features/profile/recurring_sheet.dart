@@ -28,13 +28,31 @@ class _RecurringSheetState extends ConsumerState<_RecurringSheet> {
   TimeOfDay _time = const TimeOfDay(hour: 11, minute: 0);
   late Branch _branch;
   RecurringPlan _plan = RecurringPlan.week;
+  bool _saving = false;
 
   @override
   void initState() {
     super.initState();
     final state = ref.read(appStateProvider);
     _branch = state.selectedBranch;
-    if (state.favorites.isNotEmpty) {
+    final recurring = state.recurring;
+    if (recurring != null) {
+      _productIds.addAll(recurring.productIds);
+      final timeParts = recurring.time.split(':');
+      if (timeParts.length == 2) {
+        final hour = int.tryParse(timeParts[0]);
+        final minute = int.tryParse(timeParts[1]);
+        if (hour != null && minute != null) {
+          _time = TimeOfDay(hour: hour, minute: minute);
+        }
+      }
+      _branch =
+          state.branches
+              .where((branch) => branch.id == recurring.branchId)
+              .firstOrNull ??
+          state.selectedBranch;
+      _plan = recurring.plan;
+    } else if (state.favorites.isNotEmpty) {
       _productIds.add(state.favorites.first.id);
     }
   }
@@ -47,6 +65,14 @@ class _RecurringSheetState extends ConsumerState<_RecurringSheet> {
     final combo = state.products
         .where((p) => _productIds.contains(p.id))
         .toList();
+    final selectableProducts = <Product>[
+      ...state.favorites,
+      ...state.products.where(
+        (product) =>
+            _productIds.contains(product.id) &&
+            !state.favoriteIds.contains(product.id),
+      ),
+    ];
     final comboPrice = combo.fold(0, (sum, p) => sum + p.basePrice);
     final planTotal = comboPrice * _plan.days;
 
@@ -81,7 +107,7 @@ class _RecurringSheetState extends ConsumerState<_RecurringSheet> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final product in state.favorites)
+                for (final product in selectableProducts)
                   FilterChip(
                     label: Text(
                       '${strings.productName(product)} · '
@@ -180,13 +206,14 @@ class _RecurringSheetState extends ConsumerState<_RecurringSheet> {
 
             const SizedBox(height: 20),
             FilledButton(
-              onPressed: combo.isEmpty
+              onPressed: combo.isEmpty || _saving
                   ? null
-                  : () {
+                  : () async {
                       final stableTime =
                           '${_time.hour.toString().padLeft(2, '0')}:'
                           '${_time.minute.toString().padLeft(2, '0')}';
-                      ref
+                      setState(() => _saving = true);
+                      final saved = await ref
                           .read(appStateProvider.notifier)
                           .setRecurring(
                             products: combo,
@@ -194,16 +221,30 @@ class _RecurringSheetState extends ConsumerState<_RecurringSheet> {
                             branch: _branch,
                             plan: _plan,
                           );
+                      if (!mounted || !context.mounted) return;
+                      setState(() => _saving = false);
+                      if (!saved) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(strings.recurringSaveFailed)),
+                        );
+                        return;
+                      }
+                      final messenger = ScaffoldMessenger.of(context);
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      messenger.showSnackBar(
                         SnackBar(content: Text(strings.recurringEnabledDemo)),
                       );
                     },
-              child: Text(
-                strings.recurringPayAndEnable(
-                  formatSom(planTotal, strings.language),
-                ),
-              ),
+              child: _saving
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(
+                      strings.recurringPayAndEnable(
+                        formatSom(planTotal, strings.language),
+                      ),
+                    ),
             ),
           ],
         ),

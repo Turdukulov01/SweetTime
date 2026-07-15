@@ -320,7 +320,8 @@ function serializeLocalized(v: LocalizedText): Record<string, string> {
 }
 
 interface ApiModifier {
-  name: string;
+  id: string | number;
+  name: string | ApiLocalized;
   priceDelta: number;
 }
 
@@ -376,14 +377,14 @@ function mapProduct(companyId: string, p: ApiProduct): Product {
     category: p.category,
     color: p.color,
     price: p.price,
-    sizes: (p.sizes ?? []).map((s, i) => ({
-      id: `s${i}`,
-      label: s.name,
+    sizes: (p.sizes ?? []).map((s) => ({
+      id: String(s.id),
+      label: typeof s.name === "string" ? s.name : s.name.ru,
       priceDelta: s.priceDelta
     })),
-    toppings: (p.toppings ?? []).map((t, i) => ({
-      id: `t${i}`,
-      label: t.name,
+    toppings: (p.toppings ?? []).map((t) => ({
+      id: String(t.id),
+      label: typeof t.name === "string" ? t.name : t.name.ru,
       priceDelta: t.priceDelta
     })),
     availableBranchIds: p.availableBranchIds ?? [],
@@ -442,11 +443,13 @@ function serializeProductPatch(
     body.availableBranchIds = patch.availableBranchIds;
   if (patch.sizes !== undefined)
     body.sizes = patch.sizes.map((s) => ({
+      id: s.id,
       name: s.label,
       priceDelta: s.priceDelta
     }));
   if (patch.toppings !== undefined)
     body.toppings = patch.toppings.map((t) => ({
+      id: t.id,
       name: t.label,
       priceDelta: t.priceDelta
     }));

@@ -8,6 +8,7 @@ import '../../shared/app_models.dart';
 import '../../shared/app_state.dart';
 import '../../shared/demo_data.dart';
 import '../../shared/widgets/drink_art.dart';
+import '../../shared/widgets/top_notice.dart';
 
 class ProductPage extends ConsumerStatefulWidget {
   const ProductPage({super.key, required this.productId});
@@ -232,14 +233,22 @@ class _ProductPageState extends ConsumerState<ProductPage> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
           child: FilledButton(
             onPressed: canAdd
-                ? () {
-                    controller.addConfigured(
+                ? () async {
+                    final added = await controller.addConfigured(
                       product,
                       sizeId: selectedSize.id,
                       sugarPercent: _sugarPercent,
                       ice: _ice,
                       toppingIds: _toppingIds.toList(),
-                      total: total,
+                    );
+                    if (!context.mounted || !added) return;
+                    showTopNotice(
+                      context,
+                      message: strings.productAdded(
+                        product.name.resolve(language),
+                      ),
+                      actionLabel: strings.cart,
+                      onAction: () => context.go('/cart'),
                     );
                     context.go('/cart');
                   }

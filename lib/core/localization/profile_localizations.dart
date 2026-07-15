@@ -186,9 +186,9 @@ extension ProfileLocalizations on AppLocalizations {
       _pick('Удалить фото', 'Сүрөттү өчүрүү', 'Remove photo');
 
   String get profileAvatarDemoNotice => _pick(
-    'Демо: фото хранится только до завершения текущего сеанса и не загружается на сервер.',
-    'Демо: сүрөт учурдагы сеанс бүткөнгө чейин гана сакталат жана серверге жүктөлбөйт.',
-    'Demo: the photo is kept only for the current session and is not uploaded to a server.',
+    'Фото хранится в вашем профиле на сервере и будет доступно после повторного входа.',
+    'Сүрөт серверде профилиңизде сакталат жана кайра киргенде жеткиликтүү болот.',
+    'The photo is stored with your server profile and remains available after you sign in again.',
   );
 
   String get profileAvatarPickerError => _pick(
@@ -197,7 +197,15 @@ extension ProfileLocalizations on AppLocalizations {
     'Could not open the camera or gallery. Check permission and try again.',
   );
 
+  String get profileAvatarUploadError => _pick(
+    'Не удалось сохранить фото на сервере. Проверьте подключение и попробуйте снова.',
+    'Сүрөттү серверге сактоо мүмкүн болгон жок. Байланышты текшерип, кайра аракет кылыңыз.',
+    'Could not save the photo to the server. Check your connection and try again.',
+  );
+
   String get profileSave => _pick('Сохранить', 'Сактоо', 'Save');
+
+  String get profileSaving => _pick('Сохраняем…', 'Сакталууда…', 'Saving…');
 
   String get profileSaved =>
       _pick('Профиль обновлён', 'Профиль жаңыртылды', 'Profile updated');
@@ -258,6 +266,30 @@ extension ProfileLocalizations on AppLocalizations {
 
   String get profileRepeatOrder =>
       _pick('Повторить', 'Кайталоо', 'Order again');
+
+  String get profileLegacyOrderRepeatUnavailable => _pick(
+    'Этот старый заказ нельзя повторить автоматически.',
+    'Бул эски заказды автоматтык түрдө кайталоо мүмкүн эмес.',
+    'This older order cannot be repeated automatically.',
+  );
+
+  String get profileRepeatNeedsServerCatalog => _pick(
+    'Подключитесь к серверу, чтобы безопасно повторить заказ.',
+    'Заказды коопсуз кайталоо үчүн серверге туташыңыз.',
+    'Connect to the server to repeat this order safely.',
+  );
+
+  String get profileRepeatSelectionUnavailable => _pick(
+    'Состав заказа изменился или товар недоступен в выбранном филиале. Корзина не изменена.',
+    'Заказдын курамы өзгөргөн же товар тандалган филиалда жеткиликсиз. Себет өзгөргөн жок.',
+    'This order changed or is unavailable at the selected branch. Your cart was not changed.',
+  );
+
+  String profileUnknownBranch(String branchId) => _pick(
+    'Филиал недоступен ($branchId)',
+    'Филиал жеткиликсиз ($branchId)',
+    'Branch unavailable ($branchId)',
+  );
 
   String get profileAddresses => _pick('Адреса', 'Даректер', 'Addresses');
 
@@ -340,7 +372,25 @@ extension ProfileLocalizations on AppLocalizations {
     );
   }
 
+  String get recurringPaidUntilUnavailable => _pick(
+    'Срок оплаты недоступен',
+    'Төлөм мөөнөтү жеткиликсиз',
+    'Paid-through date unavailable',
+  );
+
   String get recurringCancel => _pick('Отменить', 'Токтотуу', 'Cancel');
+
+  String recurringProductUnavailable(String productId) => _pick(
+    'Товар недоступен ($productId)',
+    'Товар жеткиликсиз ($productId)',
+    'Product unavailable ($productId)',
+  );
+
+  String get recurringCancelFailed => _pick(
+    'Не удалось отменить постоянный заказ. Проверьте подключение и повторите.',
+    'Туруктуу заказды токтотуу мүмкүн болгон жок. Байланышты текшерип, кайталаңыз.',
+    'Could not cancel the recurring order. Check your connection and try again.',
+  );
 
   String get recurringSheetIntro => _pick(
     'Оплатите любимые напитки вперёд — готовим каждый день к нужному часу.',
@@ -386,6 +436,12 @@ extension ProfileLocalizations on AppLocalizations {
     'Постоянный заказ включён (демо)',
     'Туруктуу заказ иштетилди (демо)',
     'Recurring order enabled (demo)',
+  );
+
+  String get recurringSaveFailed => _pick(
+    'Не удалось сохранить постоянный заказ. Корзина и оплата не изменены.',
+    'Туруктуу заказды сактоо мүмкүн болгон жок. Себет жана төлөм өзгөргөн жок.',
+    'Could not save the recurring order. Your cart and payment were not changed.',
   );
 
   String recurringPayAndEnable(String total) => _pick(

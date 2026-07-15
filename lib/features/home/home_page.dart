@@ -8,6 +8,7 @@ import '../../shared/app_models.dart';
 import '../../shared/app_state.dart';
 import '../../shared/widgets/common.dart';
 import '../../shared/widgets/product_card.dart';
+import '../../shared/widgets/top_notice.dart';
 
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
@@ -557,16 +558,16 @@ class _ProductGrid extends StatelessWidget {
               key: ValueKey(product.id),
               product: product,
               onTap: () => context.go('/product/${product.id}'),
-              onAdd: () {
-                controller.quickAdd(product);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      strings.productAdded(
-                        product.name.resolve(strings.language),
-                      ),
-                    ),
+              onAdd: () async {
+                final added = await controller.quickAdd(product);
+                if (!context.mounted || !added) return;
+                showTopNotice(
+                  context,
+                  message: strings.productAdded(
+                    product.name.resolve(strings.language),
                   ),
+                  actionLabel: strings.cart,
+                  onAction: () => context.go('/cart'),
                 );
               },
             );

@@ -307,6 +307,106 @@ class CustomerOrder {
   final int pointsEarned;
 }
 
+/// Immutable order-history snapshot returned by the customer API.
+///
+/// History deliberately does not keep a [Product] reference: legacy orders and
+/// removed catalog items must remain readable without guessing identity from a
+/// translated display name.
+class OrderHistoryItem {
+  const OrderHistoryItem({
+    required this.productName,
+    required this.quantity,
+    required this.total,
+    this.sizeName,
+    this.productId,
+    this.sizeId,
+    this.toppingIds,
+    this.sugarPercent,
+    this.ice,
+    this.unitPrice,
+  });
+
+  final LocalizedText productName;
+  final LocalizedText? sizeName;
+  final int quantity;
+  final int total;
+  final String? productId;
+  final String? sizeId;
+  final List<String>? toppingIds;
+  final int? sugarPercent;
+  final IceLevel? ice;
+  final int? unitPrice;
+
+  factory OrderHistoryItem.fromCartItem(CartItem item) => OrderHistoryItem(
+    productName: item.product.name,
+    sizeName: item.sizeOption.name,
+    quantity: item.quantity,
+    total: item.total,
+    productId: item.product.id,
+    sizeId: item.sizeId,
+    toppingIds: List.unmodifiable(item.toppingIds),
+    sugarPercent: item.sugarPercent,
+    ice: item.ice,
+    unitPrice: (item.total / item.quantity).round(),
+  );
+}
+
+class OrderHistoryEntry {
+  const OrderHistoryEntry({
+    required this.id,
+    required this.number,
+    required this.branchId,
+    required this.type,
+    required this.status,
+    required this.paymentMethod,
+    required this.readyTime,
+    required this.itemsVersion,
+    required this.items,
+    required this.total,
+    required this.pointsUsed,
+    required this.pointsEarned,
+    this.createdAt,
+  });
+
+  final String id;
+  final String number;
+  final String branchId;
+  final OrderType type;
+  final OrderStatus status;
+  final PaymentMethod paymentMethod;
+  final OrderReadyTime readyTime;
+  final int itemsVersion;
+  final List<OrderHistoryItem> items;
+  final int total;
+  final int pointsUsed;
+  final int pointsEarned;
+  final DateTime? createdAt;
+
+  bool get supportsExactRepeat => itemsVersion == 2;
+
+  factory OrderHistoryEntry.fromLocal(CustomerOrder order) => OrderHistoryEntry(
+    id: order.id,
+    number: order.id,
+    branchId: order.branch.id,
+    type: order.type,
+    status: order.status,
+    paymentMethod: order.paymentMethod,
+    readyTime: order.readyTime,
+    itemsVersion: 2,
+    items: List.unmodifiable(order.items.map(OrderHistoryItem.fromCartItem)),
+    total: order.total,
+    pointsUsed: order.pointsUsed,
+    pointsEarned: order.pointsEarned,
+  );
+}
+
+enum RepeatOrderResult {
+  success,
+  legacyOrder,
+  catalogUnavailable,
+  unavailableSelection,
+}
+
 enum OrderType {
   pickup(Icons.shopping_bag_outlined),
   scheduled(Icons.schedule_outlined),
@@ -362,18 +462,16 @@ enum RecurringPlan {
 
 class RecurringOrder {
   const RecurringOrder({
-    required this.products,
+    required this.productIds,
     required this.time,
-    required this.branch,
+    required this.branchId,
     required this.plan,
     required this.paidUntil,
   });
 
-  final List<Product> products;
+  final List<String> productIds;
   final String time;
-  final Branch branch;
+  final String branchId;
   final RecurringPlan plan;
-  final DateTime paidUntil;
-
-  int get comboPrice => products.fold(0, (sum, p) => sum + p.basePrice);
+  final DateTime? paidUntil;
 }

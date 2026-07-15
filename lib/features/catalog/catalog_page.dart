@@ -7,6 +7,7 @@ import '../../core/localization/app_localizations.dart';
 import '../../shared/app_state.dart';
 import '../../shared/widgets/common.dart';
 import '../../shared/widgets/product_card.dart';
+import '../../shared/widgets/top_notice.dart';
 
 class CatalogPage extends ConsumerStatefulWidget {
   const CatalogPage({super.key});
@@ -202,16 +203,16 @@ class _CatalogPageState extends ConsumerState<CatalogPage> {
                         key: ValueKey(product.id),
                         product: product,
                         onTap: () => context.go('/product/${product.id}'),
-                        onAdd: () {
-                          controller.quickAdd(product);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                strings.productAdded(
-                                  product.name.resolve(language),
-                                ),
-                              ),
+                        onAdd: () async {
+                          final added = await controller.quickAdd(product);
+                          if (!context.mounted || !added) return;
+                          showTopNotice(
+                            context,
+                            message: strings.productAdded(
+                              product.name.resolve(language),
                             ),
+                            actionLabel: strings.cart,
+                            onAction: () => context.go('/cart'),
                           );
                         },
                       );

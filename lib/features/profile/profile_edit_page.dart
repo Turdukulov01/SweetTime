@@ -22,7 +22,10 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
   late final TextEditingController _firstNameController;
   late final TextEditingController _lastNameController;
   DateTime? _birthDate;
-  String? _avatarPath;
+  String? _avatarUrl;
+  XFile? _pickedAvatar;
+  bool _removeAvatar = false;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -31,7 +34,7 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
     _firstNameController = TextEditingController(text: state.firstName);
     _lastNameController = TextEditingController(text: state.lastName);
     _birthDate = state.birthDate;
-    _avatarPath = state.avatarPath;
+    _avatarUrl = state.avatarUrl;
     WidgetsBinding.instance.addPostFrameCallback((_) => _retrieveLostData());
   }
 
@@ -67,7 +70,8 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
                 child: _EditableAvatar(
                   firstName: _firstNameController.text,
                   lastName: _lastNameController.text,
-                  avatarPath: _avatarPath,
+                  localPath: _pickedAvatar?.path,
+                  remoteUrl: _removeAvatar ? null : _avatarUrl,
                 ),
               ),
               const SizedBox(height: 16),
@@ -77,22 +81,33 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
                 runSpacing: 8,
                 children: [
                   OutlinedButton.icon(
-                    onPressed: () => _pickAvatar(ImageSource.gallery),
+                    onPressed: _saving
+                        ? null
+                        : () => _pickAvatar(ImageSource.gallery),
                     icon: const Icon(Icons.photo_library_outlined),
                     label: Text(strings.profileAvatarGallery),
                   ),
                   OutlinedButton.icon(
-                    onPressed: () => _pickAvatar(ImageSource.camera),
+                    onPressed: _saving
+                        ? null
+                        : () => _pickAvatar(ImageSource.camera),
                     icon: const Icon(Icons.photo_camera_outlined),
                     label: Text(strings.profileAvatarCamera),
                   ),
                 ],
               ),
-              if (_avatarPath != null) ...[
+              if (_pickedAvatar != null ||
+                  (!_removeAvatar && _avatarUrl != null)) ...[
                 const SizedBox(height: 4),
                 Center(
                   child: TextButton.icon(
-                    onPressed: () => setState(() => _avatarPath = null),
+                    onPressed: _saving
+                        ? null
+                        : () => setState(() {
+                            _pickedAvatar = null;
+                            _avatarUrl = null;
+                            _removeAvatar = true;
+                          }),
                     icon: const Icon(Icons.delete_outline),
                     label: Text(strings.profileAvatarRemove),
                   ),
@@ -169,9 +184,16 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
               ),
               const SizedBox(height: 24),
               FilledButton.icon(
-                onPressed: _save,
-                icon: const Icon(Icons.check),
-                label: Text(strings.profileSave),
+                onPressed: _saving ? null : _save,
+                icon: _saving
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.check),
+                label: Text(
+                  _saving ? strings.profileSaving : strings.profileSave,
+                ),
               ),
             ],
           ),
@@ -204,7 +226,10 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
         requestFullMetadata: false,
       );
       if (image != null && mounted) {
-        setState(() => _avatarPath = image.path);
+        setState(() {
+          _pickedAvatar = image;
+          _removeAvatar = false;
+        });
       }
     } on PlatformException {
       _showPickerError();
@@ -219,7 +244,10 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
       if (!mounted || response.isEmpty) return;
       final files = response.files;
       if (files != null && files.isNotEmpty) {
-        setState(() => _avatarPath = files.first.path);
+        setState(() {
+          _pickedAvatar = files.first;
+          _removeAvatar = false;
+        });
       } else if (response.exception != null) {
         _showPickerError();
       }
@@ -240,20 +268,45 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
     );
   }
 
-  void _save() {
+  Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
     final strings = AppLocalizations.of(context);
     final messenger = ScaffoldMessenger.of(context);
-    ref
-        .read(appStateProvider.notifier)
-        .updateProfile(
-          firstName: _firstNameController.text.trim(),
-          lastName: _lastNameController.text.trim(),
-          birthDate: _birthDate,
-          avatarPath: _avatarPath,
-          clearBirthDate: _birthDate == null,
-          clearAvatarPath: _avatarPath == null,
+    final controller = ref.read(appStateProvider.notifier);
+    controller.updateProfile(
+      firstName: _firstNameController.text.trim(),
+      lastName: _lastNameController.text.trim(),
+      birthDate: _birthDate,
+      clearBirthDate: _birthDate == null,
+    );
+
+    var avatarSaved = true;
+    final picked = _pickedAvatar;
+    if (picked != null) {
+      try {
+        avatarSaved = await controller.uploadAvatar(
+          bytes: await picked.readAsBytes(),
+          filename: picked.name,
+          contentType: picked.mimeType ?? _contentTypeForName(picked.name),
         );
+      } catch (_) {
+        avatarSaved = false;
+      }
+    } else if (_removeAvatar) {
+      avatarSaved = await controller.deleteAvatar();
+    }
+
+    if (!mounted) return;
+    if (!avatarSaved) {
+      setState(() => _saving = false);
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text(strings.profileAvatarUploadError)),
+        );
+      return;
+    }
     context.pop();
     messenger.showSnackBar(SnackBar(content: Text(strings.profileSaved)));
   }
@@ -263,17 +316,20 @@ class _EditableAvatar extends StatelessWidget {
   const _EditableAvatar({
     required this.firstName,
     required this.lastName,
-    required this.avatarPath,
+    required this.localPath,
+    required this.remoteUrl,
   });
 
   final String firstName;
   final String lastName;
-  final String? avatarPath;
+  final String? localPath;
+  final String? remoteUrl;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final path = avatarPath?.trim();
+    final path = localPath?.trim();
+    final url = remoteUrl?.trim();
     final initials = _initials(firstName, lastName);
     final fallback = initials.isEmpty
         ? const Icon(Icons.person_outline, size: 48)
@@ -291,9 +347,8 @@ class _EditableAvatar extends StatelessWidget {
         radius: 54,
         backgroundColor: theme.colorScheme.primaryContainer,
         foregroundColor: theme.colorScheme.onPrimaryContainer,
-        child: path == null || path.isEmpty
-            ? fallback
-            : ClipOval(
+        child: path != null && path.isNotEmpty
+            ? ClipOval(
                 child: Image.file(
                   File(path),
                   width: 108,
@@ -307,10 +362,34 @@ class _EditableAvatar extends StatelessWidget {
                     child: Center(child: fallback),
                   ),
                 ),
-              ),
+              )
+            : url != null && url.isNotEmpty
+            ? ClipOval(
+                child: Image.network(
+                  url,
+                  width: 108,
+                  height: 108,
+                  fit: BoxFit.cover,
+                  cacheWidth: 384,
+                  filterQuality: FilterQuality.low,
+                  errorBuilder: (context, error, stackTrace) => SizedBox(
+                    width: 108,
+                    height: 108,
+                    child: Center(child: fallback),
+                  ),
+                ),
+              )
+            : fallback,
       ),
     );
   }
+}
+
+String _contentTypeForName(String filename) {
+  final lower = filename.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  return 'image/jpeg';
 }
 
 String _initials(String firstName, String lastName) {

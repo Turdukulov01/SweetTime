@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api_client.dart';
 import '../core/auth_store.dart';
+import '../core/cart_store.dart';
 import '../core/theme/app_theme.dart';
 import 'app_models.dart';
 import 'demo_data.dart';
@@ -70,6 +72,7 @@ class SharedPreferencesLanguagePreferenceStore
 class AppState {
   const AppState({
     required this.apiConnected,
+    required this.catalogAuthoritative,
     required this.appName,
     required this.accentColor,
     required this.loyaltyEarnRate,
@@ -77,11 +80,12 @@ class AppState {
     required this.themeMode,
     required this.language,
     required this.isGuest,
+    required this.customerId,
     required this.pendingAuthReturn,
     required this.firstName,
     required this.lastName,
     required this.birthDate,
-    required this.avatarPath,
+    required this.avatarUrl,
     required this.userContact,
     required this.userCode,
     required this.invitedByCode,
@@ -104,6 +108,10 @@ class AppState {
   /// показывается только мелкой подписью в футере главной.
   final bool apiConnected;
 
+  /// True only when products and branches came from the current backend.
+  /// A reachable config endpoint alone is not enough for safe V2 reorder.
+  final bool catalogAuthoritative;
+
   /// Брендинг компании из API (или дефолт SweetTime, если офлайн).
   final String appName;
   final Color accentColor;
@@ -115,11 +123,12 @@ class AppState {
   final ThemeMode themeMode;
   final AppLanguage language;
   final bool isGuest;
+  final String? customerId;
   final AuthReturnDestination? pendingAuthReturn;
   final String firstName;
   final String lastName;
   final DateTime? birthDate;
-  final String? avatarPath;
+  final String? avatarUrl;
   final String userContact;
 
   String get userName => '$firstName $lastName'.trim();
@@ -139,7 +148,7 @@ class AppState {
   final List<String> favoriteIds;
   final List<CartItem> cart;
   final bool useBonus;
-  final List<CustomerOrder> orders;
+  final List<OrderHistoryEntry> orders;
   final List<PointEvent> pointEvents;
   final RecurringOrder? recurring;
 
@@ -171,6 +180,7 @@ class AppState {
 
   AppState copyWith({
     bool? apiConnected,
+    bool? catalogAuthoritative,
     String? appName,
     Color? accentColor,
     double? loyaltyEarnRate,
@@ -178,11 +188,12 @@ class AppState {
     ThemeMode? themeMode,
     AppLanguage? language,
     bool? isGuest,
+    String? customerId,
     AuthReturnDestination? pendingAuthReturn,
     String? firstName,
     String? lastName,
     DateTime? birthDate,
-    String? avatarPath,
+    String? avatarUrl,
     String? userContact,
     String? invitedByCode,
     int? points,
@@ -195,17 +206,19 @@ class AppState {
     List<String>? favoriteIds,
     List<CartItem>? cart,
     bool? useBonus,
-    List<CustomerOrder>? orders,
+    List<OrderHistoryEntry>? orders,
     List<PointEvent>? pointEvents,
     RecurringOrder? recurring,
     bool clearBirthDate = false,
-    bool clearAvatarPath = false,
+    bool clearAvatarUrl = false,
+    bool clearCustomerId = false,
     bool clearInvitedByCode = false,
     bool clearPendingAuthReturn = false,
     bool clearRecurring = false,
   }) {
     return AppState(
       apiConnected: apiConnected ?? this.apiConnected,
+      catalogAuthoritative: catalogAuthoritative ?? this.catalogAuthoritative,
       appName: appName ?? this.appName,
       accentColor: accentColor ?? this.accentColor,
       loyaltyEarnRate: loyaltyEarnRate ?? this.loyaltyEarnRate,
@@ -213,13 +226,14 @@ class AppState {
       themeMode: themeMode ?? this.themeMode,
       language: language ?? this.language,
       isGuest: isGuest ?? this.isGuest,
+      customerId: clearCustomerId ? null : (customerId ?? this.customerId),
       pendingAuthReturn: clearPendingAuthReturn
           ? null
           : (pendingAuthReturn ?? this.pendingAuthReturn),
       firstName: firstName ?? this.firstName,
       lastName: lastName ?? this.lastName,
       birthDate: clearBirthDate ? null : (birthDate ?? this.birthDate),
-      avatarPath: clearAvatarPath ? null : (avatarPath ?? this.avatarPath),
+      avatarUrl: clearAvatarUrl ? null : (avatarUrl ?? this.avatarUrl),
       userContact: userContact ?? this.userContact,
       userCode: userCode,
       invitedByCode: clearInvitedByCode
@@ -246,53 +260,69 @@ class AppStateController extends StateNotifier<AppState> {
   AppStateController({
     LanguagePreferenceStore? languagePreferences,
     AuthStore? authStore,
+    CartStore? cartStore,
     ApiClient? api,
   }) : _languagePreferences =
            languagePreferences ?? SharedPreferencesLanguagePreferenceStore(),
        _authStore = authStore ?? SecureAuthStore(),
+       _cartStore =
+           cartStore ??
+           SharedPreferencesCartStore(companyId: api?.companyId ?? 'sweettime'),
        _api = api ?? ApiClient(),
        super(
-        AppState(
-          apiConnected: false,
-          appName: 'SweetTime',
-          accentColor: AppColors.candy500,
-          loyaltyEarnRate: Loyalty.earnRate,
-          loyaltyMaxSpendShare: Loyalty.maxSpendShare,
-          themeMode: ThemeMode.light,
-          language: AppLanguage.ru,
-          isGuest: true,
-          pendingAuthReturn: null,
-          firstName: '',
-          lastName: '',
-          birthDate: null,
-          avatarPath: null,
-          userContact: '',
-          userCode: DemoData.demoUserCode,
-          invitedByCode: null,
-          points: DemoData.demoPoints,
-          branches: DemoData.branches,
-          selectedBranch: DemoData.branches.first,
-          categories: DemoData.categories,
-          products: DemoData.products,
-          promotions: DemoData.promotions,
-          newsStories: DemoData.newsStories,
-          favoriteIds: DemoData.favoriteIds,
-          cart: const [],
-          useBonus: false,
-          orders: const [],
-          pointEvents: DemoData.pointEvents,
-          recurring: null,
-        ),
-      );
+         AppState(
+           apiConnected: false,
+           catalogAuthoritative: false,
+           appName: 'SweetTime',
+           accentColor: AppColors.candy500,
+           loyaltyEarnRate: Loyalty.earnRate,
+           loyaltyMaxSpendShare: Loyalty.maxSpendShare,
+           themeMode: ThemeMode.light,
+           language: AppLanguage.ru,
+           isGuest: true,
+           customerId: null,
+           pendingAuthReturn: null,
+           firstName: '',
+           lastName: '',
+           birthDate: null,
+           avatarUrl: null,
+           userContact: '',
+           userCode: DemoData.demoUserCode,
+           invitedByCode: null,
+           points: DemoData.demoPoints,
+           branches: DemoData.branches,
+           selectedBranch: DemoData.branches.first,
+           categories: DemoData.categories,
+           products: DemoData.products,
+           promotions: DemoData.promotions,
+           newsStories: DemoData.newsStories,
+           favoriteIds: DemoData.favoriteIds,
+           cart: const [],
+           useBonus: false,
+           orders: const [],
+           pointEvents: DemoData.pointEvents,
+           recurring: null,
+         ),
+       );
 
   final ApiClient _api;
   final LanguagePreferenceStore _languagePreferences;
+  final CartStore _cartStore;
 
   /// Токены сессии на устройстве: вход переживает перезапуск приложения.
   final AuthStore _authStore;
   static const languagePreferenceKey = 'app_language';
   static const themePreferenceKey = 'app_theme_mode';
   bool _bootstrapped = false;
+  int _accountEpoch = 0;
+  bool _favoritesSyncRunning = false;
+  bool _favoritesSyncDirty = false;
+  Completer<void>? _favoritesSyncCompleter;
+  int _cartRevision = 0;
+  bool _cartPersistRunning = false;
+  bool _cartPersistDirty = false;
+  Completer<void>? _cartPersistCompleter;
+  int _recurringMutationRevision = 0;
 
   /// Однократная попытка подключиться к demo-API при старте (таймаут 2 с
   /// на запрос внутри [ApiClient]). При успехе подменяем каталог/филиалы и
@@ -301,6 +331,8 @@ class AppStateController extends StateNotifier<AppState> {
   Future<void> bootstrap() async {
     if (_bootstrapped) return;
     _bootstrapped = true;
+    final cartRevision = _cartRevision;
+    final cartDraftFuture = _readCartDraft();
     try {
       final savedLanguage = await _languagePreferences.readLanguageCode();
       final language = AppLanguage.values.where(
@@ -320,7 +352,72 @@ class AppStateController extends StateNotifier<AppState> {
       // Настройки языка/темы не должны блокировать автономный запуск приложения.
     }
     await _loadCompanyData();
+    await _restoreCart(cartDraftFuture, cartRevision);
     await _restoreSession();
+  }
+
+  Future<List<CartDraftItem>> _readCartDraft() async {
+    try {
+      return await _cartStore.read();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _restoreCart(
+    Future<List<CartDraftItem>> cartDraftFuture,
+    int revisionAtStart,
+  ) async {
+    final draft = await cartDraftFuture;
+    if (revisionAtStart != _cartRevision || draft.isEmpty) return;
+
+    final restored = <CartItem>[];
+    for (final stored in draft) {
+      if (stored.quantity <= 0 ||
+          stored.quantity > 99 ||
+          !DemoData.sugarLevels.contains(stored.sugarPercent)) {
+        continue;
+      }
+      final product = state.products
+          .where((candidate) => candidate.id == stored.productId)
+          .firstOrNull;
+      if (product == null) continue;
+      final size = product.sizes
+          .where((candidate) => candidate.id == stored.sizeId)
+          .firstOrNull;
+      if (size == null) continue;
+      final ice = IceLevel.values
+          .where((candidate) => candidate.name == stored.ice)
+          .firstOrNull;
+      if (ice == null) continue;
+
+      final toppingIds = <String>[];
+      var toppingPrice = 0;
+      for (final toppingId in stored.toppingIds) {
+        final topping = product.toppings
+            .where((candidate) => candidate.id == toppingId)
+            .firstOrNull;
+        if (topping == null || toppingIds.contains(topping.id)) continue;
+        toppingIds.add(topping.id);
+        toppingPrice += topping.priceDelta;
+      }
+      final unitPrice = product.basePrice + size.priceDelta + toppingPrice;
+      restored.add(
+        CartItem(
+          product: product,
+          quantity: stored.quantity,
+          sizeId: size.id,
+          sugarPercent: stored.sugarPercent,
+          ice: ice,
+          toppingIds: List.unmodifiable(toppingIds),
+          total: unitPrice * stored.quantity,
+        ),
+      );
+    }
+
+    if (revisionAtStart != _cartRevision) return;
+    state = state.copyWith(cart: List.unmodifiable(restored), useBonus: false);
+    await _queueCartPersist();
   }
 
   Future<void> _loadCompanyData() async {
@@ -332,6 +429,11 @@ class AppStateController extends StateNotifier<AppState> {
       // Контент витрины из админки; при ошибке остаётся локальный demo.
       final news = await _api.fetchNews();
       final promotions = await _api.fetchPromotions();
+      final catalogAuthoritative =
+          products != null &&
+          products.isNotEmpty &&
+          branches != null &&
+          branches.isNotEmpty;
 
       final nextProducts = (products == null || products.isEmpty)
           ? state.products
@@ -352,6 +454,7 @@ class AppStateController extends StateNotifier<AppState> {
 
       state = state.copyWith(
         apiConnected: true,
+        catalogAuthoritative: catalogAuthoritative,
         appName: config.appName,
         accentColor: config.accentColor,
         loyaltyEarnRate: config.earnRate,
@@ -390,6 +493,9 @@ class AppStateController extends StateNotifier<AppState> {
       switch (result.status) {
         case ApiAuthStatus.ok:
           _applyCustomerProfile(result.value!);
+          await _loadCustomerFavorites();
+          await _loadCustomerOrders();
+          await _loadCustomerRecurring();
         case ApiAuthStatus.rejected:
           await _authStore.clear();
         case ApiAuthStatus.unavailable:
@@ -426,13 +532,61 @@ class AppStateController extends StateNotifier<AppState> {
   void _applyCustomerProfile(CustomerProfile profile) {
     state = state.copyWith(
       isGuest: false,
+      customerId: profile.id,
       firstName: profile.firstName,
       lastName: profile.lastName,
       birthDate: profile.birthDate,
       clearBirthDate: profile.birthDate == null,
       userContact: profile.phone,
       points: profile.points,
+      avatarUrl: profile.avatarUrl,
+      clearAvatarUrl: profile.avatarUrl == null,
     );
+  }
+
+  Future<void> _loadCustomerFavorites() async {
+    final epoch = _accountEpoch;
+    final customerId = state.customerId;
+    if (state.isGuest || customerId == null) return;
+    final result = await _withCustomerToken(_api.fetchCustomerFavorites);
+    if (!result.isOk) return;
+    if (epoch != _accountEpoch ||
+        state.isGuest ||
+        state.customerId != customerId) {
+      return;
+    }
+    state = state.copyWith(favoriteIds: List.unmodifiable(result.value!));
+  }
+
+  Future<void> _loadCustomerOrders() async {
+    final epoch = _accountEpoch;
+    final customerId = state.customerId;
+    if (state.isGuest || customerId == null) return;
+    final result = await _withCustomerToken(_api.fetchCustomerOrders);
+    if (!result.isOk) return;
+    if (epoch != _accountEpoch ||
+        state.isGuest ||
+        state.customerId != customerId) {
+      return;
+    }
+    state = state.copyWith(orders: List.unmodifiable(result.value!));
+  }
+
+  Future<void> _loadCustomerRecurring() async {
+    final epoch = _accountEpoch;
+    final customerId = state.customerId;
+    if (state.isGuest || customerId == null) return;
+    final result = await _withCustomerToken(_api.fetchCustomerRecurring);
+    if (!result.isOk) return;
+    if (epoch != _accountEpoch ||
+        state.isGuest ||
+        state.customerId != customerId) {
+      return;
+    }
+    final recurring = result.value;
+    state = recurring == null
+        ? state.copyWith(clearRecurring: true)
+        : state.copyWith(recurring: recurring);
   }
 
   /// Вход по OTP через API: токены сохраняются на устройстве, профиль
@@ -456,6 +610,9 @@ class AppStateController extends StateNotifier<AppState> {
         }
         login(phone);
         _applyCustomerProfile(session.profile);
+        await _loadCustomerFavorites();
+        await _loadCustomerOrders();
+        await _loadCustomerRecurring();
         return true;
       case ApiAuthStatus.rejected:
         return false;
@@ -487,8 +644,8 @@ class AppStateController extends StateNotifier<AppState> {
     required String readyTime,
     required List<CartItem> items,
     required Branch branch,
-    required int total,
     required int pointsUsed,
+    PaymentMethod paymentMethod = PaymentMethod.mock,
   }) async {
     if (state.isGuest || items.isEmpty) return null;
     String? accessToken;
@@ -497,7 +654,7 @@ class AppStateController extends StateNotifier<AppState> {
     } catch (_) {
       accessToken = null;
     }
-    return _api.createOrder(
+    final created = await _api.createOrder(
       accessToken: accessToken,
       branchId: branch.id,
       type: switch (type) {
@@ -509,15 +666,25 @@ class AppStateController extends StateNotifier<AppState> {
       items: [
         for (final item in items)
           {
-            'productName': item.product.name.resolve(state.language),
-            'size': item.sizeId,
+            'productId': item.product.id,
+            'sizeId': item.sizeId,
+            'toppingIds': item.toppingIds,
+            'sugarPercent': item.sugarPercent,
+            'ice': item.ice.name,
             'quantity': item.quantity,
-            'total': item.total,
           },
       ],
-      total: total,
+      paymentMethod: switch (paymentMethod) {
+        PaymentMethod.mock => 'mock',
+        PaymentMethod.cash => 'cash',
+        PaymentMethod.qrDemo => 'qr',
+      },
       pointsUsed: pointsUsed,
     );
+    if (created != null && accessToken != null) {
+      await _loadCustomerOrders();
+    }
+    return created;
   }
 
   void toggleTheme() {
@@ -555,15 +722,19 @@ class AppStateController extends StateNotifier<AppState> {
   }
 
   void login(String phone) {
+    _accountEpoch++;
+    _favoritesSyncDirty = false;
     state = state.copyWith(
       isGuest: false,
+      clearCustomerId: true,
       firstName: '',
       lastName: '',
       clearBirthDate: true,
-      clearAvatarPath: true,
+      clearAvatarUrl: true,
       userContact: phone,
       clearInvitedByCode: true,
       points: 0,
+      favoriteIds: const [],
       orders: const [],
       pointEvents: const [],
       clearRecurring: true,
@@ -589,22 +760,18 @@ class AppStateController extends StateNotifier<AppState> {
 
   /// Имя/фамилия/дата рождения. Локально применяем сразу (UI не ждёт сеть),
   /// затем сохраняем на сервере — там профиль переживает переустановку.
-  /// Аватар остаётся локальным: серверной загрузки файлов пока нет (CX-013).
+  /// Аватар загружается отдельно multipart-запросом в [uploadAvatar].
   void updateProfile({
     required String firstName,
     required String lastName,
     DateTime? birthDate,
-    String? avatarPath,
     bool clearBirthDate = false,
-    bool clearAvatarPath = false,
   }) {
     state = state.copyWith(
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       birthDate: birthDate,
-      avatarPath: avatarPath,
       clearBirthDate: clearBirthDate,
-      clearAvatarPath: clearAvatarPath,
     );
     unawaited(
       _syncProfileToServer(
@@ -613,6 +780,53 @@ class AppStateController extends StateNotifier<AppState> {
         birthDate: state.birthDate,
       ),
     );
+  }
+
+  /// Аватар хранится на сервере. Локальный путь image_picker используется
+  /// только для предпросмотра и никогда не становится данными профиля.
+  Future<bool> uploadAvatar({
+    required List<int> bytes,
+    required String filename,
+    required String contentType,
+  }) async {
+    final result = await _withCustomerToken(
+      (token) => _api.uploadCustomerAvatar(
+        token,
+        bytes: bytes,
+        filename: filename,
+        contentType: contentType,
+      ),
+    );
+    if (!result.isOk) return false;
+    _applyCustomerProfile(result.value!);
+    return true;
+  }
+
+  Future<bool> deleteAvatar() async {
+    final result = await _withCustomerToken(_api.deleteCustomerAvatar);
+    if (!result.isOk) return false;
+    state = state.copyWith(clearAvatarUrl: true);
+    return true;
+  }
+
+  Future<ApiResult<T>> _withCustomerToken<T>(
+    Future<ApiResult<T>> Function(String token) request,
+  ) async {
+    try {
+      var token = await _authStore.readAccessToken();
+      if (token == null || token.isEmpty) {
+        return ApiResult<T>.unavailable();
+      }
+      var result = await request(token);
+      if (result.isRejected) {
+        token = await _refreshAccessToken();
+        if (token == null) return ApiResult<T>.rejected();
+        result = await request(token);
+      }
+      return result;
+    } catch (_) {
+      return ApiResult<T>.unavailable();
+    }
   }
 
   /// `PATCH auth/customer/me`. Без токена (демо-вход офлайн) — тихо выходим:
@@ -655,21 +869,27 @@ class AppStateController extends StateNotifier<AppState> {
       '${date.day.toString().padLeft(2, '0')}';
 
   void logout() {
+    _accountEpoch++;
+    _favoritesSyncDirty = false;
     unawaited(_clearTokens());
     state = state.copyWith(
       isGuest: true,
+      clearCustomerId: true,
       firstName: '',
       lastName: '',
       clearBirthDate: true,
-      clearAvatarPath: true,
+      clearAvatarUrl: true,
       userContact: '',
       clearPendingAuthReturn: true,
       clearInvitedByCode: true,
       points: 0,
+      favoriteIds: const [],
       orders: const [],
       pointEvents: const [],
       clearRecurring: true,
     );
+    _cartRevision++;
+    unawaited(_queueCartPersist());
   }
 
   /// Токены с устройства убираем всегда, даже если хранилище ругнулось:
@@ -682,16 +902,19 @@ class AppStateController extends StateNotifier<AppState> {
     }
   }
 
-  void deleteAccount() {
+  Future<void> deleteAccount() async {
     // Серверного удаления аккаунта ещё нет: убираем токены, чтобы устройство
     // не восстановило сессию, и чистим локальные данные, как раньше.
+    _accountEpoch++;
+    _favoritesSyncDirty = false;
     unawaited(_clearTokens());
     state = state.copyWith(
       isGuest: true,
+      clearCustomerId: true,
       firstName: '',
       lastName: '',
       clearBirthDate: true,
-      clearAvatarPath: true,
+      clearAvatarUrl: true,
       userContact: '',
       clearPendingAuthReturn: true,
       clearInvitedByCode: true,
@@ -703,13 +926,15 @@ class AppStateController extends StateNotifier<AppState> {
       pointEvents: const [],
       clearRecurring: true,
     );
+    _cartRevision++;
+    await _queueCartPersist();
   }
 
   void selectBranch(Branch branch) {
     state = state.copyWith(selectedBranch: branch);
   }
 
-  void toggleFavorite(Product product) {
+  Future<void> toggleFavorite(Product product) async {
     final ids = [...state.favoriteIds];
     if (ids.contains(product.id)) {
       ids.remove(product.id);
@@ -717,10 +942,51 @@ class AppStateController extends StateNotifier<AppState> {
       ids.add(product.id);
     }
     state = state.copyWith(favoriteIds: ids);
+    if (state.isGuest || state.customerId == null) return;
+    await _queueFavoritesSync();
   }
 
-  void quickAdd(Product product) {
-    if (product.sizes.isEmpty) return;
+  Future<void> _queueFavoritesSync() {
+    _favoritesSyncDirty = true;
+    final completer = _favoritesSyncCompleter ??= Completer<void>();
+    if (!_favoritesSyncRunning) unawaited(_drainFavoritesSync());
+    return completer.future;
+  }
+
+  Future<void> _drainFavoritesSync() async {
+    if (_favoritesSyncRunning) return;
+    _favoritesSyncRunning = true;
+    try {
+      while (_favoritesSyncDirty) {
+        _favoritesSyncDirty = false;
+        final epoch = _accountEpoch;
+        final customerId = state.customerId;
+        if (state.isGuest || customerId == null) continue;
+        final requestedIds = List<String>.unmodifiable(state.favoriteIds);
+        final result = await _withCustomerToken(
+          (token) => _api.replaceCustomerFavorites(token, requestedIds),
+        );
+        if (!result.isOk ||
+            epoch != _accountEpoch ||
+            state.isGuest ||
+            state.customerId != customerId ||
+            !listEquals(state.favoriteIds, requestedIds)) {
+          continue;
+        }
+        state = state.copyWith(favoriteIds: List.unmodifiable(result.value!));
+      }
+    } finally {
+      _favoritesSyncRunning = false;
+      final completer = _favoritesSyncCompleter;
+      _favoritesSyncCompleter = null;
+      if (completer != null && !completer.isCompleted) completer.complete();
+    }
+  }
+
+  Future<bool> quickAdd(Product product) async {
+    if (!product.availableIn(state.selectedBranch) || product.sizes.isEmpty) {
+      return false;
+    }
 
     final size = product.sizes.firstWhere(
       (option) => option.id == 'm',
@@ -730,37 +996,59 @@ class AppStateController extends StateNotifier<AppState> {
         .where((option) => option.id == 'tapioca')
         .firstOrNull;
 
-    addConfigured(
+    return addConfigured(
       product,
       sizeId: size.id,
       sugarPercent: 50,
       ice: IceLevel.regular,
       toppingIds: topping == null ? const [] : [topping.id],
-      total: product.basePrice + size.priceDelta + (topping?.priceDelta ?? 0),
     );
   }
 
-  void addConfigured(
+  Future<bool> addConfigured(
     Product product, {
     required String sizeId,
     required int sugarPercent,
     required IceLevel ice,
     required List<String> toppingIds,
-    required int total,
-  }) {
+  }) async {
+    final currentProduct = state.products
+        .where((candidate) => candidate.id == product.id)
+        .firstOrNull;
+    if (currentProduct == null ||
+        !currentProduct.availableIn(state.selectedBranch) ||
+        !DemoData.sugarLevels.contains(sugarPercent) ||
+        toppingIds.length != toppingIds.toSet().length) {
+      return false;
+    }
+    final size = currentProduct.sizes
+        .where((candidate) => candidate.id == sizeId)
+        .firstOrNull;
+    if (size == null) return false;
+    var toppingPrice = 0;
+    for (final toppingId in toppingIds) {
+      final topping = currentProduct.toppings
+          .where((candidate) => candidate.id == toppingId)
+          .firstOrNull;
+      if (topping == null) return false;
+      toppingPrice += topping.priceDelta;
+    }
     final item = CartItem(
-      product: product,
+      product: currentProduct,
       quantity: 1,
-      sizeId: sizeId,
+      sizeId: size.id,
       sugarPercent: sugarPercent,
       ice: ice,
-      toppingIds: toppingIds,
-      total: total,
+      toppingIds: List.unmodifiable(toppingIds),
+      total: currentProduct.basePrice + size.priceDelta + toppingPrice,
     );
     state = state.copyWith(cart: [...state.cart, item]);
+    _cartRevision++;
+    await _queueCartPersist();
+    return true;
   }
 
-  void updateQuantity(int index, int delta) {
+  Future<void> updateQuantity(int index, int delta) async {
     final cart = [...state.cart];
     final item = cart[index];
     final unitPrice = (item.total / item.quantity).round();
@@ -774,11 +1062,15 @@ class AppStateController extends StateNotifier<AppState> {
       );
     }
     state = state.copyWith(cart: cart);
+    _cartRevision++;
+    await _queueCartPersist();
   }
 
-  void removeFromCart(int index) {
+  Future<void> removeFromCart(int index) async {
     final cart = [...state.cart]..removeAt(index);
     state = state.copyWith(cart: cart);
+    _cartRevision++;
+    await _queueCartPersist();
   }
 
   void setUseBonus(bool value) {
@@ -809,7 +1101,7 @@ class AppStateController extends StateNotifier<AppState> {
     state = state.copyWith(
       cart: const [],
       useBonus: false,
-      orders: [order, ...state.orders],
+      orders: [OrderHistoryEntry.fromLocal(order), ...state.orders],
       points: state.points - pointsUsed + earned,
       pointEvents: [
         PointEvent(
@@ -834,34 +1126,184 @@ class AppStateController extends StateNotifier<AppState> {
         ...state.pointEvents,
       ],
     );
+    _cartRevision++;
+    unawaited(_queueCartPersist());
     return order;
   }
 
-  void repeatOrder(CustomerOrder order) {
-    state = state.copyWith(cart: [...state.cart, ...order.items]);
+  Future<RepeatOrderResult> repeatOrder(OrderHistoryEntry order) async {
+    if (!order.supportsExactRepeat) return RepeatOrderResult.legacyOrder;
+    if (!state.catalogAuthoritative) {
+      return RepeatOrderResult.catalogUnavailable;
+    }
+
+    final repeatedItems = <CartItem>[];
+    for (final item in order.items) {
+      final productId = item.productId;
+      final sizeId = item.sizeId;
+      final toppingIds = item.toppingIds;
+      final sugarPercent = item.sugarPercent;
+      final ice = item.ice;
+      if (productId == null ||
+          sizeId == null ||
+          toppingIds == null ||
+          sugarPercent == null ||
+          ice == null) {
+        return RepeatOrderResult.unavailableSelection;
+      }
+      final product = state.products
+          .where((candidate) => candidate.id == productId)
+          .firstOrNull;
+      if (product == null || !product.availableIn(state.selectedBranch)) {
+        return RepeatOrderResult.unavailableSelection;
+      }
+      final size = product.sizes
+          .where((candidate) => candidate.id == sizeId)
+          .firstOrNull;
+      if (size == null || toppingIds.length != toppingIds.toSet().length) {
+        return RepeatOrderResult.unavailableSelection;
+      }
+
+      var toppingPrice = 0;
+      for (final toppingId in toppingIds) {
+        final topping = product.toppings
+            .where((candidate) => candidate.id == toppingId)
+            .firstOrNull;
+        if (topping == null) return RepeatOrderResult.unavailableSelection;
+        toppingPrice += topping.priceDelta;
+      }
+      final unitPrice = product.basePrice + size.priceDelta + toppingPrice;
+      repeatedItems.add(
+        CartItem(
+          product: product,
+          quantity: item.quantity,
+          sizeId: size.id,
+          sugarPercent: sugarPercent,
+          ice: ice,
+          toppingIds: List.unmodifiable(toppingIds),
+          total: unitPrice * item.quantity,
+        ),
+      );
+    }
+
+    state = state.copyWith(cart: [...state.cart, ...repeatedItems]);
+    _cartRevision++;
+    await _queueCartPersist();
+    return RepeatOrderResult.success;
   }
 
-  /// Постоянный заказ с предоплатой вперёд (день/неделя/месяц).
-  void setRecurring({
+  Future<void> _queueCartPersist() {
+    _cartPersistDirty = true;
+    final completer = _cartPersistCompleter ??= Completer<void>();
+    if (!_cartPersistRunning) unawaited(_drainCartPersist());
+    return completer.future;
+  }
+
+  Future<void> _drainCartPersist() async {
+    if (_cartPersistRunning) return;
+    _cartPersistRunning = true;
+    try {
+      while (_cartPersistDirty) {
+        _cartPersistDirty = false;
+        final snapshot = List<CartDraftItem>.unmodifiable([
+          for (final item in state.cart)
+            CartDraftItem(
+              productId: item.product.id,
+              quantity: item.quantity,
+              sizeId: item.sizeId,
+              sugarPercent: item.sugarPercent,
+              ice: item.ice.name,
+              toppingIds: List.unmodifiable(item.toppingIds),
+            ),
+        ]);
+        try {
+          await _cartStore.write(snapshot);
+        } catch (_) {
+          // Корзина уже обновлена в UI; временная ошибка локального хранилища
+          // не должна ломать покупки в текущей сессии.
+        }
+      }
+    } finally {
+      _cartPersistRunning = false;
+      final completer = _cartPersistCompleter;
+      _cartPersistCompleter = null;
+      if (completer != null && !completer.isCompleted) completer.complete();
+    }
+  }
+
+  /// Постоянный заказ с demo-предоплатой. Состояние меняется только после
+  /// подтверждения API: это платный server-scoped объект, а не локальный draft.
+  Future<bool> setRecurring({
     required List<Product> products,
     required String time,
     required Branch branch,
     required RecurringPlan plan,
-  }) {
-    final paidUntil = DateTime.now().add(Duration(days: plan.days));
-    state = state.copyWith(
-      recurring: RecurringOrder(
-        products: products,
+  }) async {
+    if (state.isGuest ||
+        !state.catalogAuthoritative ||
+        products.isEmpty ||
+        !RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(time)) {
+      return false;
+    }
+    final currentBranch = state.branches
+        .where((candidate) => candidate.id == branch.id)
+        .firstOrNull;
+    if (currentBranch == null) return false;
+    final productIds = <String>[];
+    for (final requested in products) {
+      final currentProduct = state.products
+          .where((candidate) => candidate.id == requested.id)
+          .firstOrNull;
+      if (currentProduct == null ||
+          !currentProduct.availableIn(currentBranch) ||
+          productIds.contains(currentProduct.id)) {
+        return false;
+      }
+      productIds.add(currentProduct.id);
+    }
+
+    final epoch = _accountEpoch;
+    final mutationRevision = ++_recurringMutationRevision;
+    final customerId = state.customerId;
+    if (customerId == null) return false;
+    final result = await _withCustomerToken(
+      (token) => _api.replaceCustomerRecurring(
+        token,
+        productIds: productIds,
         time: time,
-        branch: branch,
+        branchId: currentBranch.id,
         plan: plan,
-        paidUntil: paidUntil,
       ),
     );
+    final recurring = result.value;
+    if (!result.isOk ||
+        recurring == null ||
+        mutationRevision != _recurringMutationRevision ||
+        epoch != _accountEpoch ||
+        state.isGuest ||
+        state.customerId != customerId) {
+      return false;
+    }
+    state = state.copyWith(recurring: recurring);
+    return true;
   }
 
-  void cancelRecurring() {
+  Future<bool> cancelRecurring() async {
+    if (state.isGuest || state.recurring == null) return false;
+    final epoch = _accountEpoch;
+    final mutationRevision = ++_recurringMutationRevision;
+    final customerId = state.customerId;
+    if (customerId == null) return false;
+    final result = await _withCustomerToken(_api.deleteCustomerRecurring);
+    if (!result.isOk ||
+        mutationRevision != _recurringMutationRevision ||
+        epoch != _accountEpoch ||
+        state.isGuest ||
+        state.customerId != customerId) {
+      return false;
+    }
     state = state.copyWith(clearRecurring: true);
+    return true;
   }
 
   /// Привязка по коду друга. Правила анти-накрутки — docs/design/REFERRAL_LOGIC.md:
@@ -907,7 +1349,7 @@ class AppStateController extends StateNotifier<AppState> {
         firstName: DemoData.demoUserFirstName,
         lastName: DemoData.demoUserLastName,
         clearBirthDate: true,
-        clearAvatarPath: true,
+        clearAvatarUrl: true,
         userContact: DemoData.demoUserPhone,
       );
     }
@@ -941,52 +1383,56 @@ class AppStateController extends StateNotifier<AppState> {
     if (history) {
       next = next.copyWith(
         orders: [
-          CustomerOrder(
-            id: 'SW-1048',
-            items: [
-              CartItem(
-                product: DemoData.products[0],
-                quantity: 1,
-                sizeId: 'm',
-                sugarPercent: 50,
-                ice: IceLevel.regular,
-                toppingIds: const ['tapioca'],
-                total: 400,
-              ),
-            ],
-            branch: DemoData.branches.first,
-            type: OrderType.pickup,
-            status: OrderStatus.preparing,
-            paymentMethod: PaymentMethod.mock,
-            readyTime: const OrderReadyTime(kind: OrderReadyTimeKind.asap),
-            total: 640,
-            pointsUsed: 0,
-            pointsEarned: 32,
-          ),
-          CustomerOrder(
-            id: 'SW-1031',
-            items: [
-              CartItem(
-                product: DemoData.products[2],
-                quantity: 1,
-                sizeId: 'm',
-                sugarPercent: 30,
-                ice: IceLevel.regular,
-                toppingIds: const [],
-                total: 700,
-              ),
-            ],
-            branch: DemoData.branches[1],
-            type: OrderType.scheduled,
-            status: OrderStatus.completed,
-            paymentMethod: PaymentMethod.cash,
-            readyTime: const OrderReadyTime(
-              kind: OrderReadyTimeKind.scheduled,
-              value: '11:00',
+          OrderHistoryEntry.fromLocal(
+            CustomerOrder(
+              id: 'SW-1048',
+              items: [
+                CartItem(
+                  product: DemoData.products[0],
+                  quantity: 1,
+                  sizeId: 'm',
+                  sugarPercent: 50,
+                  ice: IceLevel.regular,
+                  toppingIds: const ['tapioca'],
+                  total: 400,
+                ),
+              ],
+              branch: DemoData.branches.first,
+              type: OrderType.pickup,
+              status: OrderStatus.preparing,
+              paymentMethod: PaymentMethod.mock,
+              readyTime: const OrderReadyTime(kind: OrderReadyTimeKind.asap),
+              total: 640,
+              pointsUsed: 0,
+              pointsEarned: 32,
             ),
-            total: 700,
-            pointsUsed: 0,
-            pointsEarned: 35,
+          ),
+          OrderHistoryEntry.fromLocal(
+            CustomerOrder(
+              id: 'SW-1031',
+              items: [
+                CartItem(
+                  product: DemoData.products[2],
+                  quantity: 1,
+                  sizeId: 'm',
+                  sugarPercent: 30,
+                  ice: IceLevel.regular,
+                  toppingIds: const [],
+                  total: 700,
+                ),
+              ],
+              branch: DemoData.branches[1],
+              type: OrderType.scheduled,
+              status: OrderStatus.completed,
+              paymentMethod: PaymentMethod.cash,
+              readyTime: const OrderReadyTime(
+                kind: OrderReadyTimeKind.scheduled,
+                value: '11:00',
+              ),
+              total: 700,
+              pointsUsed: 0,
+              pointsEarned: 35,
+            ),
           ),
         ],
       );
@@ -994,9 +1440,9 @@ class AppStateController extends StateNotifier<AppState> {
     if (recurring) {
       next = next.copyWith(
         recurring: RecurringOrder(
-          products: [DemoData.products[0]],
+          productIds: [DemoData.products[0].id],
           time: '11:00',
-          branch: DemoData.branches.first,
+          branchId: DemoData.branches.first.id,
           plan: RecurringPlan.week,
           paidUntil: DateTime.now().add(const Duration(days: 7)),
         ),

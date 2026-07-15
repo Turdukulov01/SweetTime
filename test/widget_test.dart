@@ -1,8 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sweettime/core/api_client.dart';
 import 'package:sweettime/core/auth_store.dart';
+import 'package:sweettime/core/cart_store.dart';
 import 'package:sweettime/core/format.dart';
 import 'package:sweettime/core/localization/app_localizations.dart';
 import 'package:sweettime/core/router.dart';
@@ -11,6 +14,87 @@ import 'package:sweettime/main.dart';
 import 'package:sweettime/shared/app_models.dart';
 import 'package:sweettime/shared/app_state.dart';
 import 'package:sweettime/shared/demo_data.dart';
+
+const _testCustomerProfile = CustomerProfile(
+  id: 'c-test',
+  phone: '+996700123456',
+  firstName: 'Test',
+  lastName: 'Customer',
+  birthDate: null,
+  points: 0,
+  referralCode: null,
+  invitedByCode: null,
+);
+
+Map<String, dynamic> _v2OrderJson({
+  int itemTotal = 430,
+  int orderTotal = 430,
+}) => <String, dynamic>{
+  'id': 'o-2001',
+  'number': 'SW-2001',
+  'customerName': 'Test Customer',
+  'branchId': DemoData.branches.first.id,
+  'type': 'pickup',
+  'status': 'preparing',
+  'readyTime': 'asap',
+  'itemsVersion': 2,
+  'items': <Map<String, dynamic>>[
+    {
+      'productName': {
+        'ru': 'Розовая луна с молочным чаем',
+        'ky': 'Кызгылт ай сүттүү чайы',
+        'en': 'Pink Moon milk tea',
+      },
+      'size': 'M',
+      'quantity': 1,
+      'total': itemTotal,
+      'productId': DemoData.products.first.id,
+      'sizeId': 'm',
+      'toppingIds': ['tapioca'],
+      'sugarPercent': 50,
+      'ice': 'regular',
+      'unitPrice': itemTotal,
+    },
+  ],
+  'total': orderTotal,
+  'paymentMethod': 'qr',
+  'pointsUsed': 0,
+  'pointsEarned': 21,
+  'createdAt': '2026-07-15T12:00:00Z',
+};
+
+Map<String, dynamic> _v1OrderJson() => <String, dynamic>{
+  'id': 'o-legacy',
+  'number': 'SW-1001',
+  'customerName': 'Test Customer',
+  'branchId': DemoData.branches.first.id,
+  'type': 'pickup',
+  'status': 'done',
+  'readyTime': 'asap',
+  'itemsVersion': 1,
+  'items': <Map<String, dynamic>>[
+    {
+      'productName': DemoData.products.first.name.ru,
+      'size': 'M',
+      'quantity': 1,
+      'total': 400,
+    },
+  ],
+  'total': 400,
+  'paymentMethod': 'cash',
+  'pointsUsed': 0,
+  'pointsEarned': 20,
+  'createdAt': '2026-07-01T12:00:00Z',
+};
+
+Map<String, dynamic> _recurringJson({String? paidUntil}) => <String, dynamic>{
+  'productIds': [DemoData.products.first.id],
+  'time': '11:00',
+  'branchId': DemoData.branches.first.id,
+  'plan': 'week',
+  'paidUntil': paidUntil ?? '2026-07-22T12:00:00Z',
+  'active': true,
+};
 
 void main() {
   test('dynamic localized content falls back to Russian', () {
@@ -83,6 +167,476 @@ void main() {
     );
   });
 
+  test('quick add reports failure for an unavailable product', () async {
+    final original = DemoData.products.first;
+    final unavailable = Product(
+      id: original.id,
+      category: original.category,
+      name: original.name,
+      description: original.description,
+      basePrice: original.basePrice,
+      accentColor: original.accentColor,
+      rating: original.rating,
+      reviewsCount: original.reviewsCount,
+      sizes: original.sizes,
+      toppings: original.toppings,
+      availableBranchIds: const [],
+      assetImage: original.assetImage,
+      isNew: original.isNew,
+      isBestSeller: original.isBestSeller,
+    );
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      cartStore: _MemoryCartStore(),
+      api: _OfflineApiClient(),
+    );
+
+    expect(await controller.quickAdd(unavailable), isFalse);
+    expect(controller.state.cart, isEmpty);
+  });
+
+  test('order submission uses stable ids independent of language', () async {
+    final api = _CapturingOrderApiClient();
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(accessToken: 'good'),
+      cartStore: _MemoryCartStore(),
+      api: api,
+    );
+    controller.login('+996700123456');
+    final product = DemoData.products.first;
+    final item = CartItem(
+      product: product,
+      quantity: 2,
+      sizeId: 'm',
+      sugarPercent: 50,
+      ice: IceLevel.regular,
+      toppingIds: const ['tapioca'],
+      total: 800,
+    );
+
+    for (final language in [AppLanguage.ru, AppLanguage.en]) {
+      controller.setLanguage(language);
+      await controller.submitOrder(
+        type: OrderType.pickup,
+        readyTime: 'asap',
+        items: [item],
+        branch: DemoData.branches.first,
+        pointsUsed: 0,
+        paymentMethod: PaymentMethod.qrDemo,
+      );
+    }
+
+    expect(api.requests, hasLength(2));
+    expect(api.requests[0], api.requests[1]);
+    final request = api.requests.first;
+    expect(request['paymentMethod'], 'qr');
+    expect(request['items'], [
+      {
+        'productId': product.id,
+        'sizeId': 'm',
+        'toppingIds': ['tapioca'],
+        'sugarPercent': 50,
+        'ice': 'regular',
+        'quantity': 2,
+      },
+    ]);
+    final encodedItem = (request['items']! as List).single as Map;
+    expect(encodedItem, isNot(contains('productName')));
+    expect(encodedItem, isNot(contains('total')));
+  });
+
+  test(
+    'customer order parser accepts V2 and preserves localized snapshots',
+    () {
+      final order = parseCustomerOrderHistoryEntry(_v2OrderJson());
+
+      expect(order, isNotNull);
+      expect(order!.number, 'SW-2001');
+      expect(order.itemsVersion, 2);
+      expect(order.status, OrderStatus.preparing);
+      expect(order.paymentMethod, PaymentMethod.qrDemo);
+      expect(order.items.single.productId, DemoData.products.first.id);
+      expect(order.items.single.sizeId, 'm');
+      expect(order.items.single.toppingIds, ['tapioca']);
+      expect(
+        order.items.single.productName.resolve(AppLanguage.en),
+        'Pink Moon milk tea',
+      );
+    },
+  );
+
+  test('malformed V2 order is unavailable instead of empty history', () {
+    final raw = _v2OrderJson();
+    (raw['items']! as List<Map<String, dynamic>>).single.remove('productId');
+
+    expect(parseCustomerOrderHistoryEntry(raw), isNull);
+  });
+
+  test(
+    'server history loads and exact V2 reorder uses current catalog price',
+    () async {
+      final order = parseCustomerOrderHistoryEntry(
+        _v2OrderJson(itemTotal: 1, orderTotal: 1),
+      )!;
+      final api = _CatalogAuthApiClient(
+        profile: _testCustomerProfile,
+        orders: [order],
+      );
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(accessToken: 'good', refreshToken: 'fresh'),
+        cartStore: _MemoryCartStore(),
+        api: api,
+      );
+
+      await controller.bootstrap();
+      expect(controller.state.catalogAuthoritative, isTrue);
+      expect(controller.state.orders.single.number, 'SW-2001');
+
+      final result = await controller.repeatOrder(order);
+      final product = DemoData.products.first;
+      final expectedUnitPrice =
+          product.basePrice +
+          product.sizes.firstWhere((size) => size.id == 'm').priceDelta +
+          product.toppings
+              .firstWhere((topping) => topping.id == 'tapioca')
+              .priceDelta;
+
+      expect(result, RepeatOrderResult.success);
+      expect(controller.state.cart.single.product.id, product.id);
+      expect(controller.state.cart.single.total, expectedUnitPrice);
+      expect(controller.state.cart.single.total, isNot(order.total));
+    },
+  );
+
+  test('empty server order history clears stale local history', () async {
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(accessToken: 'good', refreshToken: 'fresh'),
+      cartStore: _MemoryCartStore(),
+      api: _CatalogAuthApiClient(profile: _testCustomerProfile),
+    )..seedDemo(history: true);
+
+    expect(controller.state.orders, isNotEmpty);
+    await controller.bootstrap();
+
+    expect(controller.state.orders, isEmpty);
+  });
+
+  test('late order history response cannot leak back after logout', () async {
+    final order = parseCustomerOrderHistoryEntry(_v2OrderJson())!;
+    final api = _ControlledOrdersApiClient(profile: _testCustomerProfile);
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(accessToken: 'good', refreshToken: 'fresh'),
+      cartStore: _MemoryCartStore(),
+      api: api,
+    );
+
+    final bootstrap = controller.bootstrap();
+    while (api.orderGetCalls.isEmpty) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    controller.logout();
+    api.completeOrders([order]);
+    await bootstrap;
+
+    expect(controller.state.isGuest, isTrue);
+    expect(controller.state.orders, isEmpty);
+  });
+
+  test(
+    'legacy history is display-only and never matched by product name',
+    () async {
+      final legacy = parseCustomerOrderHistoryEntry(_v1OrderJson())!;
+      final api = _CatalogAuthApiClient(
+        profile: _testCustomerProfile,
+        orders: [legacy],
+      );
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(accessToken: 'good', refreshToken: 'fresh'),
+        cartStore: _MemoryCartStore(),
+        api: api,
+      );
+
+      await controller.bootstrap();
+      final result = await controller.repeatOrder(legacy);
+
+      expect(result, RepeatOrderResult.legacyOrder);
+      expect(controller.state.cart, isEmpty);
+    },
+  );
+
+  test(
+    'one unavailable V2 selection blocks the whole repeated order',
+    () async {
+      final raw = _v2OrderJson();
+      final items = raw['items']! as List<Map<String, dynamic>>;
+      items.add({...items.single, 'productId': 'removed-product'});
+      final order = parseCustomerOrderHistoryEntry(raw)!;
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(accessToken: 'good', refreshToken: 'fresh'),
+        cartStore: _MemoryCartStore(),
+        api: _CatalogAuthApiClient(
+          profile: _testCustomerProfile,
+          orders: [order],
+        ),
+      );
+
+      await controller.bootstrap();
+      final result = await controller.repeatOrder(order);
+
+      expect(result, RepeatOrderResult.unavailableSelection);
+      expect(controller.state.cart, isEmpty);
+    },
+  );
+
+  test('offline demo catalog cannot authorize a V2 reorder', () async {
+    final order = parseCustomerOrderHistoryEntry(_v2OrderJson())!;
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      cartStore: _MemoryCartStore(),
+      api: _OfflineApiClient(),
+    );
+
+    final result = await controller.repeatOrder(order);
+
+    expect(result, RepeatOrderResult.catalogUnavailable);
+    expect(controller.state.cart, isEmpty);
+  });
+
+  test('recurring parser accepts stable IDs and server paidUntil', () {
+    final recurring = parseCustomerRecurringOrder(_recurringJson());
+
+    expect(recurring, isNotNull);
+    expect(recurring!.productIds, [DemoData.products.first.id]);
+    expect(recurring.branchId, DemoData.branches.first.id);
+    expect(recurring.plan, RecurringPlan.week);
+    expect(recurring.paidUntil, DateTime.utc(2026, 7, 22, 12));
+
+    final invalid = _recurringJson()..['time'] = '25:00';
+    expect(parseCustomerRecurringOrder(invalid), isNull);
+  });
+
+  test(
+    'server recurring hydrates and authoritative null clears stale state',
+    () async {
+      final recurring = parseCustomerRecurringOrder(_recurringJson())!;
+      final restored = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(accessToken: 'good', refreshToken: 'fresh'),
+        cartStore: _MemoryCartStore(),
+        api: _CatalogAuthApiClient(
+          profile: _testCustomerProfile,
+          recurring: recurring,
+        ),
+      );
+      await restored.bootstrap();
+      expect(restored.state.recurring?.paidUntil, recurring.paidUntil);
+
+      final cleared = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(accessToken: 'good', refreshToken: 'fresh'),
+        cartStore: _MemoryCartStore(),
+        api: _CatalogAuthApiClient(profile: _testCustomerProfile),
+      )..seedDemo(recurring: true);
+      expect(cleared.state.recurring, isNotNull);
+      await cleared.bootstrap();
+      expect(cleared.state.recurring, isNull);
+    },
+  );
+
+  test('recurring PUT and DELETE use server-authoritative state', () async {
+    final api = _CatalogAuthApiClient(profile: _testCustomerProfile);
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(accessToken: 'good', refreshToken: 'fresh'),
+      cartStore: _MemoryCartStore(),
+      api: api,
+    );
+    await controller.bootstrap();
+
+    final saved = await controller.setRecurring(
+      products: [DemoData.products.first],
+      time: '11:00',
+      branch: DemoData.branches.first,
+      plan: RecurringPlan.week,
+    );
+
+    expect(saved, isTrue);
+    expect(api.recurringPutCalls, [
+      [DemoData.products.first.id],
+    ]);
+    expect(controller.state.recurring?.paidUntil, DateTime.utc(2026, 7, 22));
+
+    expect(await controller.cancelRecurring(), isTrue);
+    expect(api.recurringDeleteCalls, 1);
+    expect(controller.state.recurring, isNull);
+  });
+
+  test(
+    'late recurring PUT cannot restore private state after logout',
+    () async {
+      final api = _ControlledRecurringApiClient(profile: _testCustomerProfile);
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(accessToken: 'good', refreshToken: 'fresh'),
+        cartStore: _MemoryCartStore(),
+        api: api,
+      );
+      await controller.bootstrap();
+
+      final saving = controller.setRecurring(
+        products: [DemoData.products.first],
+        time: '11:00',
+        branch: DemoData.branches.first,
+        plan: RecurringPlan.week,
+      );
+      await Future<void>.delayed(Duration.zero);
+      controller.logout();
+      api.completePut(parseCustomerRecurringOrder(_recurringJson())!);
+
+      expect(await saving, isFalse);
+      expect(controller.state.isGuest, isTrue);
+      expect(controller.state.recurring, isNull);
+    },
+  );
+
+  test('local cart survives controller restart using stable ids', () async {
+    final cartStore = _MemoryCartStore();
+    final product = DemoData.products.first;
+    final size = product.sizes.last;
+    final topping = product.toppings.first;
+    final first = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(),
+      cartStore: cartStore,
+      api: _OfflineApiClient(),
+    );
+
+    await first.addConfigured(
+      product,
+      sizeId: size.id,
+      sugarPercent: 30,
+      ice: IceLevel.less,
+      toppingIds: [topping.id],
+    );
+    await first.updateQuantity(0, 1);
+
+    final restored = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(),
+      cartStore: cartStore,
+      api: _OfflineApiClient(),
+    );
+    await restored.bootstrap();
+
+    final item = restored.state.cart.single;
+    expect(item.product.id, product.id);
+    expect(item.quantity, 2);
+    expect(item.sizeId, size.id);
+    expect(item.sugarPercent, 30);
+    expect(item.ice, IceLevel.less);
+    expect(item.toppingIds, [topping.id]);
+    expect(
+      item.total,
+      (product.basePrice + size.priceDelta + topping.priceDelta) * 2,
+    );
+  });
+
+  test('stale cart products and modifiers are cleaned safely', () async {
+    final product = DemoData.products.first;
+    final cartStore = _MemoryCartStore([
+      const CartDraftItem(
+        productId: 'deleted-product',
+        quantity: 1,
+        sizeId: 'm',
+        sugarPercent: 50,
+        ice: 'regular',
+        toppingIds: [],
+      ),
+      CartDraftItem(
+        productId: product.id,
+        quantity: 1,
+        sizeId: product.sizes.first.id,
+        sugarPercent: 50,
+        ice: 'regular',
+        toppingIds: const ['deleted-topping'],
+      ),
+      CartDraftItem(
+        productId: product.id,
+        quantity: 1,
+        sizeId: 'deleted-size',
+        sugarPercent: 50,
+        ice: 'regular',
+        toppingIds: const [],
+      ),
+    ]);
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(),
+      cartStore: cartStore,
+      api: _OfflineApiClient(),
+    );
+
+    await controller.bootstrap();
+
+    expect(controller.state.cart, hasLength(1));
+    expect(controller.state.cart.single.product.id, product.id);
+    expect(controller.state.cart.single.toppingIds, isEmpty);
+    expect(cartStore.items, hasLength(1));
+    expect(cartStore.items.single.toppingIds, isEmpty);
+  });
+
+  test('removing the last cart item persists an empty draft', () async {
+    final cartStore = _MemoryCartStore();
+    final first = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(),
+      cartStore: cartStore,
+      api: _OfflineApiClient(),
+    );
+    await first.quickAdd(DemoData.products.first);
+    await first.removeFromCart(0);
+
+    final restored = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(),
+      cartStore: cartStore,
+      api: _OfflineApiClient(),
+    );
+    await restored.bootstrap();
+
+    expect(cartStore.items, isEmpty);
+    expect(restored.state.cart, isEmpty);
+  });
+
+  test(
+    'cart survives login and logout but account deletion clears it',
+    () async {
+      final cartStore = _MemoryCartStore();
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(),
+        cartStore: cartStore,
+        api: _OfflineApiClient(),
+      );
+      await controller.quickAdd(DemoData.products.first);
+
+      controller.login('+996700123456');
+      expect(controller.state.cart, isNotEmpty);
+      controller.logout();
+      expect(controller.state.cart, isNotEmpty);
+
+      await controller.deleteAccount();
+      expect(controller.state.cart, isEmpty);
+      expect(cartStore.items, isEmpty);
+    },
+  );
+
   test('money and points follow the selected language', () {
     expect(_regularSpaces(formatSom(1240, AppLanguage.ru)), '1 240 сом');
     expect(_regularSpaces(formatSom(1240, AppLanguage.ky)), '1 240 сом');
@@ -108,20 +662,19 @@ void main() {
       firstName: '  Алина ',
       lastName: ' Садыкова  ',
       birthDate: birthDate,
-      avatarPath: 'local-avatar.jpg',
     );
 
     expect(controller.state.firstName, 'Алина');
     expect(controller.state.lastName, 'Садыкова');
     expect(controller.state.userName, 'Алина Садыкова');
     expect(controller.state.birthDate, birthDate);
-    expect(controller.state.avatarPath, 'local-avatar.jpg');
+    expect(controller.state.avatarUrl, isNull);
 
     controller.logout();
     expect(controller.state.isGuest, isTrue);
     expect(controller.state.userName, isEmpty);
     expect(controller.state.birthDate, isNull);
-    expect(controller.state.avatarPath, isNull);
+    expect(controller.state.avatarUrl, isNull);
     expect(controller.state.userContact, isEmpty);
   });
 
@@ -161,7 +714,6 @@ void main() {
         readyTime: 'as soon as possible',
         items: controller.state.cart,
         branch: controller.state.selectedBranch,
-        total: controller.state.total,
         pointsUsed: 0,
       );
 
@@ -179,40 +731,69 @@ void main() {
     },
   );
 
-  test('saved token restores the server session and profile on start', () async {
-    final authStore = _MemoryAuthStore(
-      accessToken: 'good',
-      refreshToken: 'fresh',
-    );
-    final api = _FakeAuthApiClient(
-      profile: CustomerProfile(
-        id: 'c-sw-aigerim',
-        phone: '+996 555 123 456',
-        firstName: 'Айгерим',
-        lastName: 'Осмонова',
-        birthDate: DateTime(1998, 3, 14),
-        points: 1240,
-        referralCode: 'SWEET-AIGERIM',
-        invitedByCode: null,
-      ),
-    );
+  test(
+    'saved token restores the server session and profile on start',
+    () async {
+      final authStore = _MemoryAuthStore(
+        accessToken: 'good',
+        refreshToken: 'fresh',
+      );
+      final api = _FakeAuthApiClient(
+        profile: CustomerProfile(
+          id: 'c-sw-aigerim',
+          phone: '+996 555 123 456',
+          firstName: 'Айгерим',
+          lastName: 'Осмонова',
+          birthDate: DateTime(1998, 3, 14),
+          points: 1240,
+          referralCode: 'SWEET-AIGERIM',
+          invitedByCode: null,
+        ),
+        favoriteIds: [DemoData.products[1].id],
+      );
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: authStore,
+        api: api,
+      );
+
+      expect(controller.state.isGuest, isTrue);
+      await controller.bootstrap();
+
+      // Личные данные приходят с сервера, а не из локального стейта.
+      expect(api.customerMeCalls, ['good']);
+      expect(controller.state.isGuest, isFalse);
+      expect(controller.state.firstName, 'Айгерим');
+      expect(controller.state.lastName, 'Осмонова');
+      expect(controller.state.birthDate, DateTime(1998, 3, 14));
+      expect(controller.state.points, 1240);
+      expect(controller.state.userContact, '+996 555 123 456');
+      expect(api.favoriteGetCalls, ['good']);
+      expect(controller.state.favoriteIds, [DemoData.products[1].id]);
+    },
+  );
+
+  test('empty server favorites are authoritative on bootstrap', () async {
     final controller = AppStateController(
       languagePreferences: _MemoryLanguagePreferenceStore(),
-      authStore: authStore,
-      api: api,
+      authStore: _MemoryAuthStore(accessToken: 'good', refreshToken: 'fresh'),
+      api: _FakeAuthApiClient(
+        profile: const CustomerProfile(
+          id: 'c-sw-aigerim',
+          phone: '+996 555 123 456',
+          firstName: 'Aigerim',
+          lastName: '',
+          birthDate: null,
+          points: 1240,
+          referralCode: null,
+          invitedByCode: null,
+        ),
+      ),
     );
 
-    expect(controller.state.isGuest, isTrue);
+    expect(controller.state.favoriteIds, DemoData.favoriteIds);
     await controller.bootstrap();
-
-    // Личные данные приходят с сервера, а не из локального стейта.
-    expect(api.customerMeCalls, ['good']);
-    expect(controller.state.isGuest, isFalse);
-    expect(controller.state.firstName, 'Айгерим');
-    expect(controller.state.lastName, 'Осмонова');
-    expect(controller.state.birthDate, DateTime(1998, 3, 14));
-    expect(controller.state.points, 1240);
-    expect(controller.state.userContact, '+996 555 123 456');
+    expect(controller.state.favoriteIds, isEmpty);
   });
 
   test('rejected token is cleared and the user stays a guest', () async {
@@ -257,6 +838,7 @@ void main() {
           referralCode: 'SWEET-AIGERIM',
           invitedByCode: null,
         ),
+        favoriteIds: [DemoData.products[2].id],
       ),
     );
 
@@ -267,16 +849,76 @@ void main() {
     expect(await controller.loginWithOtp('+996555123456', '1111'), isTrue);
     expect(controller.state.isGuest, isFalse);
     expect(controller.state.points, 1240);
+    expect(controller.state.favoriteIds, [DemoData.products[2].id]);
     expect(authStore.accessToken, 'good');
     expect(authStore.refreshToken, 'fresh');
+
+    expect(
+      await controller.uploadAvatar(
+        bytes: const [1, 2, 3],
+        filename: 'avatar.jpg',
+        contentType: 'image/jpeg',
+      ),
+      isTrue,
+    );
+    expect(controller.state.avatarUrl, 'https://cdn.example/avatar.webp');
+
+    expect(await controller.deleteAvatar(), isTrue);
+    expect(controller.state.avatarUrl, isNull);
 
     controller.logout();
     await Future<void>.delayed(Duration.zero);
 
     expect(controller.state.isGuest, isTrue);
+    expect(controller.state.favoriteIds, isEmpty);
     expect(authStore.accessToken, isNull);
     expect(authStore.refreshToken, isNull);
     expect(authStore.clearCount, 1);
+  });
+
+  test('rapid favorite toggles serialize writes and keep newest set', () async {
+    final api = _ControlledFavoritesApiClient(
+      profile: const CustomerProfile(
+        id: 'c-sw-aigerim',
+        phone: '+996 555 123 456',
+        firstName: 'Aigerim',
+        lastName: '',
+        birthDate: null,
+        points: 1240,
+        referralCode: null,
+        invitedByCode: null,
+      ),
+    );
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(),
+      api: api,
+    );
+    await controller.loginWithOtp('+996555123456', '1111');
+
+    final first = DemoData.products[0];
+    final second = DemoData.products[1];
+    final firstSync = controller.toggleFavorite(first);
+    await Future<void>.delayed(Duration.zero);
+    final secondSync = controller.toggleFavorite(second);
+
+    expect(controller.state.favoriteIds, [first.id, second.id]);
+    expect(api.favoritePutCalls, [
+      [first.id],
+    ]);
+
+    api.completeNextPut();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.state.favoriteIds, [first.id, second.id]);
+    expect(api.favoritePutCalls, [
+      [first.id],
+      [first.id, second.id],
+    ]);
+
+    api.completeNextPut();
+    await Future.wait([firstSync, secondSync]);
+    expect(api.serverFavoriteIds, [first.id, second.id]);
+    expect(controller.state.favoriteIds, [first.id, second.id]);
   });
 
   testWidgets('AppTheme memoizes light and dark themes for the same accent', (
@@ -308,6 +950,37 @@ void main() {
     expect(find.text('Категории'), findsNothing);
     await _scrollToText(tester, 'Узнайте, что у нас нового');
     expect(find.text('Узнайте, что у нас нового'), findsOneWidget);
+  });
+
+  testWidgets('quick add shows one transient notice at the top', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(_testApp());
+    await tester.pump(const Duration(milliseconds: 900));
+    await tester.tap(find.text('Каталог').first);
+    await tester.pumpAndSettle();
+
+    final addButton = find.widgetWithText(FilledButton, 'В корзину').first;
+    await tester.ensureVisible(addButton);
+    await tester.pumpAndSettle();
+    await tester.tap(addButton);
+    await tester.pump(const Duration(milliseconds: 220));
+    await tester.tap(addButton);
+    await tester.pump(const Duration(milliseconds: 220));
+
+    final message = const AppLocalizations(
+      AppLanguage.ru,
+    ).productAdded(DemoData.products.first.name.ru);
+    expect(find.text(message), findsOneWidget);
+    final logicalHeight =
+        tester.view.physicalSize.height / tester.view.devicePixelRatio;
+    expect(
+      tester.getTopLeft(find.text(message)).dy,
+      lessThan(logicalHeight / 3),
+    );
+
+    await tester.pump(const Duration(milliseconds: 2500));
+    expect(find.text(message), findsNothing);
   });
 
   testWidgets('bottom navigation uses filled inactive icons', (
@@ -790,7 +1463,10 @@ Widget _testApp([LanguagePreferenceStore? preferences]) {
   return ProviderScope(
     overrides: [
       appStateProvider.overrideWith(
-        (ref) => AppStateController(languagePreferences: store),
+        (ref) => AppStateController(
+          languagePreferences: store,
+          cartStore: _MemoryCartStore(),
+        ),
       ),
     ],
     child: const SweetTimeApp(),
@@ -803,6 +1479,21 @@ Widget _testAppWithController(AppStateController controller) {
     overrides: [appStateProvider.overrideWith((ref) => controller)],
     child: const SweetTimeApp(),
   );
+}
+
+class _MemoryCartStore implements CartStore {
+  _MemoryCartStore([List<CartDraftItem> initial = const []])
+    : items = List.unmodifiable(initial);
+
+  List<CartDraftItem> items;
+
+  @override
+  Future<List<CartDraftItem>> read() async => List.unmodifiable(items);
+
+  @override
+  Future<void> write(List<CartDraftItem> items) async {
+    this.items = List.unmodifiable(items);
+  }
 }
 
 /// Токены в памяти: платформенных каналов (Keystore/Keychain) в тестах нет.
@@ -843,23 +1534,99 @@ class _OfflineApiClient extends ApiClient {
   Future<CompanyConfig?> fetchConfig() async => null;
 
   @override
-  Future<ApiResult<CustomerSession>> otpVerify(String phone, String code) async
-  => const ApiResult<CustomerSession>.unavailable();
+  Future<ApiResult<CustomerSession>> otpVerify(
+    String phone,
+    String code,
+  ) async => const ApiResult<CustomerSession>.unavailable();
 
   @override
-  Future<ApiResult<CustomerProfile>> fetchCustomerMe(String accessToken) async
-  => const ApiResult<CustomerProfile>.unavailable();
+  Future<ApiResult<CustomerProfile>> fetchCustomerMe(
+    String accessToken,
+  ) async => const ApiResult<CustomerProfile>.unavailable();
+
+  @override
+  Future<ApiResult<List<String>>> fetchCustomerFavorites(
+    String accessToken,
+  ) async => const ApiResult<List<String>>.unavailable();
+
+  @override
+  Future<ApiResult<List<OrderHistoryEntry>>> fetchCustomerOrders(
+    String accessToken,
+  ) async => const ApiResult<List<OrderHistoryEntry>>.unavailable();
+
+  @override
+  Future<ApiResult<RecurringOrder?>> fetchCustomerRecurring(
+    String accessToken,
+  ) async => const ApiResult<RecurringOrder?>.unavailable();
+
+  @override
+  Future<ApiResult<RecurringOrder?>> replaceCustomerRecurring(
+    String accessToken, {
+    required List<String> productIds,
+    required String time,
+    required String branchId,
+    required RecurringPlan plan,
+  }) async => const ApiResult<RecurringOrder?>.unavailable();
+
+  @override
+  Future<ApiResult<bool>> deleteCustomerRecurring(String accessToken) async =>
+      const ApiResult<bool>.unavailable();
+
+  @override
+  Future<ApiResult<List<String>>> replaceCustomerFavorites(
+    String accessToken,
+    List<String> productIds,
+  ) async => const ApiResult<List<String>>.unavailable();
 
   @override
   Future<bool> otpRequest(String phone) async => false;
 }
 
+class _CapturingOrderApiClient extends _OfflineApiClient {
+  final List<Map<String, Object?>> requests = [];
+
+  @override
+  Future<CreatedOrder?> createOrder({
+    required String branchId,
+    required String type,
+    required String readyTime,
+    required List<Map<String, Object?>> items,
+    required String paymentMethod,
+    required int pointsUsed,
+    String? accessToken,
+  }) async {
+    requests.add({
+      'branchId': branchId,
+      'type': type,
+      'readyTime': readyTime,
+      'items': items,
+      'paymentMethod': paymentMethod,
+      'pointsUsed': pointsUsed,
+    });
+    return const CreatedOrder(number: 'SW-test', pointsEarned: 0);
+  }
+}
+
 /// Сервер с одним известным клиентом: access-токен `good`, refresh `fresh`.
 class _FakeAuthApiClient extends ApiClient {
-  _FakeAuthApiClient({required this.profile});
+  _FakeAuthApiClient({
+    required this.profile,
+    this.favoriteIds = const [],
+    this.orders = const [],
+    RecurringOrder? recurring,
+  }) : serverRecurring = recurring;
 
   final CustomerProfile profile;
+  final List<String> favoriteIds;
+  final List<OrderHistoryEntry> orders;
+  RecurringOrder? serverRecurring;
   final List<String> customerMeCalls = [];
+  final List<String> favoriteGetCalls = [];
+  final List<String> orderGetCalls = [];
+  final List<String> recurringGetCalls = [];
+  final List<List<String>> recurringPutCalls = [];
+  int recurringDeleteCalls = 0;
+  final List<List<String>> favoritePutCalls = [];
 
   @override
   Future<CompanyConfig?> fetchConfig() async => null;
@@ -874,7 +1641,10 @@ class _FakeAuthApiClient extends ApiClient {
   }
 
   @override
-  Future<ApiResult<CustomerSession>> otpVerify(String phone, String code) async {
+  Future<ApiResult<CustomerSession>> otpVerify(
+    String phone,
+    String code,
+  ) async {
     if (code != '1111') return const ApiResult<CustomerSession>.rejected();
     return ApiResult<CustomerSession>.ok(
       CustomerSession(
@@ -883,6 +1653,222 @@ class _FakeAuthApiClient extends ApiClient {
       ),
     );
   }
+
+  @override
+  Future<ApiResult<List<String>>> fetchCustomerFavorites(
+    String accessToken,
+  ) async {
+    favoriteGetCalls.add(accessToken);
+    if (accessToken != 'good') {
+      return const ApiResult<List<String>>.rejected();
+    }
+    return ApiResult<List<String>>.ok(List.unmodifiable(favoriteIds));
+  }
+
+  @override
+  Future<ApiResult<List<OrderHistoryEntry>>> fetchCustomerOrders(
+    String accessToken,
+  ) async {
+    orderGetCalls.add(accessToken);
+    if (accessToken != 'good') {
+      return const ApiResult<List<OrderHistoryEntry>>.rejected();
+    }
+    return ApiResult<List<OrderHistoryEntry>>.ok(List.unmodifiable(orders));
+  }
+
+  @override
+  Future<ApiResult<RecurringOrder?>> fetchCustomerRecurring(
+    String accessToken,
+  ) async {
+    recurringGetCalls.add(accessToken);
+    if (accessToken != 'good') {
+      return const ApiResult<RecurringOrder?>.rejected();
+    }
+    return ApiResult<RecurringOrder?>.ok(serverRecurring);
+  }
+
+  @override
+  Future<ApiResult<RecurringOrder?>> replaceCustomerRecurring(
+    String accessToken, {
+    required List<String> productIds,
+    required String time,
+    required String branchId,
+    required RecurringPlan plan,
+  }) async {
+    recurringPutCalls.add(List.unmodifiable(productIds));
+    if (accessToken != 'good') {
+      return const ApiResult<RecurringOrder?>.rejected();
+    }
+    serverRecurring = RecurringOrder(
+      productIds: List.unmodifiable(productIds),
+      time: time,
+      branchId: branchId,
+      plan: plan,
+      paidUntil: DateTime.utc(2026, 7, 22),
+    );
+    return ApiResult<RecurringOrder?>.ok(serverRecurring);
+  }
+
+  @override
+  Future<ApiResult<bool>> deleteCustomerRecurring(String accessToken) async {
+    recurringDeleteCalls++;
+    if (accessToken != 'good') return const ApiResult<bool>.rejected();
+    serverRecurring = null;
+    return const ApiResult<bool>.ok(true);
+  }
+
+  @override
+  Future<ApiResult<List<String>>> replaceCustomerFavorites(
+    String accessToken,
+    List<String> productIds,
+  ) async {
+    favoritePutCalls.add(List.unmodifiable(productIds));
+    if (accessToken != 'good') {
+      return const ApiResult<List<String>>.rejected();
+    }
+    return ApiResult<List<String>>.ok(List.unmodifiable(productIds));
+  }
+
+  @override
+  Future<ApiResult<CustomerProfile>> uploadCustomerAvatar(
+    String accessToken, {
+    required List<int> bytes,
+    required String filename,
+    required String contentType,
+  }) async {
+    if (accessToken != 'good') {
+      return const ApiResult<CustomerProfile>.rejected();
+    }
+    return ApiResult<CustomerProfile>.ok(
+      profile.copyWith(avatarUrl: 'https://cdn.example/avatar.webp'),
+    );
+  }
+
+  @override
+  Future<ApiResult<bool>> deleteCustomerAvatar(String accessToken) async {
+    if (accessToken != 'good') return const ApiResult<bool>.rejected();
+    return const ApiResult<bool>.ok(true);
+  }
+}
+
+class _CatalogAuthApiClient extends _FakeAuthApiClient {
+  _CatalogAuthApiClient({
+    required super.profile,
+    super.orders,
+    super.recurring,
+  });
+
+  @override
+  Future<CompanyConfig?> fetchConfig() async => const CompanyConfig(
+    appName: 'SweetTime',
+    accentColor: AppColors.candy500,
+    earnRate: Loyalty.earnRate,
+    maxSpendShare: Loyalty.maxSpendShare,
+  );
+
+  @override
+  Future<List<Product>?> fetchProducts() async => DemoData.products;
+
+  @override
+  Future<List<Branch>?> fetchBranches() async => DemoData.branches;
+
+  @override
+  Future<List<NewsStory>?> fetchNews() async => null;
+
+  @override
+  Future<List<Promotion>?> fetchPromotions() async => null;
+}
+
+class _ControlledOrdersApiClient extends _CatalogAuthApiClient {
+  _ControlledOrdersApiClient({required super.profile});
+
+  final Completer<ApiResult<List<OrderHistoryEntry>>> _ordersCompleter =
+      Completer<ApiResult<List<OrderHistoryEntry>>>();
+
+  @override
+  Future<ApiResult<List<OrderHistoryEntry>>> fetchCustomerOrders(
+    String accessToken,
+  ) {
+    orderGetCalls.add(accessToken);
+    return _ordersCompleter.future;
+  }
+
+  void completeOrders(List<OrderHistoryEntry> orders) {
+    _ordersCompleter.complete(
+      ApiResult<List<OrderHistoryEntry>>.ok(List.unmodifiable(orders)),
+    );
+  }
+}
+
+class _ControlledRecurringApiClient extends _CatalogAuthApiClient {
+  _ControlledRecurringApiClient({required super.profile});
+
+  final Completer<ApiResult<RecurringOrder?>> _putCompleter =
+      Completer<ApiResult<RecurringOrder?>>();
+
+  @override
+  Future<ApiResult<RecurringOrder?>> replaceCustomerRecurring(
+    String accessToken, {
+    required List<String> productIds,
+    required String time,
+    required String branchId,
+    required RecurringPlan plan,
+  }) {
+    recurringPutCalls.add(List.unmodifiable(productIds));
+    return _putCompleter.future;
+  }
+
+  void completePut(RecurringOrder recurring) {
+    _putCompleter.complete(ApiResult<RecurringOrder?>.ok(recurring));
+  }
+}
+
+class _ControlledFavoritesApiClient extends _FakeAuthApiClient {
+  _ControlledFavoritesApiClient({required super.profile});
+
+  final List<_PendingFavoritePut> _pendingFavoritePuts = [];
+  List<String> serverFavoriteIds = [];
+
+  @override
+  Future<ApiResult<List<String>>> fetchCustomerFavorites(
+    String accessToken,
+  ) async {
+    favoriteGetCalls.add(accessToken);
+    if (accessToken != 'good') {
+      return const ApiResult<List<String>>.rejected();
+    }
+    return ApiResult<List<String>>.ok(List.unmodifiable(serverFavoriteIds));
+  }
+
+  @override
+  Future<ApiResult<List<String>>> replaceCustomerFavorites(
+    String accessToken,
+    List<String> productIds,
+  ) {
+    final snapshot = List<String>.unmodifiable(productIds);
+    favoritePutCalls.add(snapshot);
+    final pending = _PendingFavoritePut(
+      snapshot,
+      Completer<ApiResult<List<String>>>(),
+    );
+    _pendingFavoritePuts.add(pending);
+    return pending.completer.future;
+  }
+
+  void completeNextPut() {
+    final pending = _pendingFavoritePuts.removeAt(0);
+    serverFavoriteIds = [...pending.productIds];
+    pending.completer.complete(
+      ApiResult<List<String>>.ok(List.unmodifiable(serverFavoriteIds)),
+    );
+  }
+}
+
+class _PendingFavoritePut {
+  const _PendingFavoritePut(this.productIds, this.completer);
+
+  final List<String> productIds;
+  final Completer<ApiResult<List<String>>> completer;
 }
 
 class _MemoryLanguagePreferenceStore implements LanguagePreferenceStore {
