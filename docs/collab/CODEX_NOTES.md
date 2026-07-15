@@ -1109,3 +1109,27 @@ Backend/admin пересобраны, Alembic=`e73c8f2a1b04`, пять productio
 Миграция создала compatibility-подборку из 6 прежних stories; публичный RU fallback работает. Осталась
 ручная owner acceptance: заполнить настоящее KY/EN название, загрузить/заменить круглую обложку, создать
 feed post и MP4 story, затем проверить RU/KY/EN, expiry и Android back/video на телефоне.
+
+## 2026-07-16 — CX-020: полноэкранные сторис и крупное медиа новостей
+
+- По прямому UX-запросу владельца полностью переработан Flutter viewer сторис. Теперь это чёрная
+  полноэкранная media-stage с `BoxFit.contain`: вертикальный материал использует доступный экран,
+  горизонтальный/desktop-формат остаётся по центру с корректным letterbox. Старые CTA «переход», счётчик
+  и нижние стрелки удалены.
+- Добавлены сегментированные полупрозрачные progress bars с плавным заполнением: 7 секунд для фото/текста,
+  реальная position/duration для MP4 и 15-секундный fallback при ошибке загрузки. Тап слева/справа идёт
+  назад/вперёд; удержание останавливает progress или видео и звук, отпускание продолжает. Видео сторис
+  автозапускается со звуком, который использует системную media-громкость телефона.
+- Detail публикации ленты открывается на 98% высоты; image/MP4 занимает 78% экрана на чёрном фоне.
+  Видео стартует muted, тап по нему включает/выключает звук, центральная кнопка управляет pause/play.
+  Android Back закрывает detail. Загруженные stories подборки дополнительно сортируются newest-first
+  на клиенте, даже если тестовый/старый API вернул иной порядок.
+- Изменены: `lib/features/news/news_media.dart`, `news_story_page.dart`, `news_page.dart`,
+  `test/news_content_test.dart`, `test/widget_test.dart`, `docs/TASKS.md`, этот файл. Backend/admin и
+  контракт Content V2 не менялись.
+- Проверки: `flutter analyze` — clean; `flutter test` — 58/58. Тест viewer проверяет 45 stories,
+  отсутствие старых стрелок, движение progress, полную остановку на hold, resume, правый tap и Android Back.
+  Production release APK собран с `https://lnp-corporation.duckdns.org` + production Web OAuth audience,
+  установлен и запущен на Redmi Note 9 Pro `f3bff2a5`. Автоматический screenshot не выполнен из-за
+  заблокированного телефона; owner должен физически проверить настоящий portrait/landscape image, MP4
+  звук/боковые кнопки громкости, hold и визуальный fit. Это единственный незакрытый acceptance-пункт CX-020.

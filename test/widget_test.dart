@@ -1191,8 +1191,12 @@ void main() {
     await _openNavigationTab(tester, 'Главная');
     await _scrollToText(tester, 'Новый вкус недели');
     await tester.tap(find.text('Новый вкус недели'));
-    await tester.pumpAndSettle();
-    expect(find.text('Новый вкус недели'), findsOneWidget);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(
+      find.byKey(const ValueKey('story-current-news-week-flavor')),
+      findsOneWidget,
+    );
     expect(
       find.text(
         'Попробуйте клубничный улун с воздушной сырной пенкой — только до воскресенья.',

@@ -113,14 +113,69 @@ void main() {
         findsOneWidget,
       );
       await tester.tap(find.byKey(const ValueKey('story-collection-large')));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
 
       final pageView = tester.widget<PageView>(find.byType(PageView));
       expect(pageView.childrenDelegate.estimatedChildCount, 45);
-      expect(find.text('1 / 45'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('story-current-collection-story-44')),
+        findsOneWidget,
+      );
+      expect(find.byIcon(Icons.arrow_back_rounded), findsNothing);
+      expect(find.byIcon(Icons.arrow_forward_rounded), findsNothing);
+
+      final progressFinder = find.byKey(
+        const ValueKey('story-progress-current'),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+      final before = tester
+          .widget<FractionallySizedBox>(progressFinder)
+          .widthFactor!;
+      await tester.pump(const Duration(milliseconds: 600));
+      final moving = tester
+          .widget<FractionallySizedBox>(progressFinder)
+          .widthFactor!;
+      expect(moving, greaterThan(before));
+
+      final gestureFinder = find.byKey(
+        const ValueKey('story-navigation-gesture'),
+      );
+      final gestureRect = tester.getRect(gestureFinder);
+      final hold = await tester.startGesture(gestureRect.center);
+      await tester.pump(const Duration(milliseconds: 600));
+      final held = tester
+          .widget<FractionallySizedBox>(progressFinder)
+          .widthFactor!;
+      await tester.pump(const Duration(seconds: 1));
+      final stillHeld = tester
+          .widget<FractionallySizedBox>(progressFinder)
+          .widthFactor!;
+      expect(stillHeld, closeTo(held, 0.0001));
+      await hold.up();
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump(const Duration(milliseconds: 500));
+      final resumed = tester
+          .widget<FractionallySizedBox>(progressFinder)
+          .widthFactor!;
+      expect(resumed, greaterThan(stillHeld));
+
+      await tester.tapAt(
+        Offset(
+          gestureRect.left + gestureRect.width * 0.8,
+          gestureRect.center.dy,
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        find.byKey(const ValueKey('story-current-collection-story-43')),
+        findsOneWidget,
+      );
 
       await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
       expect(
         find.byKey(const ValueKey('story-collection-large')),
         findsOneWidget,

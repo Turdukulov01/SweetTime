@@ -252,10 +252,10 @@ class _NewsPostCard extends StatelessWidget {
   Future<void> _openPost(BuildContext context) {
     return showModalBottomSheet<void>(
       context: context,
-      useSafeArea: true,
+      useSafeArea: false,
       isScrollControlled: true,
-      showDragHandle: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      showDragHandle: false,
+      backgroundColor: Colors.transparent,
       builder: (context) => _NewsPostSheet(post: post, language: language),
     );
   }
@@ -270,44 +270,114 @@ class _NewsPostSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mediaHeight = MediaQuery.sizeOf(context).height * 0.78;
+    final hasMedia = post.effectiveMediaType != NewsMediaType.none;
     return FractionallySizedBox(
-      heightFactor: 0.92,
-      child: SingleChildScrollView(
-        key: const ValueKey('news-post-sheet'),
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (post.effectiveMediaType != NewsMediaType.none) ...[
-              NewsMediaView(
-                mediaType: post.effectiveMediaType,
-                url: post.effectiveMediaUrl,
-                thumbnailUrl: post.thumbnailUrl,
-                allowVideo: true,
-              ),
-              const SizedBox(height: 20),
-            ],
-            Text(
-              post.title.resolve(language),
-              style: theme.textTheme.headlineMedium,
-            ),
-            if (post.publishedDate case final date?) ...[
-              const SizedBox(height: 8),
-              Text(
-                MaterialLocalizations.of(
-                  context,
-                ).formatMediumDate(date.toLocal()),
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+      heightFactor: 0.98,
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+        child: Material(
+          color: theme.colorScheme.surface,
+          child: CustomScrollView(
+            key: const ValueKey('news-post-sheet'),
+            slivers: [
+              if (hasMedia)
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: mediaHeight,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        NewsMediaView(
+                          key: ValueKey('news-post-media-${post.id}'),
+                          mediaType: post.effectiveMediaType,
+                          url: post.effectiveMediaUrl,
+                          thumbnailUrl: post.thumbnailUrl,
+                          allowVideo: true,
+                          borderRadius: BorderRadius.zero,
+                          fit: BoxFit.contain,
+                          expand: true,
+                          backgroundColor: Colors.black,
+                          autoPlay:
+                              post.effectiveMediaType == NewsMediaType.video,
+                          showPlaybackControls: true,
+                          tapToToggleMute:
+                              post.effectiveMediaType == NewsMediaType.video,
+                          initialMuted:
+                              post.effectiveMediaType == NewsMediaType.video,
+                        ),
+                        SafeArea(
+                          bottom: false,
+                          child: Align(
+                            alignment: Alignment.topRight,
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: IconButton.filled(
+                                key: const ValueKey('news-post-close'),
+                                onPressed: Navigator.of(context).pop,
+                                style: IconButton.styleFrom(
+                                  backgroundColor: Colors.black.withValues(
+                                    alpha: 0.52,
+                                  ),
+                                  foregroundColor: Colors.white,
+                                ),
+                                icon: const Icon(Icons.close_rounded),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                SliverToBoxAdapter(
+                  child: SafeArea(
+                    bottom: false,
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                        child: IconButton(
+                          key: const ValueKey('news-post-close'),
+                          onPressed: Navigator.of(context).pop,
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
+                sliver: SliverList.list(
+                  children: [
+                    Text(
+                      post.title.resolve(language),
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (post.publishedDate case final date?) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        MaterialLocalizations.of(
+                          context,
+                        ).formatMediumDate(date.toLocal()),
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    Text(
+                      post.body.resolve(language),
+                      style: theme.textTheme.bodyLarge?.copyWith(height: 1.55),
+                    ),
+                  ],
                 ),
               ),
             ],
-            const SizedBox(height: 20),
-            Text(
-              post.body.resolve(language),
-              style: theme.textTheme.bodyLarge?.copyWith(height: 1.55),
-            ),
-          ],
+          ),
         ),
       ),
     );

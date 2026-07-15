@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -18,16 +19,31 @@ class NewsStoryPage extends ConsumerStatefulWidget {
   ConsumerState<NewsStoryPage> createState() => _NewsStoryPageState();
 }
 
-class _NewsStoryPageState extends ConsumerState<NewsStoryPage> {
+class _NewsStoryPageState extends ConsumerState<NewsStoryPage>
+    with SingleTickerProviderStateMixin {
+  static const _imageDuration = Duration(seconds: 7);
+  static const _videoFallbackDuration = Duration(seconds: 15);
+
   PageController? _pageController;
+  late final AnimationController _progressController;
   List<NewsStory>? _collectionStories;
+  List<NewsStory> _renderedStories = const [];
   int _currentIndex = 0;
+  int _restartEpoch = 0;
   bool _loading = false;
   bool _loadFailed = false;
+  bool _held = false;
+  bool _navigating = false;
+  bool _currentVideoReady = false;
+  String? _scheduledPlaybackKey;
 
   @override
   void initState() {
     super.initState();
+    _progressController = AnimationController(
+      vsync: this,
+      duration: _imageDuration,
+    )..addStatusListener(_handleProgressStatus);
     if (widget.collectionId != null) _loadCollection();
   }
 
@@ -38,7 +54,10 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage> {
       _pageController?.dispose();
       _pageController = null;
       _currentIndex = 0;
+      _restartEpoch++;
       _collectionStories = null;
+      _scheduledPlaybackKey = null;
+      _progressController.stop();
       if (widget.collectionId != null) _loadCollection();
     }
   }
@@ -54,15 +73,15 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage> {
         .read(appStateProvider.notifier)
         .fetchCollectionStories(collectionId);
     if (!mounted || collectionId != widget.collectionId) return;
-    final fallback =
-        ref
-            .read(appStateProvider)
-            .newsStories
-            .where((story) => story.collectionId == collectionId)
-            .toList(growable: false)
-          ..sort(compareNewsStories);
+    final fallback = ref
+        .read(appStateProvider)
+        .newsStories
+        .where((story) => story.collectionId == collectionId)
+        .toList(growable: false);
+    final stories = List<NewsStory>.of(loaded ?? fallback)
+      ..sort(compareNewsStories);
     setState(() {
-      _collectionStories = loaded ?? fallback;
+      _collectionStories = stories;
       _loading = false;
       _loadFailed = loaded == null && fallback.isEmpty;
     });
@@ -71,6 +90,7 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage> {
   @override
   void dispose() {
     _pageController?.dispose();
+    _progressController.dispose();
     super.dispose();
   }
 
@@ -85,19 +105,28 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage> {
 
     if (_loading && _collectionStories == null) {
       return const Scaffold(
+        backgroundColor: Colors.black,
         body: Center(child: CircularProgressIndicator.adaptive()),
       );
     }
     if (_loadFailed) {
       return Scaffold(
-        appBar: AppBar(),
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+        ),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(strings.newsLoadFailed, textAlign: TextAlign.center),
+                Text(
+                  strings.newsLoadFailed,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white),
+                ),
                 const SizedBox(height: 16),
                 FilledButton(
                   onPressed: _loadCollection,
@@ -129,96 +158,112 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage> {
     }
 
     _ensurePageController(stories);
+    _renderedStories = stories;
     final safeIndex = _currentIndex.clamp(0, stories.length - 1);
     final current = stories[safeIndex];
-    final foreground =
-        ThemeData.estimateBrightnessForColor(current.accentColor) ==
-            Brightness.dark
-        ? Colors.white
-        : const Color(0xFF251713);
+    _schedulePlayback(current);
 
-    return Scaffold(
-      backgroundColor: current.accentColor,
-      body: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              current.accentColor,
-              Color.lerp(current.accentColor, Colors.black, 0.2)!,
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: Stack(
-            children: [
-              PageView.builder(
-                key: ValueKey('story-pages-${widget.collectionId ?? 'home'}'),
-                controller: _pageController,
-                itemCount: stories.length,
-                onPageChanged: (index) => setState(() => _currentIndex = index),
-                itemBuilder: (context, index) => _StoryContent(
-                  story: stories[index],
-                  language: state.language,
-                  foreground: foreground,
-                  isCurrent: index == safeIndex,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light.copyWith(
+        statusBarColor: Colors.transparent,
+        systemNavigationBarColor: Colors.black,
+      ),
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            PageView.builder(
+              key: ValueKey('story-pages-${widget.collectionId ?? 'home'}'),
+              controller: _pageController,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: stories.length,
+              onPageChanged: _handlePageChanged,
+              itemBuilder: (context, index) => _StoryContent(
+                key: ValueKey(
+                  'story-content-${stories[index].id}-${index == safeIndex ? _restartEpoch : 0}',
                 ),
+                story: stories[index],
+                language: state.language,
+                isCurrent: index == safeIndex,
+                playbackPaused: _held,
+                onVideoReady: index == safeIndex
+                    ? (duration) => _handleVideoReady(stories[index], duration)
+                    : null,
+                onVideoProgress: index == safeIndex
+                    ? (position, duration) => _handleVideoProgress(
+                        stories[index],
+                        position,
+                        duration,
+                      )
+                    : null,
+                onVideoEnded: index == safeIndex
+                    ? () => _handleVideoEnded(stories[index])
+                    : null,
               ),
-              Positioned(
-                top: 12,
-                left: 20,
-                right: 64,
+            ),
+            Positioned.fill(
+              child: GestureDetector(
+                key: const ValueKey('story-navigation-gesture'),
+                behavior: HitTestBehavior.translucent,
+                onTapUp: _handleTap,
+                onLongPressStart: (_) => _holdPlayback(),
+                onLongPressEnd: (_) => _resumePlayback(),
+              ),
+            ),
+            SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    LinearProgressIndicator(
-                      value: (safeIndex + 1) / stories.length,
-                      color: foreground,
-                      backgroundColor: foreground.withValues(alpha: 0.28),
-                      borderRadius: BorderRadius.circular(999),
+                    AnimatedBuilder(
+                      animation: _progressController,
+                      builder: (context, _) => _StoryProgress(
+                        count: stories.length,
+                        currentIndex: safeIndex,
+                        currentValue: _progressController.value,
+                      ),
                     ),
-                    const SizedBox(height: 7),
-                    Text(
-                      '${safeIndex + 1} / ${stories.length}',
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: foreground.withValues(alpha: 0.8),
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: IconButton(
+                        key: const ValueKey('story-close'),
+                        tooltip: strings.close,
+                        onPressed: context.pop,
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.black.withValues(alpha: 0.26),
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: const Icon(Icons.close_rounded),
                       ),
                     ),
                   ],
                 ),
               ),
-              Positioned(
-                top: 0,
-                right: 8,
-                child: IconButton(
-                  tooltip: strings.close,
-                  onPressed: context.pop,
-                  color: foreground,
-                  icon: const Icon(Icons.close),
+            ),
+            if (_held)
+              const Center(
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Color(0x66000000),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Padding(
+                      padding: EdgeInsets.all(14),
+                      child: Icon(
+                        Icons.pause_rounded,
+                        color: Colors.white,
+                        size: 34,
+                      ),
+                    ),
+                  ),
                 ),
               ),
-              Positioned(
-                left: 16,
-                right: 16,
-                bottom: 12,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    IconButton.filledTonal(
-                      onPressed: safeIndex == 0 ? null : _previous,
-                      icon: const Icon(Icons.arrow_back_rounded),
-                    ),
-                    IconButton.filledTonal(
-                      onPressed: safeIndex == stories.length - 1 ? null : _next,
-                      icon: const Icon(Icons.arrow_forward_rounded),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+          ],
         ),
       ),
     );
@@ -243,50 +288,233 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage> {
     _pageController = PageController(initialPage: _currentIndex);
   }
 
-  void _previous() {
-    _pageController?.previousPage(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
-    );
+  void _schedulePlayback(NewsStory story) {
+    final key = '${story.id}:$_restartEpoch';
+    if (_scheduledPlaybackKey == key) return;
+    _scheduledPlaybackKey = key;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _scheduledPlaybackKey != key) return;
+      _activateStory(story);
+    });
   }
 
-  void _next() {
-    _pageController?.nextPage(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
+  void _activateStory(NewsStory story) {
+    _progressController.stop();
+    _currentVideoReady = false;
+    _progressController.duration = _isVideo(story)
+        ? _videoFallbackDuration
+        : _imageDuration;
+    _progressController.value = 0;
+    if (!_held) _progressController.forward();
+  }
+
+  void _handleProgressStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed || !mounted || _held) return;
+    final current = _currentStory;
+    if (current == null) return;
+    if (_isVideo(current) && _currentVideoReady) return;
+    _advance();
+  }
+
+  NewsStory? get _currentStory {
+    if (_renderedStories.isEmpty ||
+        _currentIndex < 0 ||
+        _currentIndex >= _renderedStories.length) {
+      return null;
+    }
+    return _renderedStories[_currentIndex];
+  }
+
+  bool _isVideo(NewsStory story) =>
+      story.effectiveMediaType == NewsMediaType.video &&
+      (story.effectiveMediaUrl?.trim().isNotEmpty ?? false);
+
+  void _handlePageChanged(int index) {
+    if (!mounted) return;
+    setState(() {
+      _currentIndex = index;
+      _held = false;
+    });
+  }
+
+  void _handleTap(TapUpDetails details) {
+    if (_held || _navigating) return;
+    final width = MediaQuery.sizeOf(context).width;
+    if (details.localPosition.dx < width / 2) {
+      _previous();
+    } else {
+      _advance();
+    }
+  }
+
+  void _previous() {
+    if (_currentIndex <= 0) {
+      _restartCurrentStory();
+      return;
+    }
+    _animateTo(_currentIndex - 1);
+  }
+
+  void _advance() {
+    if (_navigating || !mounted) return;
+    if (_currentIndex >= _renderedStories.length - 1) {
+      context.pop();
+      return;
+    }
+    _animateTo(_currentIndex + 1);
+  }
+
+  Future<void> _animateTo(int index) async {
+    final controller = _pageController;
+    if (controller == null || !controller.hasClients || _navigating) return;
+    _navigating = true;
+    _progressController.stop();
+    try {
+      await controller.animateToPage(
+        index,
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+      );
+    } finally {
+      _navigating = false;
+    }
+  }
+
+  void _restartCurrentStory() {
+    setState(() {
+      _restartEpoch++;
+      _held = false;
+      _scheduledPlaybackKey = null;
+    });
+  }
+
+  void _holdPlayback() {
+    if (_held || !mounted) return;
+    setState(() => _held = true);
+    _progressController.stop();
+  }
+
+  void _resumePlayback() {
+    if (!_held || !mounted) return;
+    setState(() => _held = false);
+    final current = _currentStory;
+    if (current != null && (!_isVideo(current) || !_currentVideoReady)) {
+      _progressController.forward();
+    }
+  }
+
+  void _handleVideoReady(NewsStory story, Duration duration) {
+    if (!mounted || _currentStory?.id != story.id) return;
+    _currentVideoReady = true;
+    _progressController.stop();
+    _progressController.value = 0;
+  }
+
+  void _handleVideoProgress(
+    NewsStory story,
+    Duration position,
+    Duration duration,
+  ) {
+    if (!mounted ||
+        _currentStory?.id != story.id ||
+        duration <= Duration.zero) {
+      return;
+    }
+    final value = position.inMilliseconds / duration.inMilliseconds;
+    _progressController.value = value.clamp(0.0, 1.0);
+  }
+
+  void _handleVideoEnded(NewsStory story) {
+    if (!mounted || _currentStory?.id != story.id || _held) return;
+    _advance();
+  }
+}
+
+class _StoryProgress extends StatelessWidget {
+  const _StoryProgress({
+    required this.count,
+    required this.currentIndex,
+    required this.currentValue,
+  });
+
+  final int count;
+  final int currentIndex;
+  final double currentValue;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        for (var index = 0; index < count; index++) ...[
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: SizedBox(
+                height: 3,
+                child: ColoredBox(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: FractionallySizedBox(
+                      key: index == currentIndex
+                          ? const ValueKey('story-progress-current')
+                          : null,
+                      widthFactor: index < currentIndex
+                          ? 1
+                          : index == currentIndex
+                          ? currentValue
+                          : 0,
+                      child: const ColoredBox(color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (index != count - 1) const SizedBox(width: 3),
+        ],
+      ],
     );
   }
 }
 
 class _StoryContent extends StatelessWidget {
   const _StoryContent({
+    super.key,
     required this.story,
     required this.language,
-    required this.foreground,
     required this.isCurrent,
+    required this.playbackPaused,
+    this.onVideoReady,
+    this.onVideoProgress,
+    this.onVideoEnded,
   });
 
   final NewsStory story;
   final AppLanguage language;
-  final Color foreground;
   final bool isCurrent;
+  final bool playbackPaused;
+  final ValueChanged<Duration>? onVideoReady;
+  final void Function(Duration position, Duration duration)? onVideoProgress;
+  final VoidCallback? onVideoEnded;
 
   @override
   Widget build(BuildContext context) {
     final badge = story.badge.resolve(language).trim();
+    final title = story.title.resolve(language).trim();
     final body = story.body.resolve(language).trim();
-    final cta = story.ctaLabel?.resolve(language).trim();
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 84, 24, 84),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          minHeight: MediaQuery.sizeOf(context).height - 190,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    final hasMedia =
+        story.effectiveMediaType != NewsMediaType.none ||
+        story.assetImage != null;
+
+    return ColoredBox(
+      key: ValueKey('story-current-${story.id}'),
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (hasMedia)
             NewsMediaView(
-              key: ValueKey('story-media-${story.id}-$isCurrent'),
               mediaType: story.effectiveMediaType,
               url: story.effectiveMediaUrl,
               thumbnailUrl: story.thumbnailUrl,
@@ -294,69 +522,128 @@ class _StoryContent extends StatelessWidget {
               allowVideo: isCurrent,
               isActive: isCurrent,
               fallbackIcon: story.visual.icon,
+              borderRadius: BorderRadius.zero,
+              fit: BoxFit.contain,
+              expand: true,
+              backgroundColor: Colors.black,
+              autoPlay: true,
+              playbackPaused: playbackPaused,
+              showPlaybackControls: false,
+              initialMuted: false,
+              onVideoReady: onVideoReady,
+              onVideoProgress: onVideoProgress,
+              onVideoEnded: onVideoEnded,
+            )
+          else
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    story.accentColor,
+                    Color.lerp(story.accentColor, Colors.black, 0.36)!,
+                  ],
+                ),
+              ),
+              child: Center(
+                child: Icon(
+                  story.visual.icon,
+                  color: Colors.white.withValues(alpha: 0.9),
+                  size: 92,
+                ),
+              ),
             ),
-            if (badge.isNotEmpty) ...[
-              const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0x52000000),
+                    Colors.transparent,
+                    Colors.transparent,
+                    Color(0xB8000000),
+                  ],
+                  stops: [0, 0.2, 0.55, 1],
                 ),
-                decoration: BoxDecoration(
-                  color: foreground.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  badge,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: foreground,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(height: 18),
-            Text(
-              story.title.resolve(language),
-              style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                color: foreground,
-                fontWeight: FontWeight.w800,
-                height: 1.05,
               ),
             ),
-            if (body.isNotEmpty) ...[
-              const SizedBox(height: 18),
-              Text(
-                body,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: foreground.withValues(alpha: 0.9),
-                  height: 1.4,
+          ),
+          SafeArea(
+            top: false,
+            child: Align(
+              alignment: Alignment.bottomLeft,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 110, 24, 34),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (badge.isNotEmpty) ...[
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.36),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.25),
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          child: Text(
+                            badge,
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                    ],
+                    if (title.isNotEmpty)
+                      Text(
+                        title,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              height: 1.08,
+                              shadows: const [
+                                Shadow(blurRadius: 12, color: Colors.black87),
+                              ],
+                            ),
+                      ),
+                    if (body.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        body,
+                        maxLines: 6,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.94),
+                          height: 1.32,
+                          shadows: const [
+                            Shadow(blurRadius: 10, color: Colors.black87),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-            ],
-            if (cta != null &&
-                cta.isNotEmpty &&
-                _isAllowedRoute(story.ctaRoute)) ...[
-              const SizedBox(height: 24),
-              FilledButton.icon(
-                onPressed: () => context.push(story.ctaRoute!),
-                icon: const Icon(Icons.arrow_forward_rounded),
-                label: Text(cta),
-              ),
-            ],
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
-}
-
-bool _isAllowedRoute(String? route) {
-  if (route == null || !route.startsWith('/')) return false;
-  return route == '/' ||
-      route.startsWith('/catalog') ||
-      route.startsWith('/qr') ||
-      route.startsWith('/cart') ||
-      route.startsWith('/profile') ||
-      route.startsWith('/news');
 }
