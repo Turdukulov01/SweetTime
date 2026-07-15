@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 from . import schemas
 from .auth import global_router as auth_global_router
 from .auth import router as auth_router
+from .content import router as content_router
 from .config import settings
 from .database import engine, get_db
 from .deps import (
@@ -84,6 +85,7 @@ app.add_middleware(
 # Логин/refresh/me/OTP: /api/companies/{companyId}/auth/...
 app.include_router(auth_global_router)
 app.include_router(auth_router)
+app.include_router(content_router)
 
 # В production `/media/*` отдаёт nginx напрямую. Локально nginx обычно нет,
 # поэтому dev-only mount позволяет проверить загруженный URL на телефоне/ПК.
@@ -149,6 +151,12 @@ def _branch_out(b: Branch) -> schemas.BranchOut:
 
 
 def _news_out(n: News) -> schemas.NewsOut:
+    published_at = n.published_at
+    if published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=timezone.utc)
+    expires_at = n.expires_at
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
     return schemas.NewsOut(
         id=n.id,
         sortOrder=n.sort_order,
@@ -158,8 +166,8 @@ def _news_out(n: News) -> schemas.NewsOut:
         badge=n.badge,
         accentColor=n.accent_color,
         visual=n.visual,
-        publishedAt=n.published_at,
-        expiresAt=n.expires_at,
+        publishedAt=published_at.isoformat(),
+        expiresAt=expires_at.isoformat() if expires_at else None,
         imageUrl=n.image_url,
         ctaLabel=n.cta_label,
         ctaRoute=n.cta_route,
@@ -656,10 +664,16 @@ def patch_order_status(
 def list_news(
     company: Company = Depends(get_company), db: Session = Depends(get_db)
 ) -> list[schemas.NewsOut]:
+    now = datetime.now(timezone.utc)
     items = db.scalars(
         select(News)
-        .where(News.company_id == company.id)
-        .order_by(News.sort_order.asc())
+        .where(
+            News.company_id == company.id,
+            News.is_published.is_(True),
+            News.published_at <= now,
+            (News.expires_at.is_(None) | (News.expires_at > now)),
+        )
+        .order_by(News.is_pinned.desc(), News.published_at.desc(), News.id.desc())
     ).all()
     return [_news_out(n) for n in items]
 

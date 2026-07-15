@@ -25,6 +25,7 @@ from .models import (
     Order,
     Product,
     Promotion,
+    StoryCollection,
 )
 from .security import hash_password
 
@@ -88,6 +89,12 @@ def _yesterday_at(hours: int, minutes: int) -> str:
 def _days_ago(days: int, hours: int, minutes: int) -> str:
     d = datetime.now(timezone.utc) - timedelta(days=days)
     return _iso(d.replace(hour=hours, minute=minutes, second=0, microsecond=0))
+
+
+def _content_dt(value: str) -> datetime:
+    """Parse stable UTC content fixture dates into the aware ORM type."""
+
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 # ---------------------------------------------------------------------------
@@ -696,10 +703,43 @@ _COFFEEGO_HISTORY_START = 180  # CG-180 … CG-198
 # 0xFFRRGGBB → "#RRGGBB", переводы ru/ky/en сохранены. CoffeeGo — свои.
 # ---------------------------------------------------------------------------
 
+_STORY_COLLECTIONS = [
+    StoryCollection(
+        id="collection-sweettime-news",
+        company_id="sweettime",
+        name={"ru": "Новости", "ky": "Жаңылыктар", "en": "News"},
+        description={
+            "ru": "Что нового в SweetTime",
+            "ky": "SweetTime'дагы жаңылыктар",
+            "en": "What's new at SweetTime",
+        },
+        accent_color="#FF8FBD",
+        visual="sparkle",
+        sort_order=10,
+        is_published=True,
+    ),
+    StoryCollection(
+        id="collection-coffeego-news",
+        company_id="coffeego",
+        name={"ru": "Новости", "ky": "Жаңылыктар", "en": "News"},
+        description={
+            "ru": "Что нового в CoffeeGo",
+            "ky": "CoffeeGo'догу жаңылыктар",
+            "en": "What's new at CoffeeGo",
+        },
+        accent_color="#34C99A",
+        visual="sparkle",
+        sort_order=10,
+        is_published=True,
+    ),
+]
+
+
 _SWEETTIME_NEWS = [
     News(
         id="news-week-flavor",
         company_id="sweettime",
+        collection_id="collection-sweettime-news",
         sort_order=10,
         is_published=True,
         title={
@@ -718,11 +758,12 @@ _SWEETTIME_NEWS = [
         badge={"ru": "Новинка", "ky": "Жаңы", "en": "New"},
         accent_color="#FF8FBD",
         visual="sparkle",
-        published_at="2026-07-13T00:00:00Z",
+        published_at=_content_dt("2026-07-13T00:00:00Z"),
     ),
     News(
         id="news-manas",
         company_id="sweettime",
+        collection_id="collection-sweettime-news",
         sort_order=20,
         is_published=True,
         title={
@@ -740,11 +781,12 @@ _SWEETTIME_NEWS = [
         badge={"ru": "Филиал", "ky": "Филиал", "en": "Branch"},
         accent_color="#8FDCC4",
         visual="storefront",
-        published_at="2026-07-10T00:00:00Z",
+        published_at=_content_dt("2026-07-10T00:00:00Z"),
     ),
     News(
         id="news-table-qr",
         company_id="sweettime",
+        collection_id="collection-sweettime-news",
         sort_order=30,
         is_published=True,
         title={
@@ -763,11 +805,12 @@ _SWEETTIME_NEWS = [
         badge={"ru": "Совет", "ky": "Кеңеш", "en": "Tip"},
         accent_color="#FFC96B",
         visual="qr",
-        published_at="2026-07-08T00:00:00Z",
+        published_at=_content_dt("2026-07-08T00:00:00Z"),
     ),
     News(
         id="news-double-points",
         company_id="sweettime",
+        collection_id="collection-sweettime-news",
         sort_order=40,
         is_published=True,
         title={
@@ -785,7 +828,7 @@ _SWEETTIME_NEWS = [
         badge={"ru": "Лояльность", "ky": "Лоялдуулук", "en": "Loyalty"},
         accent_color="#A9D88E",
         visual="loyalty",
-        published_at="2026-07-06T00:00:00Z",
+        published_at=_content_dt("2026-07-06T00:00:00Z"),
     ),
 ]
 
@@ -850,6 +893,7 @@ _COFFEEGO_NEWS = [
     News(
         id="cg-news-yunusalieva",
         company_id="coffeego",
+        collection_id="collection-coffeego-news",
         sort_order=10,
         is_published=True,
         title={
@@ -868,11 +912,12 @@ _COFFEEGO_NEWS = [
         badge={"ru": "Филиал", "ky": "Филиал", "en": "Branch"},
         accent_color="#34C99A",
         visual="storefront",
-        published_at="2026-07-11T00:00:00Z",
+        published_at=_content_dt("2026-07-11T00:00:00Z"),
     ),
     News(
         id="cg-news-loyalty",
         company_id="coffeego",
+        collection_id="collection-coffeego-news",
         sort_order=20,
         is_published=True,
         title={
@@ -890,7 +935,7 @@ _COFFEEGO_NEWS = [
         badge={"ru": "Лояльность", "ky": "Лоялдуулук", "en": "Loyalty"},
         accent_color="#6B4226",
         visual="loyalty",
-        published_at="2026-07-07T00:00:00Z",
+        published_at=_content_dt("2026-07-07T00:00:00Z"),
     ),
 ]
 
@@ -1097,6 +1142,8 @@ def seed_if_empty(db: Session) -> bool:
 
     db.add_all(_SWEETTIME_PRODUCTS)
     db.add_all(_COFFEEGO_PRODUCTS)
+    db.add_all(_STORY_COLLECTIONS)
+    db.flush()  # collections exist -> News.collection_id is valid below
 
     # Заказы SweetTime собираем вместе: часть из них — заказы демо-клиента,
     # их надо связать с ним, иначе его история в приложении будет пустой.
@@ -1139,6 +1186,7 @@ def bootstrap_production_sweettime(
     company = _fresh_rows([_COMPANIES[0]], Company)[0]
     branches = _fresh_rows(_SWEETTIME_BRANCHES, Branch)
     products = _fresh_rows(_SWEETTIME_PRODUCTS, Product)
+    collections = _fresh_rows([_STORY_COLLECTIONS[0]], StoryCollection)
     news = _fresh_rows(_SWEETTIME_NEWS, News)
     promotions = _fresh_rows(_SWEETTIME_PROMOTIONS, Promotion)
 
@@ -1159,6 +1207,8 @@ def bootstrap_production_sweettime(
             )
         )
         db.add_all(products)
+        db.add_all(collections)
+        db.flush()
         db.add_all(news)
         db.add_all(promotions)
         db.commit()

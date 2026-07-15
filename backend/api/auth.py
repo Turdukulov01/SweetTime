@@ -676,6 +676,12 @@ def customer_upload_avatar(
     created_at = datetime.now(timezone.utc)
 
     try:
+        # Media metadata has one row per entity+variant. Remove the old set and
+        # flush it before inserting replacements so the unique constraint also
+        # protects concurrent uploads.
+        for old in old_media:
+            db.delete(old)
+        db.flush()
         for variant in saved.variants.values():
             db.add(
                 MediaFile(
@@ -694,8 +700,6 @@ def customer_upload_avatar(
                 )
             )
         customer.avatar_storage_key = saved.medium.storage_key
-        for old in old_media:
-            db.delete(old)
         db.commit()
         db.refresh(customer)
     except Exception:

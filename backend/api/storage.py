@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+from typing import BinaryIO
 from uuid import uuid4
 import warnings
 
@@ -29,6 +31,16 @@ VARIANT_SIZES = {
     "thumbnail": (240, 240, 78),
 }
 _SAFE_TENANT = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
+MEDIA_KINDS = {
+    "avatars",
+    "products",
+    "categories",
+    "banners",
+    "branding",
+    "stories",
+    "story_collections",
+    "news_posts",
+}
 
 
 class StorageValidationError(ValueError):
@@ -55,6 +67,15 @@ class SavedImage:
         return self.variants["medium"]
 
 
+@dataclass(frozen=True)
+class SavedVideo:
+    video_id: str
+    original_filename: str | None
+    storage_key: str
+    size_bytes: int
+    checksum_sha256: str
+
+
 class StorageService:
     """Локальная реализация интерфейса media storage."""
 
@@ -65,11 +86,13 @@ class StorageService:
         public_base_url: str,
         max_image_bytes: int,
         max_image_pixels: int,
+        max_video_bytes: int = 50 * 1024 * 1024,
     ) -> None:
         self.media_root = media_root
         self.public_base_url = public_base_url.rstrip("/")
         self.max_image_bytes = max_image_bytes
         self.max_image_pixels = max_image_pixels
+        self.max_video_bytes = max_video_bytes
 
     def build_storage_key(
         self,
@@ -82,7 +105,7 @@ class StorageService:
     ) -> str:
         if not _SAFE_TENANT.fullmatch(tenant_slug):
             raise StorageValidationError("Invalid tenant identifier")
-        if media_kind not in {"avatars", "products", "categories", "banners", "branding"}:
+        if media_kind not in MEDIA_KINDS:
             raise StorageValidationError("Unsupported media kind")
         if variant not in VARIANT_SIZES:
             raise StorageValidationError("Unsupported image variant")
@@ -94,6 +117,28 @@ class StorageService:
             f"{created_at.month:02d}",
             image_id,
             f"{variant}.webp",
+        ).as_posix()
+
+    def build_video_storage_key(
+        self,
+        *,
+        tenant_slug: str,
+        media_kind: str,
+        video_id: str,
+        created_at: datetime,
+    ) -> str:
+        if not _SAFE_TENANT.fullmatch(tenant_slug):
+            raise StorageValidationError("Invalid tenant identifier")
+        if media_kind not in MEDIA_KINDS:
+            raise StorageValidationError("Unsupported media kind")
+        return PurePosixPath(
+            "tenants",
+            tenant_slug,
+            media_kind,
+            str(created_at.year),
+            f"{created_at.month:02d}",
+            video_id,
+            "video.mp4",
         ).as_posix()
 
     def get_public_url(self, storage_key: str | None) -> str | None:
@@ -170,6 +215,74 @@ class StorageService:
             variants=variants,
         )
 
+    def save_mp4(
+        self,
+        *,
+        tenant_slug: str,
+        media_kind: str,
+        file_object: BinaryIO,
+        original_filename: str | None,
+        declared_content_type: str | None,
+    ) -> SavedVideo:
+        """Stream a signature-validated MP4 into a controlled storage key.
+
+        This deliberately does not claim codec validation or transcoding. The
+        admin contract must require an H.264/AAC MP4 from the operator.
+        """
+
+        if declared_content_type != "video/mp4":
+            raise StorageValidationError("Only video/mp4 is supported")
+
+        created_at = datetime.now(timezone.utc)
+        video_id = str(uuid4())
+        storage_key = self.build_video_storage_key(
+            tenant_slug=tenant_slug,
+            media_kind=media_kind,
+            video_id=video_id,
+            created_at=created_at,
+        )
+        final_path = self._safe_path(storage_key)
+        temp_dir = self.media_root / "temp" / video_id
+        temp_path = temp_dir / "video.mp4"
+        digest = sha256()
+        size_bytes = 0
+        signature = bytearray()
+
+        try:
+            temp_dir.mkdir(parents=True, exist_ok=False)
+            with temp_path.open("xb") as destination:
+                while True:
+                    chunk = file_object.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size_bytes += len(chunk)
+                    if size_bytes > self.max_video_bytes:
+                        raise StorageValidationError("Video file is too large")
+                    if len(signature) < 32:
+                        signature.extend(chunk[: 32 - len(signature)])
+                    digest.update(chunk)
+                    destination.write(chunk)
+
+            if not size_bytes:
+                raise StorageValidationError("Video file is empty")
+            self._validate_mp4_signature(bytes(signature), size_bytes)
+
+            final_path.parent.parent.mkdir(parents=True, exist_ok=True)
+            temp_dir.replace(final_path.parent)
+        except Exception:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            if final_path.parent.exists():
+                shutil.rmtree(final_path.parent, ignore_errors=True)
+            raise
+
+        return SavedVideo(
+            video_id=video_id,
+            original_filename=self._safe_filename(original_filename),
+            storage_key=storage_key,
+            size_bytes=size_bytes,
+            checksum_sha256=digest.hexdigest(),
+        )
+
     def delete_file(self, storage_key: str) -> None:
         path = self._safe_path(storage_key)
         path.unlink(missing_ok=True)
@@ -213,6 +326,21 @@ class StorageService:
         except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError) as exc:
             raise StorageValidationError("Invalid image file") from exc
 
+    @staticmethod
+    def _validate_mp4_signature(header: bytes, size_bytes: int) -> None:
+        # ISO BMFF begins with a sized box whose type is `ftyp`. Extended-size
+        # boxes are valid but pointless for this tiny header, so accept them
+        # only when the minimum signature is still structurally sound.
+        if len(header) < 12 or header[4:8] != b"ftyp":
+            raise StorageValidationError("Invalid MP4 signature")
+        box_size = int.from_bytes(header[:4], "big")
+        if box_size == 1:
+            if len(header) < 16:
+                raise StorageValidationError("Invalid MP4 signature")
+            box_size = int.from_bytes(header[8:16], "big")
+        if box_size < 12 or box_size > size_bytes:
+            raise StorageValidationError("Invalid MP4 signature")
+
     def _safe_path(self, storage_key: str) -> Path:
         pure = PurePosixPath(storage_key)
         if pure.is_absolute() or ".." in pure.parts or not pure.parts:
@@ -235,4 +363,5 @@ storage_service = StorageService(
     public_base_url=settings.media_public_base_url,
     max_image_bytes=settings.media_max_image_bytes,
     max_image_pixels=settings.media_max_image_pixels,
+    max_video_bytes=settings.media_max_video_bytes,
 )

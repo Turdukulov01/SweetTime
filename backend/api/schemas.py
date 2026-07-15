@@ -7,9 +7,18 @@
 текущем сиде), либо локализованный объект {ru,ky,en} — приложение умеет оба.
 """
 
+from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 OrderType = Literal["pickup", "scheduled", "qr"]
 OrderStatus = Literal["new", "preparing", "ready", "done", "cancelled"]
@@ -307,13 +316,19 @@ class NewsCreate(BaseModel):
     badge: LocalizedText
     accentColor: HexColor = "#FF5C9A"
     visual: NewsVisual
-    publishedAt: str
-    expiresAt: str | None = None
+    publishedAt: AwareDatetime
+    expiresAt: AwareDatetime | None = None
     isPublished: bool = True
     sortOrder: int = 0
     imageUrl: str | None = None
     ctaLabel: LocalizedText | None = None
     ctaRoute: str | None = None
+
+    @model_validator(mode="after")
+    def validate_active_interval(self) -> "NewsCreate":
+        if self.expiresAt is not None and self.expiresAt <= self.publishedAt:
+            raise ValueError("expiresAt must be later than publishedAt")
+        return self
 
 
 class NewsPatch(BaseModel):
@@ -324,13 +339,184 @@ class NewsPatch(BaseModel):
     badge: LocalizedText | None = None
     accentColor: HexColor | None = None
     visual: NewsVisual | None = None
-    publishedAt: str | None = None
-    expiresAt: str | None = None
+    publishedAt: AwareDatetime | None = None
+    expiresAt: AwareDatetime | None = None
     isPublished: bool | None = None
     sortOrder: int | None = None
     imageUrl: str | None = None
     ctaLabel: LocalizedText | None = None
     ctaRoute: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Stories, collections and permanent news feed (V2 content contract)
+# ---------------------------------------------------------------------------
+
+
+class FullLocalizedText(BaseModel):
+    """All locales are always present; blank values are allowed only in drafts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ru: str = Field(default="", max_length=10_000)
+    ky: str = Field(default="", max_length=10_000)
+    en: str = Field(default="", max_length=10_000)
+
+
+ContentMediaType = Literal["none", "image", "video"]
+
+
+class ContentMediaOut(BaseModel):
+    type: ContentMediaType
+    url: str | None = None
+    thumbnailUrl: str | None = None
+
+
+class StoryOut(BaseModel):
+    id: str
+    collectionId: str | None = None
+    title: FullLocalizedText
+    body: FullLocalizedText
+    badge: FullLocalizedText
+    accentColor: HexColor
+    visual: NewsVisual
+    isPublished: bool
+    showOnHome: bool
+    isPinned: bool
+    sortOrder: int
+    publishedAt: datetime
+    expiresAt: datetime | None = None
+    mediaType: ContentMediaType
+    mediaUrl: str | None = None
+    imageUrl: str | None = None
+    thumbnailUrl: str | None = None
+    ctaLabel: FullLocalizedText | None = None
+    ctaRoute: str | None = None
+
+
+class StoryWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collectionId: str | None = Field(default=None, max_length=64)
+    title: FullLocalizedText = Field(default_factory=FullLocalizedText)
+    body: FullLocalizedText = Field(default_factory=FullLocalizedText)
+    badge: FullLocalizedText = Field(default_factory=FullLocalizedText)
+    accentColor: HexColor = "#FF5C9A"
+    visual: NewsVisual = "sparkle"
+    showOnHome: bool = True
+    isPinned: bool = False
+    sortOrder: int = 0
+    publishedAt: AwareDatetime | None = None
+    expiresAt: AwareDatetime | None = None
+    ctaLabel: FullLocalizedText | None = None
+    ctaRoute: str | None = Field(default=None, max_length=255)
+    isPublished: bool = False
+
+    @model_validator(mode="after")
+    def validate_active_interval(self) -> "StoryWrite":
+        if (
+            self.publishedAt is not None
+            and self.expiresAt is not None
+            and self.expiresAt <= self.publishedAt
+        ):
+            raise ValueError("expiresAt must be later than publishedAt")
+        return self
+
+
+class StoryPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collectionId: str | None = Field(default=None, max_length=64)
+    title: FullLocalizedText | None = None
+    body: FullLocalizedText | None = None
+    badge: FullLocalizedText | None = None
+    accentColor: HexColor | None = None
+    visual: NewsVisual | None = None
+    showOnHome: bool | None = None
+    isPinned: bool | None = None
+    sortOrder: int | None = None
+    publishedAt: AwareDatetime | None = None
+    expiresAt: AwareDatetime | None = None
+    ctaLabel: FullLocalizedText | None = None
+    ctaRoute: str | None = Field(default=None, max_length=255)
+    isPublished: bool | None = None
+
+
+class StoryPage(BaseModel):
+    items: list[StoryOut]
+    nextCursor: str | None = None
+
+
+class StoryCollectionOut(BaseModel):
+    id: str
+    name: FullLocalizedText
+    description: FullLocalizedText | None = None
+    coverImageUrl: str | None = None
+    coverThumbnailUrl: str | None = None
+    accentColor: HexColor
+    visual: NewsVisual
+    sortOrder: int
+    isPublished: bool
+    storyCount: int = 0
+
+
+class StoryCollectionWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: FullLocalizedText = Field(default_factory=FullLocalizedText)
+    description: FullLocalizedText | None = None
+    accentColor: HexColor = "#FF5C9A"
+    visual: NewsVisual = "sparkle"
+    sortOrder: int = 0
+    isPublished: bool = False
+
+
+class StoryCollectionPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: FullLocalizedText | None = None
+    description: FullLocalizedText | None = None
+    accentColor: HexColor | None = None
+    visual: NewsVisual | None = None
+    sortOrder: int | None = None
+    isPublished: bool | None = None
+
+
+class NewsPostOut(BaseModel):
+    id: str
+    title: FullLocalizedText
+    summary: FullLocalizedText
+    body: FullLocalizedText
+    isPublished: bool
+    publishedAt: datetime
+    mediaType: ContentMediaType
+    mediaUrl: str | None = None
+    thumbnailUrl: str | None = None
+
+
+class NewsPostWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: FullLocalizedText = Field(default_factory=FullLocalizedText)
+    summary: FullLocalizedText = Field(default_factory=FullLocalizedText)
+    body: FullLocalizedText = Field(default_factory=FullLocalizedText)
+    publishedAt: AwareDatetime | None = None
+    isPublished: bool = False
+
+
+class NewsPostPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: FullLocalizedText | None = None
+    summary: FullLocalizedText | None = None
+    body: FullLocalizedText | None = None
+    publishedAt: AwareDatetime | None = None
+    isPublished: bool | None = None
+
+
+class NewsPostPage(BaseModel):
+    items: list[NewsPostOut]
+    nextCursor: str | None = None
 
 
 # ---------------------------------------------------------------------------

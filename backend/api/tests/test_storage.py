@@ -113,3 +113,58 @@ def test_delete_image_variants_removes_uuid_directory(tmp_path) -> None:
     )
 
     assert not image_dir.exists()
+
+
+def _minimal_mp4(payload: bytes = b"payload") -> bytes:
+    # 20-byte ftyp box followed by opaque bytes. Codec validation/transcoding is
+    # deliberately outside this first backend slice.
+    return (20).to_bytes(4, "big") + b"ftyp" + b"isom" + b"\x00\x00\x00\x00" + b"isom" + payload
+
+
+def test_save_mp4_streams_signature_validated_file(tmp_path) -> None:
+    service = StorageService(
+        media_root=tmp_path / "media",
+        public_base_url="https://api.example/media",
+        max_image_bytes=1024,
+        max_image_pixels=1_000,
+        max_video_bytes=1024,
+    )
+    saved = service.save_mp4(
+        tenant_slug="sweettime",
+        media_kind="stories",
+        file_object=BytesIO(_minimal_mp4()),
+        original_filename="../clip.mp4",
+        declared_content_type="video/mp4",
+    )
+    assert saved.original_filename == "clip.mp4"
+    assert saved.storage_key.endswith("/video.mp4")
+    assert len(saved.checksum_sha256) == 64
+    assert service.media_root.joinpath(*saved.storage_key.split("/")).is_file()
+
+
+@pytest.mark.parametrize(
+    ("content", "content_type", "limit"),
+    [
+        (b"not-mp4", "video/mp4", 1024),
+        (_minimal_mp4(), "application/octet-stream", 1024),
+        (_minimal_mp4(b"x" * 100), "video/mp4", 32),
+    ],
+)
+def test_save_mp4_rejects_signature_mime_and_size(
+    tmp_path, content: bytes, content_type: str, limit: int
+) -> None:
+    service = StorageService(
+        media_root=tmp_path / "media",
+        public_base_url="/media",
+        max_image_bytes=1024,
+        max_image_pixels=1_000,
+        max_video_bytes=limit,
+    )
+    with pytest.raises(StorageValidationError):
+        service.save_mp4(
+            tenant_slug="sweettime",
+            media_kind="stories",
+            file_object=BytesIO(content),
+            original_filename="clip.mp4",
+            declared_content_type=content_type,
+        )

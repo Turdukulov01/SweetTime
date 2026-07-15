@@ -62,6 +62,19 @@ class MediaFile(Base):
     __tablename__ = "media_files"
     __table_args__ = (
         UniqueConstraint("storage_key", name="uq_media_file_storage_key"),
+        UniqueConstraint(
+            "tenant_id",
+            "entity_type",
+            "entity_id",
+            "variant",
+            name="uq_media_file_entity_variant",
+        ),
+        Index(
+            "ix_media_files_tenant_entity",
+            "tenant_id",
+            "entity_type",
+            "entity_id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
@@ -77,6 +90,10 @@ class MediaFile(Base):
     width: Mapped[int] = mapped_column(Integer)
     height: Mapped[int] = mapped_column(Integer)
     variant: Mapped[str] = mapped_column(String(50))
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    checksum_sha256: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -239,13 +256,40 @@ class News(Base):
     JSON-объекты {"ru": ..., "ky"?: ..., "en"?: ...}."""
 
     __tablename__ = "news"
+    __table_args__ = (
+        Index(
+            "ix_news_public_home",
+            "company_id",
+            "is_published",
+            "show_on_home",
+            "is_pinned",
+            "published_at",
+            "id",
+        ),
+        Index(
+            "ix_news_public_collection",
+            "company_id",
+            "collection_id",
+            "is_published",
+            "is_pinned",
+            "published_at",
+            "id",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     company_id: Mapped[str] = mapped_column(
         ForeignKey("companies.id"), index=True
     )
+    collection_id: Mapped[str | None] = mapped_column(
+        ForeignKey("story_collections.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
     is_published: Mapped[bool] = mapped_column(Boolean, default=True)
+    show_on_home: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     title: Mapped[dict] = mapped_column(JSON)
     body: Mapped[dict] = mapped_column(JSON)
     badge: Mapped[dict] = mapped_column(JSON)
@@ -253,12 +297,92 @@ class News(Base):
     accent_color: Mapped[str]
     # sparkle | storefront | qr | loyalty
     visual: Mapped[str]
-    # ISO-8601 строки
-    published_at: Mapped[str]
-    expires_at: Mapped[str | None] = mapped_column(default=None)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    # none | image | video. The URL is always derived from server media metadata
+    # for V2; image_url remains only as a legacy read alias.
+    media_type: Mapped[str] = mapped_column(String(16), default="none")
     image_url: Mapped[str | None] = mapped_column(default=None)
     cta_label: Mapped[dict | None] = mapped_column(JSON, default=None)
     cta_route: Mapped[str | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class StoryCollection(Base):
+    """Localized, owner-managed grouping for a lazy list of stories."""
+
+    __tablename__ = "story_collections"
+    __table_args__ = (
+        Index(
+            "ix_story_collections_public_order",
+            "company_id",
+            "is_published",
+            "sort_order",
+            "id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id"), index=True
+    )
+    name: Mapped[dict] = mapped_column(JSON)
+    description: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    accent_color: Mapped[str] = mapped_column(String(7), default="#FF5C9A")
+    visual: Mapped[str] = mapped_column(String(32), default="sparkle")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    is_published: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class NewsPost(Base):
+    """Permanent, cursor-paginated publication in the news feed."""
+
+    __tablename__ = "news_posts"
+    __table_args__ = (
+        Index(
+            "ix_news_posts_public_feed",
+            "company_id",
+            "is_published",
+            "published_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id"), index=True
+    )
+    title: Mapped[dict] = mapped_column(JSON)
+    summary: Mapped[dict] = mapped_column(JSON)
+    body: Mapped[dict] = mapped_column(JSON)
+    is_published: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    media_type: Mapped[str] = mapped_column(String(16), default="none")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class Promotion(Base):

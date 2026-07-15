@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     media_public_base_url: str = "/media"
     media_max_image_bytes: int = 10 * 1024 * 1024
     media_max_image_pixels: int = 25_000_000
+    media_max_video_bytes: int = 50 * 1024 * 1024
 
     @model_validator(mode="after")
     def validate_production_safety(self) -> "Settings":
