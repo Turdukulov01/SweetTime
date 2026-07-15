@@ -59,7 +59,7 @@ below remains authoritative; this section records the current execution order.
   passed Redmi release smoke for QR preview initialization, torch, tab leave/re-entry, and launching the
   external profile camera without an ML Kit crash. An iOS OAuth client and URL scheme remain future iOS-release work. SMS
   verification remains a later task.
-- [ ] **S6 — Ubuntu deployment artifacts.** **[partial—verified in production; next: authenticated admin acceptance]** `backend/api/Dockerfile`
+- [ ] **S6 — Ubuntu deployment artifacts.** **[partial—verified in production; next: admin content acceptance]** `backend/api/Dockerfile`
   and `deploy/production/` contain PostgreSQL, Redis, backend, nginx, media volume and an environment
   example. PostgreSQL/backend/nginx now have ordered healthchecks; `/ready` probes the real database.
   Production config rejects placeholder secrets, wildcard/non-HTTPS CORS, mock OTP and demo seed;
@@ -76,7 +76,8 @@ below remains authoritative; this section records the current execution order.
   disposable PostgreSQL→backend→admin→nginx smoke and security-header checks pass locally. The admin image
   is now deployed internally on the physical server: public `/login` and `/ready` return 200, `/admin`
   redirects to the HTTPS `/login`, temporary media remains 403, and all five production services are healthy.
-  Authenticated owner login and reversible admin→API content acceptance remain before this slice is approved.
+  Authenticated owner login is physically verified; reversible admin→API→mobile content acceptance remains
+  before this slice is approved.
 - [x] **S7 — deploy backend to physical server.** **[verified production]** Target is
   `ranex@81.88.192.41`; `/srv/sweetime/media`, `/srv/sweetime/backups` and
   `/srv/projects/sweetime` are prepared. Host Nginx and the valid Let's Encrypt certificate now route
@@ -284,12 +285,12 @@ below remains authoritative; this section records the current execution order.
 ## Phase 3 — Custom Next.js Admin MVP
 
 - [x] Canonical admin decision: develop `admin/`; keep `admin-legacy/` archive-only.
-- [ ] **Task 7 — Admin MVP.** **[partial—deployed 2026-07-15; authenticated acceptance pending]** Real JWT login/refresh, permission-aware
+- [ ] **Task 7 — Admin MVP.** **[partial—deployed 2026-07-15; owner login verified]** Real JWT login/refresh, permission-aware
   navigation, API-backed order queue, menu/modifiers/availability, branches, news, promotions and settings
   exist and build. The production container and TLS routing are deployed and pass unauthenticated smoke.
   Fake login credentials and recurring analytics were removed from the production surface; staff navigation
-  is hidden and the direct route is read-only until server-side staff CRUD exists. Owner login and a reversible
-  content mutation/readback test through the live API/mobile are still required.
+  is hidden and the direct route is read-only until server-side staff CRUD exists. Owner login works against
+  production; a reversible content mutation/readback test through the live API/mobile is still required.
 - [x] Connect admin to the canonical API and implement real owner/manager/barista sessions and permission-aware navigation.
 - [ ] Let the owner configure real support contacts/availability in pilot settings; mobile must not
   invent phone, email or chat availability when this configuration is absent.
@@ -306,6 +307,11 @@ below remains authoritative; this section records the current execution order.
 ## Phase 4 — Integration, Brand, Pilot, And Release
 
 - [ ] **Task 8 — Mobile API Integration.** Connect repository implementations for auth, config, catalog/branches, orders/history/status, loyalty/referral, promotions, and deletion while retaining an explicit mock/demo mode.
+- [ ] **[implemented locally 2026-07-15; physical content acceptance pending]** Admin-driven config,
+  catalog, branch, news and promotion data refreshes at bootstrap, after app resume (30-second throttle),
+  and by pull-to-refresh on Home/Catalog. Concurrent refreshes are coalesced; an empty server news/promotion
+  list is authoritative and no longer resurrects DemoData. Flutter analyze and all 53 tests pass; the release
+  APK is installed on the target Redmi for the reversible admin→mobile check.
 - [ ] Store tokens securely, handle expiry/revocation, prevent duplicate checkout/payment submissions, and make network errors conform to the state matrix.
 - [ ] Add end-to-end contract tests for Flutter -> API -> admin order processing and status refresh.
 - [ ] **Task 9 — Brand And Content Replacement.** **[blocked—owner input]** Replace app name/logo/colors/menu/photos/modifiers/branches/maps/promotion copy and seed data only with approved owner assets.

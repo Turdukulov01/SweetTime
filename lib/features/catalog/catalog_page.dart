@@ -82,147 +82,155 @@ class _CatalogPageState extends ConsumerState<CatalogPage> {
     return Scaffold(
       body: SafeArea(
         bottom: false,
-        child: CustomScrollView(
-          // Prepare roughly two rows before they enter the viewport so image
-          // decode/layout work does not land on the visible scroll frame.
-          scrollCacheExtent: const ScrollCacheExtent.pixels(680),
-          slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              sliver: SliverToBoxAdapter(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      strings.catalog,
-                      style: theme.textTheme.headlineMedium,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      strings.catalogSubtitle(state.appName),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+        child: RefreshIndicator.adaptive(
+          onRefresh: () => controller.refreshCompanyData(force: true),
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            // Prepare roughly two rows before they enter the viewport so image
+            // decode/layout work does not land on the visible scroll frame.
+            scrollCacheExtent: const ScrollCacheExtent.pixels(680),
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        strings.catalog,
+                        style: theme.textTheme.headlineMedium,
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _searchController,
-                      onChanged: (value) => setState(() => _query = value),
-                      decoration: InputDecoration(
-                        prefixIcon: const Icon(Icons.search),
-                        hintText: strings.catalogSearchHint,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: 44,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(strings.all),
-                        selected: _selectedCategoryIds.isEmpty,
-                        showCheckmark: false,
-                        onSelected: (_) => setState(_selectedCategoryIds.clear),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: Semantics(
-                        label: strings.favoritesFilterSemantics,
-                        selected: _favoritesOnly,
-                        child: FilterChip(
-                          avatar: const Icon(Icons.favorite, size: 18),
-                          label: Text(strings.favoritesFilter),
-                          selected: _favoritesOnly,
-                          showCheckmark: false,
-                          onSelected: (selected) =>
-                              setState(() => _favoritesOnly = selected),
+                      const SizedBox(height: 4),
+                      Text(
+                        strings.catalogSubtitle(state.appName),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
-                    ),
-                    for (final category in state.categories)
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _searchController,
+                        onChanged: (value) => setState(() => _query = value),
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(Icons.search),
+                          hintText: strings.catalogSearchHint,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: SizedBox(
+                  height: 44,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    children: [
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
-                        child: FilterChip(
-                          label: Text(category.name.resolve(language)),
-                          selected: _selectedCategoryIds.contains(category.id),
-                          onSelected: (selected) => setState(() {
-                            if (selected) {
-                              _selectedCategoryIds.add(category.id);
-                            } else {
-                              _selectedCategoryIds.remove(category.id);
-                            }
-                          }),
+                        child: ChoiceChip(
+                          label: Text(strings.all),
+                          selected: _selectedCategoryIds.isEmpty,
+                          showCheckmark: false,
+                          onSelected: (_) =>
+                              setState(_selectedCategoryIds.clear),
                         ),
                       ),
-                  ],
-                ),
-              ),
-            ),
-            if (filtered.isEmpty)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: EmptyState(
-                  icon: _favoritesOnly
-                      ? Icons.favorite_border
-                      : Icons.search_off,
-                  title: _favoritesOnly
-                      ? strings.favoritesEmptyTitle
-                      : strings.catalogEmptyTitle,
-                  message: _favoritesOnly
-                      ? strings.favoritesEmptyMessage
-                      : strings.catalogEmptyMessage,
-                  action: FilledButton(
-                    onPressed: _resetFilters,
-                    child: Text(strings.resetFilters),
-                  ),
-                ),
-              )
-            else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                sliver: SliverGrid(
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 220,
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    mainAxisExtent: 330,
-                  ),
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      final product = filtered[index];
-                      return ProductCard(
-                        key: ValueKey(product.id),
-                        product: product,
-                        onTap: () => context.go('/product/${product.id}'),
-                        onAdd: () async {
-                          final added = await controller.quickAdd(product);
-                          if (!context.mounted || !added) return;
-                          showTopNotice(
-                            context,
-                            message: strings.productAdded(
-                              product.name.resolve(language),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Semantics(
+                          label: strings.favoritesFilterSemantics,
+                          selected: _favoritesOnly,
+                          child: FilterChip(
+                            avatar: const Icon(Icons.favorite, size: 18),
+                            label: Text(strings.favoritesFilter),
+                            selected: _favoritesOnly,
+                            showCheckmark: false,
+                            onSelected: (selected) =>
+                                setState(() => _favoritesOnly = selected),
+                          ),
+                        ),
+                      ),
+                      for (final category in state.categories)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: FilterChip(
+                            label: Text(category.name.resolve(language)),
+                            selected: _selectedCategoryIds.contains(
+                              category.id,
                             ),
-                            actionLabel: strings.cart,
-                            onAction: () => context.go('/cart'),
-                          );
-                        },
-                      );
-                    },
-                    childCount: filtered.length,
-                    addAutomaticKeepAlives: false,
+                            onSelected: (selected) => setState(() {
+                              if (selected) {
+                                _selectedCategoryIds.add(category.id);
+                              } else {
+                                _selectedCategoryIds.remove(category.id);
+                              }
+                            }),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),
-          ],
+              if (filtered.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: EmptyState(
+                    icon: _favoritesOnly
+                        ? Icons.favorite_border
+                        : Icons.search_off,
+                    title: _favoritesOnly
+                        ? strings.favoritesEmptyTitle
+                        : strings.catalogEmptyTitle,
+                    message: _favoritesOnly
+                        ? strings.favoritesEmptyMessage
+                        : strings.catalogEmptyMessage,
+                    action: FilledButton(
+                      onPressed: _resetFilters,
+                      child: Text(strings.resetFilters),
+                    ),
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  sliver: SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 220,
+                          mainAxisSpacing: 12,
+                          crossAxisSpacing: 12,
+                          mainAxisExtent: 330,
+                        ),
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        final product = filtered[index];
+                        return ProductCard(
+                          key: ValueKey(product.id),
+                          product: product,
+                          onTap: () => context.go('/product/${product.id}'),
+                          onAdd: () async {
+                            final added = await controller.quickAdd(product);
+                            if (!context.mounted || !added) return;
+                            showTopNotice(
+                              context,
+                              message: strings.productAdded(
+                                product.name.resolve(language),
+                              ),
+                              actionLabel: strings.cart,
+                              onAction: () => context.go('/cart'),
+                            );
+                          },
+                        );
+                      },
+                      childCount: filtered.length,
+                      addAutomaticKeepAlives: false,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

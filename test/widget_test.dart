@@ -275,6 +275,36 @@ void main() {
   });
 
   test(
+    'company refresh accepts empty storefront content and reads later changes',
+    () async {
+      final api = _MutableCompanyContentApiClient(
+        news: const [],
+        promotions: const [],
+      );
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(),
+        cartStore: _MemoryCartStore(),
+        api: api,
+      );
+
+      await controller.bootstrap();
+
+      expect(controller.state.newsStories, isEmpty);
+      expect(controller.state.promotions, isEmpty);
+      expect(api.newsCalls, 1);
+
+      api.news = [DemoData.newsStories.last];
+      api.promotions = [DemoData.promotions.last];
+      await controller.refreshCompanyData(force: true);
+
+      expect(controller.state.newsStories.single.id, api.news!.single.id);
+      expect(controller.state.promotions.single.id, api.promotions!.single.id);
+      expect(api.newsCalls, 2);
+    },
+  );
+
+  test(
     'server history loads and exact V2 reorder uses current catalog price',
     () async {
       final order = parseCustomerOrderHistoryEntry(
@@ -633,10 +663,7 @@ void main() {
       expect(controller.state.cart, isNotEmpty);
 
       controller.login('+996700123456');
-      expect(
-        await controller.deleteAccount(),
-        AccountDeletionResult.success,
-      );
+      expect(await controller.deleteAccount(), AccountDeletionResult.success);
       expect(controller.state.cart, isEmpty);
       expect(cartStore.items, isEmpty);
     },
@@ -1952,6 +1979,40 @@ class _CatalogAuthApiClient extends _FakeAuthApiClient {
 
   @override
   Future<List<Promotion>?> fetchPromotions() async => null;
+}
+
+class _MutableCompanyContentApiClient extends ApiClient {
+  _MutableCompanyContentApiClient({
+    required this.news,
+    required this.promotions,
+  });
+
+  List<NewsStory>? news;
+  List<Promotion>? promotions;
+  int newsCalls = 0;
+
+  @override
+  Future<CompanyConfig?> fetchConfig() async => const CompanyConfig(
+    appName: 'SweetTime',
+    accentColor: AppColors.candy500,
+    earnRate: Loyalty.earnRate,
+    maxSpendShare: Loyalty.maxSpendShare,
+  );
+
+  @override
+  Future<List<Product>?> fetchProducts() async => DemoData.products;
+
+  @override
+  Future<List<Branch>?> fetchBranches() async => DemoData.branches;
+
+  @override
+  Future<List<NewsStory>?> fetchNews() async {
+    newsCalls++;
+    return news;
+  }
+
+  @override
+  Future<List<Promotion>?> fetchPromotions() async => promotions;
 }
 
 class _ControlledOrdersApiClient extends _CatalogAuthApiClient {

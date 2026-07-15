@@ -1059,3 +1059,15 @@ snapshot `/srv/sweetime/backups/snapshots/20260715T151245Z`. Server `.env` до�
 `absolute_redirect off`; исправленный конфиг развёрнут отдельно и теперь `/admin` возвращает относительный
 `Location: /login`, а итоговый URL остаётся HTTPS. Следующий шаг — ручной owner login, затем обратимый
 admin→API readback и проверка обновления Flutter без оставления тестового контента.
+
+Production owner login физически подтверждён в браузере: роль `Владелец`, API connected, dashboard читает
+production заказы/метрики. Для следующего admin→mobile acceptance исправлена давняя stale-content проблема
+Flutter: `refreshCompanyData` объединяет параллельные запросы, автоматический resume refresh ограничен 30
+секундами, а Home/Catalog имеют принудительный pull-to-refresh. Пустые server news/promotions теперь
+authoritative и скрывают секцию вместо возврата DemoData; пустой server product list также больше не
+подменяется demo-каталогом. Добавлен regression test пусто→новый контент. `flutter analyze` clean, Flutter
+53/53; production release APK 79,522,830 bytes, SHA-256
+`06A925702A04D691A45586C5621AD7A66E6DD9505E22C80004453EF11777CDA9` собран с production HTTPS/Web OAuth,
+установлен поверх текущего приложения на Redmi `f3bff2a5` и запущен. Осталась ручная обратимая проверка:
+создать/опубликовать test news в admin → pull-to-refresh в приложении → увидеть RU/KY/EN → удалить запись →
+повторно обновить и убедиться, что она исчезла.

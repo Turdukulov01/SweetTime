@@ -44,101 +44,108 @@ class HomePage extends ConsumerWidget {
     return Scaffold(
       body: SafeArea(
         bottom: false,
-        child: CustomScrollView(
-          // Build roughly two product rows ahead. The Home feed contains only a
-          // small curated set, so this keeps image decoding out of the visible
-          // scroll path without retaining the full catalog.
-          scrollCacheExtent: const ScrollCacheExtent.pixels(720),
-          slivers: [
-            SliverToBoxAdapter(
-              child: _TopBar(
-                language: state.language,
-                onToggleTheme: controller.toggleTheme,
-                onLanguageSelected: controller.setLanguage,
+        child: RefreshIndicator.adaptive(
+          onRefresh: () => controller.refreshCompanyData(force: true),
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            // Build roughly two product rows ahead. The Home feed contains only a
+            // small curated set, so this keeps image decoding out of the visible
+            // scroll path without retaining the full catalog.
+            scrollCacheExtent: const ScrollCacheExtent.pixels(720),
+            slivers: [
+              SliverToBoxAdapter(
+                child: _TopBar(
+                  language: state.language,
+                  onToggleTheme: controller.toggleTheme,
+                  onLanguageSelected: controller.setLanguage,
+                ),
               ),
-            ),
-            SliverToBoxAdapter(
-              child: _BranchSelector(
-                selectedBranch: state.selectedBranch,
-                branches: state.branches,
+              SliverToBoxAdapter(
+                child: _BranchSelector(
+                  selectedBranch: state.selectedBranch,
+                  branches: state.branches,
+                ),
               ),
-            ),
-            SliverToBoxAdapter(
-              child: _Hero(onOrder: () => context.go('/catalog')),
-            ),
+              SliverToBoxAdapter(
+                child: _Hero(onOrder: () => context.go('/catalog')),
+              ),
 
-            // Пустой промо-блок скрываем целиком (критерий приёмки UX-брифа).
-            if (state.promotions.isNotEmpty) ...[
+              // Пустой промо-блок скрываем целиком (критерий приёмки UX-брифа).
+              if (state.promotions.isNotEmpty) ...[
+                _sectionPadding(
+                  SectionHeader(
+                    overline: strings.today,
+                    title: strings.seasonalOffers,
+                    actionLabel: strings.all,
+                    onAction: () => context.go('/catalog'),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: _PromoRail(promotions: state.promotions),
+                ),
+              ],
+
+              if (newsStories.isNotEmpty) ...[
+                _sectionPadding(
+                  SectionHeader(
+                    overline: strings.news,
+                    title: strings.whatsNew,
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: _NewsStoryRail(
+                    stories: newsStories,
+                    language: state.language,
+                  ),
+                ),
+              ],
+
               _sectionPadding(
                 SectionHeader(
-                  overline: strings.today,
-                  title: strings.seasonalOffers,
+                  overline: strings.popular,
+                  title: strings.bestSellers,
                   actionLabel: strings.all,
                   onAction: () => context.go('/catalog'),
                 ),
               ),
-              SliverToBoxAdapter(
-                child: _PromoRail(promotions: state.promotions),
-              ),
-            ],
+              _ProductGrid(products: bestSellers, controller: controller),
 
-            if (newsStories.isNotEmpty) ...[
               _sectionPadding(
-                SectionHeader(overline: strings.news, title: strings.whatsNew),
-              ),
-              SliverToBoxAdapter(
-                child: _NewsStoryRail(
-                  stories: newsStories,
-                  language: state.language,
+                SectionHeader(
+                  overline: strings.newItems,
+                  title: strings.newOnMenu,
                 ),
               ),
-            ],
+              _ProductGrid(products: fresh, controller: controller),
 
-            _sectionPadding(
-              SectionHeader(
-                overline: strings.popular,
-                title: strings.bestSellers,
-                actionLabel: strings.all,
-                onAction: () => context.go('/catalog'),
-              ),
-            ),
-            _ProductGrid(products: bestSellers, controller: controller),
-
-            _sectionPadding(
-              SectionHeader(
-                overline: strings.newItems,
-                title: strings.newOnMenu,
-              ),
-            ),
-            _ProductGrid(products: fresh, controller: controller),
-
-            const SliverToBoxAdapter(child: SizedBox(height: 32)),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      strings.footer(state.appName),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      strings.dataSource(state.apiConnected),
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant.withValues(
-                          alpha: 0.7,
+              const SliverToBoxAdapter(child: SizedBox(height: 32)),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        strings.footer(state.appName),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 6),
+                      Text(
+                        strings.dataSource(state.apiConnected),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant.withValues(
+                            alpha: 0.7,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -26,11 +26,13 @@ class SweetTimeApp extends ConsumerStatefulWidget {
   ConsumerState<SweetTimeApp> createState() => _SweetTimeAppState();
 }
 
-class _SweetTimeAppState extends ConsumerState<SweetTimeApp> {
+class _SweetTimeAppState extends ConsumerState<SweetTimeApp>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    // Пробуем demo-API один раз при старте; офлайн — молча живём на DemoData.
+    WidgetsBinding.instance.addObserver(this);
+    // Загружаем production-контент; офлайн сохраняем последний доступный UI.
     ref.read(appStateProvider.notifier).bootstrap();
     final seeds = _demoSeeds();
     if (seeds.isNotEmpty) {
@@ -45,6 +47,19 @@ class _SweetTimeAppState extends ConsumerState<SweetTimeApp> {
             );
       });
     }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ref.read(appStateProvider.notifier).refreshCompanyData();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   @override

@@ -347,6 +347,8 @@ class AppStateController extends StateNotifier<AppState> {
   bool _favoritesSyncRunning = false;
   bool _favoritesSyncDirty = false;
   Completer<void>? _favoritesSyncCompleter;
+  Future<void>? _companyRefreshInFlight;
+  DateTime? _lastCompanyRefreshAt;
   int _cartRevision = 0;
   bool _cartPersistRunning = false;
   bool _cartPersistDirty = false;
@@ -380,7 +382,7 @@ class AppStateController extends StateNotifier<AppState> {
     } catch (_) {
       // Настройки языка/темы не должны блокировать автономный запуск приложения.
     }
-    await _loadCompanyData();
+    await refreshCompanyData(force: true);
     await _restoreCart(cartDraftFuture, cartRevision);
     await _restoreSession();
   }
@@ -449,24 +451,49 @@ class AppStateController extends StateNotifier<AppState> {
     await _queueCartPersist();
   }
 
-  Future<void> _loadCompanyData() async {
+  /// Обновляет управляемый из админки контент.
+  ///
+  /// Параллельные запросы объединяются, а автоматическое обновление после
+  /// возврата в приложение ограничено одним разом в 30 секунд. Явный pull to
+  /// refresh использует [force] и всегда обращается к серверу.
+  Future<void> refreshCompanyData({bool force = false}) {
+    final active = _companyRefreshInFlight;
+    if (active != null) return active;
+
+    final lastRefresh = _lastCompanyRefreshAt;
+    if (!force &&
+        lastRefresh != null &&
+        DateTime.now().difference(lastRefresh) < const Duration(seconds: 30)) {
+      return Future<void>.value();
+    }
+
+    late final Future<void> operation;
+    operation = _loadCompanyData()
+        .then((loaded) {
+          if (loaded) _lastCompanyRefreshAt = DateTime.now();
+        })
+        .whenComplete(() {
+          if (identical(_companyRefreshInFlight, operation)) {
+            _companyRefreshInFlight = null;
+          }
+        });
+    _companyRefreshInFlight = operation;
+    return operation;
+  }
+
+  Future<bool> _loadCompanyData() async {
     try {
       final config = await _api.fetchConfig();
-      if (config == null) return; // сервер недоступен — остаёмся на демо
+      if (config == null) return false; // сервер недоступен — сохраняем UI
       final products = await _api.fetchProducts();
       final branches = await _api.fetchBranches();
-      // Контент витрины из админки; при ошибке остаётся локальный demo.
+      // null означает ошибку сети; пустой список — валидное состояние админки.
       final news = await _api.fetchNews();
       final promotions = await _api.fetchPromotions();
       final catalogAuthoritative =
-          products != null &&
-          products.isNotEmpty &&
-          branches != null &&
-          branches.isNotEmpty;
+          products != null && branches != null && branches.isNotEmpty;
 
-      final nextProducts = (products == null || products.isEmpty)
-          ? state.products
-          : products;
+      final nextProducts = products ?? state.products;
       final nextBranches = (branches == null || branches.isEmpty)
           ? state.branches
           : branches;
@@ -491,15 +518,14 @@ class AppStateController extends StateNotifier<AppState> {
         products: nextProducts,
         branches: nextBranches,
         selectedBranch: selected,
-        categories: categories.isEmpty ? state.categories : categories,
-        // news/promotions от сервера; null или пусто — оставляем локальный demo
-        newsStories: (news == null || news.isEmpty) ? state.newsStories : news,
-        promotions: (promotions == null || promotions.isEmpty)
-            ? state.promotions
-            : promotions,
+        categories: products == null ? state.categories : categories,
+        newsStories: news ?? state.newsStories,
+        promotions: promotions ?? state.promotions,
       );
+      return true;
     } catch (_) {
       // Любая неожиданная ошибка не должна ронять запуск приложения.
+      return false;
     }
   }
 
