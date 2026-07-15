@@ -955,3 +955,10 @@ container nginx опубликован только как `127.0.0.1:8080->80`.
 До удаления bootstrap secret требуется безопасно проверить global staff login. Нельзя печатать JSON
 ответ целиком, потому что он содержит access/refresh tokens; проверка должна читать password file
 локально, отправлять HTTPS JSON и выводить только HTTP status, user role/company и boolean наличия токенов.
+
+Production owner login проверен безопасным host-side Python probe: HTTP 200, role `owner`, company
+`sweettime`, access/refresh tokens присутствуют, но значения не печатались и не сохранялись. После трёх
+минут работы backend/nginx/postgres/redis все healthy; nginx остаётся только на loopback 8080. Перед
+удалением `/srv/sweetime/secrets/bootstrap-owner-password` владелец должен явно подтвердить, что случайный
+пароль сохранён в password manager: после удаления plaintext восстановить из bcrypt hash невозможно.
+Следом нужны initial backup + restore drill, затем физический Android Google→contact→checkout HTTPS QA.

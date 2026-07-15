@@ -80,8 +80,10 @@ below remains authoritative; this section records the current execution order.
   the fail-closed one-shot bootstrap created the real SweetTime tenant/catalog and first owner with exit
   0. The main stack then started successfully: backend is healthy, loopback and public HTTPS `/ready`
   return 200, company config returns the real SweetTime tenant and `/media/temp/` returns 403. Redis/nginx
-  were still completing their initial health start when first listed. Owner-login verification,
-  bootstrap-secret removal, initial backup/restore checks and mobile Google HTTPS QA remain undone.
+  subsequently became healthy. Global staff login returned 200 for the real owner with role `owner`,
+  company `sweettime` and both token types present without exposing their values. After the owner confirms
+  the generated password is stored safely, bootstrap-secret removal, initial backup/restore checks and
+  mobile Google HTTPS QA remain undone.
 
 ## Audit Snapshot — 2026-07-12
 
