@@ -1048,3 +1048,14 @@ admin→nginx smoke: `/ready`=200, `/login`=200, config=200, `/admin` и `/admin
 `/media/temp`=403, nosniff/frame-deny присутствуют. Production остаётся на предыдущем revision и
 возвращает `/login`=404 до отдельного owner-approved upload/build/up. В server `.env` перед build нужно
 добавить public non-secret `ADMIN_PUBLIC_API_URL=https://lnp-corporation.duckdns.org`.
+
+Production rollout custom Next.js admin выполнен 2026-07-15 из архива revision `15f05eb` после проверенного
+snapshot `/srv/sweetime/backups/snapshots/20260715T151245Z`. Server `.env` дополнен публичным
+`ADMIN_PUBLIC_API_URL=https://lnp-corporation.duckdns.org`; admin image собран на сервере и запущен только
+во внутренней Compose-сети, без host port. `admin`, `backend`, `nginx`, `postgres`, `redis` healthy;
+публичные `/ready`, `/login`, company config возвращают 200, `/media/temp/probe` — 403, security headers
+присутствуют. Первый production smoke обнаружил, что внутренний nginx превращал `return 302 /login` в
+абсолютный `http://` redirect из-за TLS termination на host proxy. Revision `15a92b3` добавляет
+`absolute_redirect off`; исправленный конфиг развёрнут отдельно и теперь `/admin` возвращает относительный
+`Location: /login`, а итоговый URL остаётся HTTPS. Следующий шаг — ручной owner login, затем обратимый
+admin→API readback и проверка обновления Flutter без оставления тестового контента.
