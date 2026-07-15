@@ -1,4 +1,5 @@
 x-backend-image: &backend-image sweettime-backend:${SWEETIME_IMAGE_TAG:-local}
+x-admin-image: &admin-image sweettime-admin:${SWEETIME_IMAGE_TAG:-local}
 
 services:
   postgres:
@@ -75,6 +76,32 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  admin:
+    build:
+      context: ../..
+      dockerfile: admin/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${ADMIN_PUBLIC_API_URL:?Set the public HTTPS API origin in deploy/production/.env}
+    image: *admin-image
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
@@ -87,8 +114,14 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+      admin:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/ready"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O /dev/null http://127.0.0.1/ready && wget -q -O /dev/null http://127.0.0.1/login",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3

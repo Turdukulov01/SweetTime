@@ -9,7 +9,6 @@ import {
   CircleDollarSign,
   CreditCard,
   ReceiptText,
-  Repeat,
   ShoppingBag,
   Sparkles,
   UserPlus,
@@ -33,7 +32,6 @@ type DetailKey =
   | "revenue"
   | "average"
   | "payments"
-  | "recurring"
   | "popular"
   | "newCustomers"
   | "dormant"
@@ -250,7 +248,7 @@ function AnalyticsDrawer({
 }
 
 function DashboardContent() {
-  const { company, branches, recurring } = useCompanyStore();
+  const { company, branches } = useCompanyStore();
   const { orders } = useOrders();
   const [selectedDetail, setSelectedDetail] = useState<DetailKey | null>(null);
 
@@ -274,8 +272,6 @@ function DashboardContent() {
   const revenue = todayOrders.reduce((sum, order) => sum + order.total, 0);
   const averageCheck =
     todayOrders.length > 0 ? Math.round(revenue / todayOrders.length) : 0;
-  const activeRecurring = recurring.filter((item) => item.active);
-
   const paymentByPeriod = ordersByPeriod.map((period) => {
     const methods = Object.fromEntries(
       (["mock", "cash", "qr", "unknown"] as PaymentBucket[]).map((method) => [
@@ -345,13 +341,6 @@ function DashboardContent() {
       value: `${prepaidToday} заказов`,
       hint: "QR, demo и наличные отдельно",
       icon: CreditCard
-    },
-    {
-      key: "recurring",
-      label: "Постоянные заказы",
-      value: String(activeRecurring.length),
-      hint: "Неделя, месяц и товары",
-      icon: Repeat
     },
     {
       key: "popular",
@@ -465,42 +454,6 @@ function DashboardContent() {
             </EmptyDetail>
           </>
         );
-      case "recurring": {
-        const recurringProducts = new Map<string, number>();
-        activeRecurring.forEach((item) => recurringProducts.set(item.productName, (recurringProducts.get(item.productName) ?? 0) + 1));
-        return (
-          <>
-            <DetailSection title="Активные планы">
-              <div className="grid grid-cols-2 gap-2">
-                {(["week", "month"] as const).map((plan) => (
-                  <div key={plan} className="rounded-xl bg-cream-100 px-4 py-3 dark:bg-white/5">
-                    <p className="text-xs text-coffee-500">{plan === "week" ? "На неделю" : "На месяц"}</p>
-                    <p className="mt-1 text-xl font-semibold text-coffee-900">{activeRecurring.filter((item) => item.plan === plan).length}</p>
-                  </div>
-                ))}
-              </div>
-            </DetailSection>
-            <EmptyDetail>
-              Демо-данные: «постоянных заказов» в API пока нет — цифры ниже не
-              боевые.
-            </EmptyDetail>
-            <DetailSection title="Товары в постоянных заказах">
-              {recurringProducts.size === 0 ? (
-                <EmptyDetail>Активных постоянных заказов нет.</EmptyDetail>
-              ) : (
-                <div className="space-y-2">
-                  {[...recurringProducts.entries()].map(([name, count]) => (
-                    <div key={name} className="flex justify-between rounded-xl border border-coffee-900/10 px-4 py-3 text-sm">
-                      <span className="text-coffee-700">{name}</span>
-                      <span className="font-semibold text-coffee-900">{count}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </DetailSection>
-          </>
-        );
-      }
       case "popular":
         return (
           <>

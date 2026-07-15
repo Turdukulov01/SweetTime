@@ -59,7 +59,7 @@ below remains authoritative; this section records the current execution order.
   passed Redmi release smoke for QR preview initialization, torch, tab leave/re-entry, and launching the
   external profile camera without an ML Kit crash. An iOS OAuth client and URL scheme remain future iOS-release work. SMS
   verification remains a later task.
-- [ ] **S6 — Ubuntu deployment artifacts.** **[next: production admin deployment]** `backend/api/Dockerfile`
+- [ ] **S6 — Ubuntu deployment artifacts.** **[partial—verified locally; next: admin server rollout]** `backend/api/Dockerfile`
   and `deploy/production/` contain PostgreSQL, Redis, backend, nginx, media volume and an environment
   example. PostgreSQL/backend/nginx now have ordered healthchecks; `/ready` probes the real database.
   Production config rejects placeholder secrets, wildcard/non-HTTPS CORS, mock OTP and demo seed;
@@ -70,8 +70,11 @@ below remains authoritative; this section records the current execution order.
   production secrets, execution of the locally verified one-shot real owner/catalog bootstrap on the
   target, a real independent off-host destination with retention/encryption policy, avatar privacy
   decision and fully pinned Docker runtime dependencies/image digests. Backend validation, TLS/domain,
-  loopback routing, backup and restore drill are complete on the target. The Next.js admin is API-connected
-  in code but still has no Dockerfile or production service; `/`, `/login` and `/admin` are not served yet.
+  loopback routing, backup and restore drill are complete on the target. The Next.js admin now has a
+  non-root standalone Dockerfile, fail-closed HTTPS build arg, internal-only Compose service, combined
+  backend/admin healthcheck and nginx routing for `/login` plus `/admin` redirect. Typecheck, Docker build,
+  disposable PostgreSQL→backend→admin→nginx smoke and security-header checks pass locally. Production
+  `/login` remains 404 until this revision is uploaded, built and started on the physical server.
 - [x] **S7 — deploy backend to physical server.** **[verified production]** Target is
   `ranex@81.88.192.41`; `/srv/sweetime/media`, `/srv/sweetime/backups` and
   `/srv/projects/sweetime` are prepared. Host Nginx and the valid Let's Encrypt certificate now route
@@ -279,11 +282,12 @@ below remains authoritative; this section records the current execution order.
 ## Phase 3 — Custom Next.js Admin MVP
 
 - [x] Canonical admin decision: develop `admin/`; keep `admin-legacy/` archive-only.
-- [ ] **Task 7 — Admin MVP.** **[partial—verified 2026-07-13]** Login, expanded clickable
-  demo analytics, order queue, menu/modifiers/availability and category filters, branch editing/
-  creation, staff invite/name editing, and settings screens exist and build. Sessions/RBAC remain
-  client-only; staff/recurring are mocks and several writes remain optimistic or demo-only.
-- [ ] Connect admin to the canonical API and implement real owner/manager/barista sessions and permission-aware navigation.
+- [ ] **Task 7 — Admin MVP.** **[partial—verified 2026-07-15]** Real JWT login/refresh, permission-aware
+  navigation, API-backed order queue, menu/modifiers/availability, branches, news, promotions and settings
+  exist and build. Production container/routing is verified locally but not yet deployed. Fake login
+  credentials and recurring analytics were removed from the production surface; staff navigation is
+  hidden and the direct route is read-only until server-side staff CRUD exists.
+- [x] Connect admin to the canonical API and implement real owner/manager/barista sessions and permission-aware navigation.
 - [ ] Let the owner configure real support contacts/availability in pilot settings; mobile must not
   invent phone, email or chat availability when this configuration is absent.
 - [ ] Reconcile order actions with the canonical lifecycle and payment state; allow only valid transitions and make mutations idempotent.

@@ -23,6 +23,7 @@ snapshot="${backup_root}/${timestamp}"
 
 compose=(docker compose --env-file "${env_file}" -f "${compose_file}")
 backend_was_running="$("${compose[@]}" ps --status running -q backend)"
+admin_was_running="$("${compose[@]}" ps --status running -q admin)"
 nginx_was_running="$("${compose[@]}" ps --status running -q nginx)"
 resumed=0
 
@@ -33,6 +34,7 @@ resume_services() {
   resumed=1
   local services=()
   [[ -n "${backend_was_running}" ]] && services+=(backend)
+  [[ -n "${admin_was_running}" ]] && services+=(admin)
   [[ -n "${nginx_was_running}" ]] && services+=(nginx)
   if ((${#services[@]})); then
     "${compose[@]}" up -d "${services[@]}"
@@ -57,7 +59,7 @@ trap cleanup EXIT INT TERM
 mkdir -p -- "${backup_root}" "${partial}"
 
 # A short write-maintenance window keeps database rows and media files aligned.
-"${compose[@]}" stop nginx backend
+"${compose[@]}" stop nginx admin backend
 
 "${compose[@]}" exec -T postgres sh -c \
   'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --compress=9' \

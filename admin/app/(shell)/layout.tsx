@@ -16,8 +16,7 @@ import {
   Newspaper,
   Settings,
   Store,
-  Tag,
-  Users
+  Tag
 } from "lucide-react";
 import { ErrorToast } from "@/components/data-state";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -66,7 +65,6 @@ const NAV_ITEMS: Array<{
     icon: MapPin,
     roles: ["owner", "manager"]
   },
-  { href: "/staff", label: "Сотрудники", icon: Users, roles: ["owner"] },
   { href: "/settings", label: "Настройки", icon: Settings, roles: ["owner"] }
 ];
 

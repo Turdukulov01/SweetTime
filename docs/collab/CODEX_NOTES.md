@@ -1032,3 +1032,19 @@ guest state, вход тем же Google снова потребовал тел�
 news/promotions сейчас ошибочно заменяются DemoData. Перед end-to-end admin→API→mobile acceptance нужно
 развернуть admin, исправить mobile refresh/empty semantics и отдельно добавить product media/category
 contracts; staff и admin recurring по-прежнему явно demo-only.
+
+Production admin deployment artifacts завершены локально, server rollout ещё не выполнялся. Добавлены
+`admin/Dockerfile` (Next 15 standalone, Node 22/pnpm 11.7, HTTPS build arg, non-root `nextjs`) и admin
+service без host port. Внутренний nginx сохраняет host `X-Real-IP`/`X-Forwarded-Proto`, оставляет
+приоритет `/api`, `/ready`, `/media`, проксирует web в admin, перенаправляет `/admin[/]` на `/login`,
+добавляет базовые security headers; его health теперь проверяет backend и `/login`. Backup maintenance
+window учитывает admin. Production login больше не показывает demo email/password; recurring demo
+analytics удалена, staff скрыт из navigation, а direct `/staff` только сообщает об отсутствии server CRUD.
+
+Проверки: admin typecheck clean; Docker standalone build success; image runtime user=`nextjs`;
+`/login` и static chunk=200; insecure HTTP `NEXT_PUBLIC_API_URL` fail-closed; nginx syntax clean; Compose
+config clean и admin не публикует порт. Полный disposable PostgreSQL→Alembic `b91e7c4a2d10`→backend→
+admin→nginx smoke: `/ready`=200, `/login`=200, config=200, `/admin` и `/admin/`=302,
+`/media/temp`=403, nosniff/frame-deny присутствуют. Production остаётся на предыдущем revision и
+возвращает `/login`=404 до отдельного owner-approved upload/build/up. В server `.env` перед build нужно
+добавить public non-secret `ADMIN_PUBLIC_API_URL=https://lnp-corporation.duckdns.org`.

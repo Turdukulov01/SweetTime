@@ -9,9 +9,6 @@
 // при ошибке (403 «Недостаточно прав», сеть) изменение откатывается и
 // показывается тост (errorMessage → ErrorToast в shell).
 //
-// Демо-остатки (нет серверных ручек): сотрудники и «постоянные заказы» —
-// помечены в интерфейсе как демо-данные.
-//
 // Провайдер монтируется в shell с key={companyId}: при перелогине состояние
 // пересоздаётся, данные чужой компании не «протекают».
 
@@ -46,16 +43,13 @@ import {
   apiPatchPromotion,
   describeApiError
 } from "@/lib/api";
-import { getDemoRecurring, getDemoStaff } from "@/lib/demo-data";
 import { logout } from "@/lib/session";
 import type {
-  AdminUser,
   Branch,
   Company,
   NewsStory,
   Product,
-  Promotion,
-  RecurringOrder
+  Promotion
 } from "@/lib/types";
 
 interface CompanyState {
@@ -64,10 +58,6 @@ interface CompanyState {
   branches: Branch[];
   news: NewsStory[];
   promotions: Promotion[];
-  /** Демо: серверного управления сотрудниками пока нет */
-  users: AdminUser[];
-  /** Демо: «постоянных заказов» на сервере пока нет */
-  recurring: RecurringOrder[];
 }
 
 interface CompanyStoreValue extends CompanyState {
@@ -79,9 +69,6 @@ interface CompanyStoreValue extends CompanyState {
   updateProduct: (productId: string, patch: Partial<Omit<Product, "id">>) => void;
   addBranch: (branch: Branch) => void;
   updateBranch: (branchId: string, patch: Partial<Omit<Branch, "id">>) => void;
-  addUser: (user: AdminUser) => void;
-  updateUser: (userId: string, patch: Partial<Omit<AdminUser, "id">>) => void;
-  removeUser: (userId: string) => void;
   addNews: (news: NewsStory) => void;
   updateNews: (newsId: string, patch: Partial<Omit<NewsStory, "id">>) => void;
   removeNews: (newsId: string) => void;
@@ -140,9 +127,7 @@ export function CompanyStoreProvider({
           products,
           branches,
           news,
-          promotions,
-          users: getDemoStaff(companyId),
-          recurring: getDemoRecurring(companyId)
+          promotions
         });
         setLoadStatus("ready");
       })
@@ -357,38 +342,6 @@ export function CompanyStoreProvider({
     },
     [companyId, showError]
   );
-
-  // ----- Сотрудники: демо, серверных ручек нет — только локальное состояние -----
-
-  const addUser = useCallback((user: AdminUser) => {
-    setState((prev) =>
-      prev ? { ...prev, users: [...prev.users, user] } : prev
-    );
-  }, []);
-
-  const updateUser = useCallback(
-    (userId: string, patch: Partial<Omit<AdminUser, "id">>) => {
-      setState((prev) =>
-        prev
-          ? {
-              ...prev,
-              users: prev.users.map((u) =>
-                u.id === userId ? { ...u, ...patch } : u
-              )
-            }
-          : prev
-      );
-    },
-    []
-  );
-
-  const removeUser = useCallback((userId: string) => {
-    setState((prev) =>
-      prev
-        ? { ...prev, users: prev.users.filter((u) => u.id !== userId) }
-        : prev
-    );
-  }, []);
 
   // ----- Новости-сторис -----
 
@@ -629,9 +582,6 @@ export function CompanyStoreProvider({
             updateProduct,
             addBranch,
             updateBranch,
-            addUser,
-            updateUser,
-            removeUser,
             addNews,
             updateNews,
             removeNews,
@@ -648,9 +598,6 @@ export function CompanyStoreProvider({
       updateProduct,
       addBranch,
       updateBranch,
-      addUser,
-      updateUser,
-      removeUser,
       addNews,
       updateNews,
       removeNews,

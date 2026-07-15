@@ -2,11 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
-import { KeyRound, LogIn } from "lucide-react";
-import { getDemoAccounts } from "@/lib/demo-data";
+import { LogIn } from "lucide-react";
 import { login, useSession } from "@/lib/session";
-
-const demoAccounts = getDemoAccounts();
 
 export default function LoginPage() {
   const router = useRouter();
@@ -34,12 +31,6 @@ export default function LoginPage() {
       return;
     }
     router.replace("/");
-  }
-
-  function fillDemo(demoEmail: string) {
-    setEmail(demoEmail);
-    setPassword("demo");
-    setError(null);
   }
 
   const submitLabel = pending ? "Входим…" : "Войти";
@@ -70,7 +61,7 @@ export default function LoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="owner@sweettime.kg"
+                placeholder="name@example.com"
                 className="input"
               />
             </div>
@@ -89,7 +80,7 @@ export default function LoginPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="demo"
+                placeholder="Введите пароль"
                 className="input"
               />
             </div>
@@ -111,28 +102,6 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <div className="surface mt-4 px-6 py-4">
-          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-coffee-500">
-            <KeyRound className="h-3.5 w-3.5" />
-            Демо-аккаунты (пароль: demo)
-          </p>
-          <ul className="mt-2 space-y-1">
-            {demoAccounts.map((account) => (
-              <li key={account.email}>
-                <button
-                  type="button"
-                  onClick={() => fillDemo(account.email)}
-                  className="focus-ring w-full rounded-lg px-2 py-1.5 text-left text-sm text-coffee-700 transition hover:bg-candy-50"
-                >
-                  <span className="font-medium text-coffee-900">
-                    {account.email}
-                  </span>{" "}
-                  — {account.roleLabel}, {account.companyName}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
       </div>
     </main>
   );

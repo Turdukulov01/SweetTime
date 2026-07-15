@@ -28,6 +28,30 @@ and inode capacity. The script makes no server changes and does not print contai
    `SEED_MODE=none` and `OTP_MODE=disabled`; known demo credentials are never created.
 4. Configure the outer reverse proxy and TLS before exposing auth, orders, or media.
 
+Set the public same-origin URL used by the browser-side admin bundle:
+
+```dotenv
+ADMIN_PUBLIC_API_URL=https://lnp-corporation.duckdns.org
+```
+
+This value is public, not a secret, but Next.js embeds it during `docker compose build admin`.
+Changing the domain therefore requires rebuilding the admin image; a runtime-only environment change
+is not enough.
+
+## Production admin
+
+The custom Next.js application in `admin/` is the canonical admin. It runs as a non-root container,
+has no published host port and is reachable only through the internal nginx and the existing host TLS
+proxy. Canonical entry points are:
+
+- `https://lnp-corporation.duckdns.org/login`;
+- `https://lnp-corporation.duckdns.org/admin` (redirects to `/login`).
+
+Production login contains no demo credentials. Use only the real bootstrapped owner account. Products,
+branches, news, promotions, settings and the order queue use the authenticated production API. Staff
+management is deliberately hidden until server-side staff CRUD exists; the direct `/staff` route only
+shows an unavailable notice and performs no in-memory mutations.
+
 ## Google Sign-In setup
 
 Google Sign-In is fail-closed: the API returns `503` until its accepted OAuth audience is configured.
@@ -73,7 +97,8 @@ outside the repository. A release build now fails instead of silently falling ba
 
 The host nginx terminates TLS for `lnp-corporation.duckdns.org` and proxies to `127.0.0.1:8080`.
 The production Compose stack deliberately maps that loopback port to the **container nginx on port
-80**, which then routes `/api/`, `/health` and `/ready` to `backend:8000` and serves guarded media.
+80**, which routes `/api/`, `/health` and `/ready` to `backend:8000`, serves guarded media and sends
+all remaining web routes to the internal Next.js admin on port 3000.
 Keep the existing Compose mapping `${SWEETIME_HTTP_BIND}:${SWEETIME_HTTP_PORT}:80`; do not replace
 it with `127.0.0.1:8080:8000`, which would bypass the container nginx policy and healthcheck.
 
@@ -141,7 +166,7 @@ openssl rand -hex 32
 openssl rand -hex 32
 nano .env
 docker compose --env-file .env config >/dev/null
-docker compose --env-file .env build backend
+docker compose --env-file .env build backend admin
 ```
 
 On a fresh empty database, run the one-shot bootstrap above before starting the public-facing services.
@@ -154,16 +179,20 @@ docker compose --env-file .env logs --tail=100 migrate backend nginx
 curl -fsS http://127.0.0.1:8080/ready
 curl -fsS https://lnp-corporation.duckdns.org/ready
 curl -fsS https://lnp-corporation.duckdns.org/api/companies/sweettime/config
+curl -fsS https://lnp-corporation.duckdns.org/login >/dev/null
+curl -sS -o /dev/null -w '%{http_code}\n' https://lnp-corporation.duckdns.org/admin
 ```
 
-The domain root may return `404` because SweetTime currently exposes an API/mobile backend, not a web
-landing page. `/ready` and the company config endpoint are the deployment smoke tests.
+Expected results are `/ready`=200, company config=200, `/login`=200 and `/admin`=302. The domain root
+is owned by the admin application; an unauthenticated browser is redirected to `/login` by its client
+session guard.
 
 ## Backup lifecycle
 
-`backup-production.sh` stops backend writes briefly, creates a versioned PostgreSQL custom dump and
-media archive, records Alembic/media metadata, verifies both archives and checksums, then resumes only
-the application services that were running. The local snapshot is still on the same physical host.
+`backup-production.sh` stops nginx, admin and backend briefly, creates a versioned PostgreSQL custom
+dump and media archive, records Alembic/media metadata, verifies both archives and checksums, then
+resumes only the application services that were running. The local snapshot is still on the same
+physical host.
 
 Copy every accepted snapshot to an independently administered host or storage account:
 
