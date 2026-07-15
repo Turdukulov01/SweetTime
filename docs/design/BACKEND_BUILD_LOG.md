@@ -316,3 +316,66 @@ curl -s -X PATCH $B/coffeego/products/cg1 -H "Authorization: Bearer $TOKEN" -H '
 - Серверные цены/лояльность/рефералка (+100 инвайтеру, invited_by) — S3, здесь не трогали.
 
 ## S3+ — см. PRODUCTION_PLAN.md (серверные цены/лояльность, контент, клиенты на API, деплой S6–S7).
+
+## 2026-07-15 — приёмка S5.3 + S6 (работа Codex), выход на S7
+
+### Что принято и закоммичено
+Вся работа лежала незакоммиченной (4208 вставок / 29 файлов) — это был главный риск, закрыт первым.
+Проверял своими прогонами, не на слово:
+
+| Проверка | Результат |
+|---|---|
+| `py -m pytest api/tests -q` | **29/29** |
+| `flutter analyze --no-pub` | чисто |
+| `flutter test --no-pub` | **48/48** |
+| `git check-ignore deploy/production/.env backend/api/.env` | оба игнорируются (в Git только `.env.example`, в нём плейсхолдеры) |
+
+Коммиты: `baffe6f` (deploy S6) → `e57c88b` (backend S5.3+аватары+V2+S6) → `16e0920` (Flutter S5.3) → `4020aca` (docs).
+
+6 правок владельца с телефона закрыты: фото (на сервер), recurring, история, корзина (локально),
+избранное (сервер; статичные `DemoData.favoriteIds` больше не воскресают), notice сверху.
+
+Моя правка сида уцелела после работы Codex: `_link_demo_customer_orders` связывает 6 заказов
+демо-клиента с его id. Сервер выбирает историю по `customer_id`, а сид знал клиента только по
+имени — без связки история пустая. **Действует только на пустой БД** (`seed_if_empty`); в уже
+поднятой dev-базе те 6 заказов остались с `customer_id=NULL` — при желании долинковать разовым UPDATE.
+
+### Грабли (в копилку)
+- `git status --cached` — **не существует** (это опция `git diff`). Цепочка через `&&` молча не
+  доходит до коммита. Проверять индекс: `git diff --cached --name-only`.
+
+### Канон деплоя (не перепутать)
+Боевой путь — `deploy/production/` + `backend/api/Dockerfile`. Корневые `docker-compose.yml` и
+`backend/Dockerfile` относятся к старому `backend/app` — **не запускать как боевые**.
+
+### Решение владельца 2026-07-15: TLS
+Выбран **бесплатный сабдомен (DuckDNS) + Let's Encrypt**. Причина: конфликт «пока IP» с fail-closed
+конфигом — `Settings.validate_production_safety` отвергает не-HTTPS CORS, а по plain HTTP пароль
+владельца и JWT шли бы открытым текстом (админка = браузер) + Android блокирует cleartext.
+Сабдомен даёт настоящий доверенный сертификат без денег и договора; переезд на свой домен позже —
+смена `CORS_ORIGINS`/`MEDIA_PUBLIC_BASE_URL` и server_name.
+
+Топология (как задумано в `deploy/production/nginx.conf`): TLS терминирует **хостовый** nginx
+(тот же, что обслуживает существующий проект владельца) → `proxy_pass` на `127.0.0.1:8080` →
+контейнерный nginx → backend. Порт наружу не публикуется.
+
+### S6-E — блокер: preflight
+У Codex нет SSH (`Permission denied (publickey,password)`), и по модели владельца «твои команды»
+он и не нужен. Скрипт `deploy/production/server-preflight.sh` прочитан и подтверждён read-only:
+только `stat`/`df`/`docker ps`/`ss -l`/`nginx -T` (без reload)/`ufw status`; вывод `nginx -T`
+фильтруется `sed` до listen/server_name/proxy_pass — секреты конфигов не утекают.
+
+Команда владельцу:
+`ssh ranex@81.88.192.41 'bash -s' < deploy/production/server-preflight.sh`
+
+Ждём вывод, чтобы: выбрать свободный порт, увидеть существующий nginx/certbot и права на
+`/srv/sweetime/*` — и **не сломать текущий проект владельца**.
+
+### Осознанно НЕ сделано (честно, до S7)
+- Реальный SMS-провайдер: `OTP_MODE=disabled` в проде, `/otp/*` отвечает **503**. Значит боевой
+  вход клиента в приложение пока невозможен — нужен договор/деньги (решение владельца: потом).
+- Off-host бэкап: скрипты готовы и проверены локально, но реальная внешняя копия/шифрование/
+  retention не настроены — локальный snapshot не является disaster recovery.
+- Приватность аватаров: сейчас public immutable URL по UUID. Перед публичным запуском утвердить.
+- Recurring — server-persistent demo/MVP-light: нет реальной оплаты, refund и авто-деактивации
+  истёкшего `paidUntil`.
