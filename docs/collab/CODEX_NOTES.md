@@ -1100,3 +1100,12 @@ authoritative и скрывают секцию вместо возврата Dem
   визуальная проверка admin выполнена сборкой/код-ревью, а не интерактивным screenshot-smoke. Flutter также
   предупреждает, что `mobile_scanner` пока сам применяет Kotlin Gradle Plugin; перед будущим крупным Flutter
   upgrade нужно обновить плагин до версии с Built-in Kotlin support.
+
+Production rollout Content V2 выполнен из архива revision `a168c64` после проверенного snapshot
+`/srv/sweetime/backups/snapshots/20260715T171013Z`. SHA-256 архива совпал; `.env` сохранился с mode 600.
+Backend/admin пересобраны, Alembic=`e73c8f2a1b04`, пять production-сервисов healthy, локальный и внешний
+`/ready`=200. Host nginx и внутренний nginx используют `client_max_body_size 52M`; конфигурация host nginx
+прошла `nginx -t`. Публичные `/stories/home`, `/story-collections`, `/news-posts` и `/login` возвращают 200.
+Миграция создала compatibility-подборку из 6 прежних stories; публичный RU fallback работает. Осталась
+ручная owner acceptance: заполнить настоящее KY/EN название, загрузить/заменить круглую обложку, создать
+feed post и MP4 story, затем проверить RU/KY/EN, expiry и Android back/video на телефоне.
