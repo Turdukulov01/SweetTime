@@ -109,8 +109,10 @@ Add:
 - authenticated image-only `PUT/DELETE .../cover` for collection
 
 All mutations require owner or manager. Barista is denied. Company scope is
-checked from the staff token and path. Create/patch reject content with neither
-text nor media and reject invalid/naive dates.
+checked from the staff token and path. An unpublished empty draft shell is
+allowed so the server can issue an ID before multipart media upload. Publishing
+(or a patch that enables publication) rejects content with neither text nor
+media, incomplete used translations, and invalid/naive dates.
 
 ## Admin UX
 
