@@ -26,6 +26,10 @@ from .security import TokenError, create_token_pair, decode_token, verify_passwo
 
 router = APIRouter(prefix="/api/companies/{companyId}/auth", tags=["auth"])
 
+# Глобальный вход сотрудника: форма входа в админку знает только email+пароль,
+# компанию определяем по email (он уникален глобально) — стандартный SaaS-паттерн.
+global_router = APIRouter(prefix="/api/auth", tags=["auth"])
+
 
 # ---------------------------------------------------------------------------
 # Сериализация профилей (без паролей/хэшей)
@@ -126,6 +130,40 @@ def staff_login(
     ).first()
     # Одинаковый ответ на «нет такого email» и «неверный пароль» — не
     # подсказываем, какие адреса заведены.
+    if user is None or not verify_password(body.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    access, refresh = create_token_pair(
+        subject=user.id, typ="staff", company_id=user.company_id, role=user.role
+    )
+    return schemas.StaffLoginOut(
+        accessToken=access, refreshToken=refresh, user=staff_out(user)
+    )
+
+
+@global_router.post(
+    "/staff/login",
+    response_model=schemas.StaffLoginOut,
+    summary="Вход сотрудника без указания компании (email определяет компанию)",
+)
+def staff_login_global(
+    body: schemas.StaffLoginIn,
+    db: Session = Depends(get_db),
+) -> schemas.StaffLoginOut:
+    """Вход для админки: компания выводится из email (он уникален глобально).
+
+    Токен всё равно несёт `cid`, поэтому дальнейшие запросы остаются жёстко
+    скоупнутыми на компанию сотрудника.
+    """
+    user = db.scalars(
+        select(AdminUser).where(
+            func.lower(AdminUser.email) == body.email.strip().lower()
+        )
+    ).first()
     if user is None or not verify_password(body.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

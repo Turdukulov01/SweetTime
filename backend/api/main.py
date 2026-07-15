@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import schemas
+from .auth import global_router as auth_global_router
 from .auth import router as auth_router
 from .config import settings
 from .database import engine, get_db
@@ -77,6 +78,7 @@ app.add_middleware(
 )
 
 # Логин/refresh/me/OTP: /api/companies/{companyId}/auth/...
+app.include_router(auth_global_router)
 app.include_router(auth_router)
 
 # Роли: контент/меню/настройки правят владелец и менеджер; бариста — только
