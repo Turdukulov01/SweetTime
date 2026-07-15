@@ -249,6 +249,36 @@ SHA-1 будет три: debug (есть), release/upload (keystore ещё не 
 (появится только после первой загрузки в Play Console — без него вход упадёт именно в
 опубликованной версии).
 
+### CL-007a — OAuth client IDs получены от владельца (2026-07-15)
+
+Проект Google Cloud: ID **`project-1c2e438d-1859-42b3-bc5`**, номер **23205820785**
+(номер — общий префикс всех клиентов ниже).
+
+| Клиент | ID |
+|---|---|
+| **Web («SweetTime backend») — `serverClientId`/`aud`** | `23205820785-ap4kgng4fef97ie9l69e5erlufjc8v2i.apps.googleusercontent.com` |
+| Android Debug | `23205820785-3qsqi30tcbppsfhqifr92ro3idiqg8kh.apps.googleusercontent.com` |
+| Android Release | `23205820785-thvputte60b3ig74n6pek45o0vm8ft29.apps.googleusercontent.com` |
+
+Client ID **не секреты** (зашиты в приложение) — в репо/конфиге хранить можно; client secret не
+нужен и не запрашивался.
+
+Как использовать:
+- **Backend**: `aud` проверять строго против **Web** client ID. Вынести в настройку
+  (`GOOGLE_CLIENT_ID`), а не хардкодить: у белого лейбла backend один, но проект может смениться.
+  В production Settings добавить fail-closed проверку — пустой/placeholder client ID при
+  `GOOGLE_AUTH` включённом должен ронять старт, как это уже сделано для JWT/CORS.
+- **Flutter**: `serverClientId` = тот же **Web** client ID (не Android!). Это типовая ошибка —
+  с Android client ID в serverClientId сервер получит `aud`, который не сойдётся.
+- **Android client IDs в коде не упоминаются вообще**: Google сопоставляет их по package+SHA-1.
+  Они просто должны существовать в консоли.
+
+Незакрытое (спросить владельца): (1) какой package name реально введён в консоли — должен быть
+`kg.sweettime.app`, а НЕ `kg.sweettime.demo`; (2) release-клиент создан под SHA-1 из реального
+`sweettime-upload.jks` или под временный отпечаток. Если package в консоли и в build.gradle
+разойдутся — вход упадёт с `ApiException: 10 (DEVELOPER_ERROR)`, и это будет выглядеть как
+«код не работает», хотя дело в конфиге.
+
 ## 8. Журнал значимых изменений
 
 - 2026-07-15 (2) — CL-007: решения владельца по Google OAuth (phone → nullable + `(company_id,
