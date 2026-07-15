@@ -300,12 +300,16 @@ below remains authoritative; this section records the current execution order.
 - [ ] Add owner/manager-only News management in `admin/`: list, create/edit, translation
   completeness, media/accent/CTA, preview, scheduling, ordering, publish/archive/delete. Navigation
   hiding and client `RoleGate` are UX only; the canonical API must enforce permissions.
-- [ ] **[in progress 2026-07-15] Stories, collections and news feed expansion.** Implement the approved
+- [ ] **[implemented locally 2026-07-15; production migration and phone acceptance pending] Stories,
+  collections and news feed expansion.** The approved
   contract in `docs/design/NEWS_CONTENT_SPEC.md`: at most 30 active flat Home stories; editable
-  RU/KG/EN story collections with editable round image covers and lazy support for 40+ stories each;
+  RU/KG/EN story collections with names and round image covers editable after creation and support
+  for at least 40 stories each (capacity, not a publication minimum);
   a permanent newest-first news feed; text/image/MP4 content; pinning, scheduling and non-destructive
   expiry; protected owner/manager media CRUD; server-side public filtering; and reversible
-  admin→API→Flutter acceptance. Collections live on the dedicated News page, not on Home.
+  admin→API→Flutter acceptance. Collections live on the dedicated News page, not on Home. Local
+  PostgreSQL+HTTP acceptance passed with 41/41 unique collection stories, an edited collection name,
+  and the Home response capped at 30; real production image/video and Android UX remain to be checked.
 - [ ] Enforce company/branch scope server-side and add isolation/permission tests; the two-company view remains a demo scenario, not production SaaS.
 - [ ] Align scripts, environment variables, ports, Docker configuration, and README with the custom Next.js stack.
 - [ ] Keep admin typecheck and production build green; add unit/E2E/accessibility tests and verify authenticated role/branch flows before acceptance.

@@ -7,12 +7,15 @@
 
 ## Текущий статус и активные зоны
 
+- Stories/collections/news feed V2 полностью реализованы локально в `backend/api`, `admin`, `lib` и
+  `deploy/production`; все автоматические и disposable PostgreSQL+HTTP проверки зелёные. Текущая задача —
+  production rollout и физическая Android-приёмка, см. CX-019 в конце файла и `docs/TASKS.md`.
 - Завершён аудит репозитория и Product/UX Requirements Pack; результат отражён в пяти основных
   документах и в `docs/TASKS.md` как Task 0 и Task 1.
 - По прямому поручению пользователя завершён и ожидает визуальной приёмки Flutter UX-срез:
   управление вспышкой QR-сканера, замена категорий Home на news stories и полный RU/KG/EN для
-  всех существующих экранов и текущего demo-контента. Будущий CRUD новостей в admin с правами
-  owner/manager записан в канонический backlog, но намеренно не реализован в мобильном срезе.
+  всех существующих экранов и текущего demo-контента. Этот ранний срез позже расширен до полного
+  owner/manager Content V2, описанного в CX-019.
 - По свежей обратной связи выполнен отдельный performance/UI-проход: компактный выбор языка в
   шапке Profile, filled-иконки нижней навигации, быстрые theme/tab transitions, resized decode
   карточек Home и lifecycle камеры только для активной вкладки Scan. Пользователь подтвердил
@@ -31,8 +34,8 @@
   честно сообщает о недостающей OAuth-конфигурации. `flutter analyze`, 24/24 теста и свежая
   profile APK проходят; APK установлена на Redmi Note 9 Pro, owner QA ещё ожидается.
 - Последние заявленные зоны Claude Code: `lib/`, `admin/`, `backend/app_demo/`, `docs/design/*`.
-  Прямое новое поручение пользователя разрешило Codex изменить Flutter-файлы; Claude Code должен
-  перечитать этот файл и не перезаписывать свежий мобильный срез старой копией.
+  Прямые новые поручения пользователя разрешили Codex завершить Flutter/admin/backend Content V2;
+  Claude Code должен перечитать CX-019 и не перезаписывать свежий срез старой копией.
 
 ## Выполнено с последнего обновления
 
@@ -1071,3 +1074,25 @@ authoritative и скрывают секцию вместо возврата Dem
 установлен поверх текущего приложения на Redmi `f3bff2a5` и запущен. Осталась ручная обратимая проверка:
 создать/опубликовать test news в admin → pull-to-refresh в приложении → увидеть RU/KY/EN → удалить запись →
 повторно обновить и убедиться, что она исчезла.
+
+## 2026-07-15 — CX-019: Stories/collections/news feed V2 локально завершены
+
+- Продуктовый контракт: Home остаётся плоской лентой максимум из 30 активных сторис. Подборки живут только
+  на `/news`; название/описание RU/KY/EN и круглая фото-обложка изменяются после создания. Каждая подборка
+  поддерживает минимум 40 сторис как ёмкость, но публикация не требует заранее заполнить 40 элементов.
+- Backend: добавлены V2 public/admin API, cursor-pagination, RBAC owner/manager, tenant isolation, фильтрация
+  draft/future/expired, media-only story, image/MP4 storage и Alembic `e73c8f2a1b04` от `b91e7c4a2d10`.
+  Host/internal nginx limit повышен до 52 MiB для MP4; сервер не перекодирует видео, поэтому admin честно
+  требует H.264/AAC MP4. Коммит `8e83710`.
+- Admin: `/news` разделён на «Сторисы», «Подборки», «Лента»; добавлены таймеры never/24h/3d/7d/custom,
+  редактирование названия/обложки подборки, RU/KY/EN, preview/replace/remove media, server-ACK и обработка
+  ошибок. Коммит `4cff2db`.
+- Flutter: Home max30 и переход стрелкой на `/news`; подборки/40+ viewer, лента с bottom sheet, image/video,
+  Android back и RU/KY/EN. Коммиты `d1d1384`, `e1f9d07`.
+- Проверки: backend Docker `53 passed`; Flutter analyze clean и `58 passed`; admin typecheck и 4/4 content
+  tests; Linux production admin image build; disposable PostgreSQL+HTTP: head=`e73c8f2a1b04`, переименование
+  подборки прочитано публично, `41/41` сторис без дублей/пропусков, Home=`30`.
+- Осталось: выкатить архив с обязательным backup, migration и rebuild backend/admin; обновить фактический
+  host nginx `client_max_body_size` с 11M до 52M; проверить на production реальную замену обложки, MP4 range,
+  RU/KY/EN и Android UX/back. Встроенное окно браузера в текущей сессии недоступно, поэтому локальная
+  визуальная проверка admin выполнена сборкой/код-ревью, а не интерактивным screenshot-smoke.

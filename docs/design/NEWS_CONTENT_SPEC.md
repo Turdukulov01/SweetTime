@@ -12,8 +12,10 @@ SweetTime has three related but distinct surfaces:
    evergreen or automatically expire.
 2. **Story collections** — editable round categories at the top of `/news`.
    Examples are employees, videos, company news, and reviews. A collection has
-   a localized name and an editable image cover. It has no small hard item
-   limit and the UI must remain lazy and usable with 40+ stories.
+   a localized name and an editable image cover; both remain editable after
+   creation. It has no small hard item limit and the UI must remain lazy and
+   usable with at least 40 stories per collection. This is a capacity
+   guarantee, not a requirement to upload 40 items before publishing.
 3. **News feed posts** — permanent scrollable publications below the collection
    rail. A post has localized title, summary and full body, an automatic
    publication date, and optional image or MP4 video. Opening a post presents
