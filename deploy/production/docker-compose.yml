@@ -42,7 +42,7 @@ services:
       GOOGLE_OAUTH_WEB_CLIENT_ID: ${GOOGLE_OAUTH_WEB_CLIENT_ID:-}
       GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS: ${GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS:-[]}
       SEED_MODE: none
-    command: ["alembic", "-c", "api/alembic.ini", "upgrade", "head"]
+    command: ["alembic", "-c", "/app/api/alembic.ini", "upgrade", "head"]
     depends_on:
       postgres:
         condition: service_healthy

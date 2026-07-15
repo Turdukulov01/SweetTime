@@ -9,6 +9,7 @@ COPY backend/api/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY backend/api /app/api
+RUN chmod -R a+rX /app/api
 
 EXPOSE 8000
 

@@ -1013,5 +1013,13 @@ QR-камера имела `CAMERA granted=true`, но release logcat + retrace 
 чист; Flutter 52/52 и backend 43/43 тестов проходят; release APK успешно собран, подписан прежним upload key
 и установлен через `adb install --no-streaming -r`. На Redmi QR теперь открывает CameraX/ML Kit без NPE,
 фонарь включается, scanner повторно запускается после смены subtab/root tab; внешняя Xiaomi OneShotCamera
-успешно открывается из редактирования профиля. Осталось загрузить revision на сервер, выполнить migrate до
-`b91e7c4a2d10`, затем проверить delete→same Google→обязательный phone prompt.
+успешно открывается из редактирования профиля.
+
+Revision `761b7b6` развёрнут на production; Alembic=`b91e7c4a2d10`, внешний `/ready`=200, а
+неавторизованный `DELETE /api/companies/sweettime/auth/customer/me`=401, то есть новый маршрут активен.
+При выкладке обнаружен packaging-риск: архив распаковывался в shell с ранее установленным `umask 077`,
+из-за чего backend-файлы внутри Docker image стали `600 root:root`, а migrate под UID/GID 1000 не мог
+прочитать `alembic.ini` и сообщал `No 'script_location'`. На сервере права восстановлены через `a+rX`;
+локально `backend/api/Dockerfile` теперь всегда выполняет `chmod -R a+rX /app/api`, а Compose использует
+абсолютный `/app/api/alembic.ini`. Осталась ручная destructive acceptance-проверка:
+delete account → guest state → вход тем же Google → обязательный phone prompt и пустой новый профиль.
