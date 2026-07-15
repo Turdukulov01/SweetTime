@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sweettime/core/api_client.dart';
+import 'package:sweettime/core/auth_store.dart';
 import 'package:sweettime/core/format.dart';
 import 'package:sweettime/core/localization/app_localizations.dart';
 import 'package:sweettime/core/router.dart';
@@ -177,6 +179,106 @@ void main() {
     },
   );
 
+  test('saved token restores the server session and profile on start', () async {
+    final authStore = _MemoryAuthStore(
+      accessToken: 'good',
+      refreshToken: 'fresh',
+    );
+    final api = _FakeAuthApiClient(
+      profile: CustomerProfile(
+        id: 'c-sw-aigerim',
+        phone: '+996 555 123 456',
+        firstName: 'Айгерим',
+        lastName: 'Осмонова',
+        birthDate: DateTime(1998, 3, 14),
+        points: 1240,
+        referralCode: 'SWEET-AIGERIM',
+        invitedByCode: null,
+      ),
+    );
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: authStore,
+      api: api,
+    );
+
+    expect(controller.state.isGuest, isTrue);
+    await controller.bootstrap();
+
+    // Личные данные приходят с сервера, а не из локального стейта.
+    expect(api.customerMeCalls, ['good']);
+    expect(controller.state.isGuest, isFalse);
+    expect(controller.state.firstName, 'Айгерим');
+    expect(controller.state.lastName, 'Осмонова');
+    expect(controller.state.birthDate, DateTime(1998, 3, 14));
+    expect(controller.state.points, 1240);
+    expect(controller.state.userContact, '+996 555 123 456');
+  });
+
+  test('rejected token is cleared and the user stays a guest', () async {
+    final authStore = _MemoryAuthStore(accessToken: 'stale');
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: authStore,
+      api: _FakeAuthApiClient(
+        profile: const CustomerProfile(
+          id: 'c-sw-aigerim',
+          phone: '+996 555 123 456',
+          firstName: '',
+          lastName: '',
+          birthDate: null,
+          points: 0,
+          referralCode: null,
+          invitedByCode: null,
+        ),
+      ),
+    );
+
+    await controller.bootstrap();
+
+    expect(controller.state.isGuest, isTrue);
+    expect(authStore.accessToken, isNull);
+    expect(authStore.refreshToken, isNull);
+  });
+
+  test('OTP sign-in stores tokens and logout clears them', () async {
+    final authStore = _MemoryAuthStore();
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: authStore,
+      api: _FakeAuthApiClient(
+        profile: const CustomerProfile(
+          id: 'c-sw-aigerim',
+          phone: '+996 555 123 456',
+          firstName: 'Айгерим',
+          lastName: '',
+          birthDate: null,
+          points: 1240,
+          referralCode: 'SWEET-AIGERIM',
+          invitedByCode: null,
+        ),
+      ),
+    );
+
+    expect(await controller.loginWithOtp('+996555123456', '9999'), isFalse);
+    expect(controller.state.isGuest, isTrue);
+    expect(authStore.accessToken, isNull);
+
+    expect(await controller.loginWithOtp('+996555123456', '1111'), isTrue);
+    expect(controller.state.isGuest, isFalse);
+    expect(controller.state.points, 1240);
+    expect(authStore.accessToken, 'good');
+    expect(authStore.refreshToken, 'fresh');
+
+    controller.logout();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.state.isGuest, isTrue);
+    expect(authStore.accessToken, isNull);
+    expect(authStore.refreshToken, isNull);
+    expect(authStore.clearCount, 1);
+  });
+
   testWidgets('AppTheme memoizes light and dark themes for the same accent', (
     WidgetTester tester,
   ) async {
@@ -340,9 +442,12 @@ void main() {
   testWidgets(
     'guest signs in with a bounded Kyrgyz phone and returns to checkout',
     (WidgetTester tester) async {
+      // Сервер недоступен: проверяем автономный демо-вход (APK без API).
       final controller =
           AppStateController(
               languagePreferences: _MemoryLanguagePreferenceStore(),
+              authStore: _MemoryAuthStore(),
+              api: _OfflineApiClient(),
             )
             ..setLanguage(AppLanguage.en)
             ..seedDemo(cart: true);
@@ -698,6 +803,86 @@ Widget _testAppWithController(AppStateController controller) {
     overrides: [appStateProvider.overrideWith((ref) => controller)],
     child: const SweetTimeApp(),
   );
+}
+
+/// Токены в памяти: платформенных каналов (Keystore/Keychain) в тестах нет.
+class _MemoryAuthStore implements AuthStore {
+  _MemoryAuthStore({this.accessToken, this.refreshToken});
+
+  String? accessToken;
+  String? refreshToken;
+  int clearCount = 0;
+
+  @override
+  Future<String?> readAccessToken() async => accessToken;
+
+  @override
+  Future<String?> readRefreshToken() async => refreshToken;
+
+  @override
+  Future<void> writeTokens({
+    required String accessToken,
+    required String refreshToken,
+  }) async {
+    this.accessToken = accessToken;
+    this.refreshToken = refreshToken;
+  }
+
+  @override
+  Future<void> clear() async {
+    clearCount++;
+    accessToken = null;
+    refreshToken = null;
+  }
+}
+
+/// API недоступен: все запросы отвечают как офлайн.
+/// Даёт детерминированность — тест не зависит от того, поднят ли реальный :8010.
+class _OfflineApiClient extends ApiClient {
+  @override
+  Future<CompanyConfig?> fetchConfig() async => null;
+
+  @override
+  Future<ApiResult<CustomerSession>> otpVerify(String phone, String code) async
+  => const ApiResult<CustomerSession>.unavailable();
+
+  @override
+  Future<ApiResult<CustomerProfile>> fetchCustomerMe(String accessToken) async
+  => const ApiResult<CustomerProfile>.unavailable();
+
+  @override
+  Future<bool> otpRequest(String phone) async => false;
+}
+
+/// Сервер с одним известным клиентом: access-токен `good`, refresh `fresh`.
+class _FakeAuthApiClient extends ApiClient {
+  _FakeAuthApiClient({required this.profile});
+
+  final CustomerProfile profile;
+  final List<String> customerMeCalls = [];
+
+  @override
+  Future<CompanyConfig?> fetchConfig() async => null;
+
+  @override
+  Future<ApiResult<CustomerProfile>> fetchCustomerMe(String accessToken) async {
+    customerMeCalls.add(accessToken);
+    if (accessToken != 'good') {
+      return const ApiResult<CustomerProfile>.rejected();
+    }
+    return ApiResult<CustomerProfile>.ok(profile);
+  }
+
+  @override
+  Future<ApiResult<CustomerSession>> otpVerify(String phone, String code) async {
+    if (code != '1111') return const ApiResult<CustomerSession>.rejected();
+    return ApiResult<CustomerSession>.ok(
+      CustomerSession(
+        tokens: const TokenPair(accessToken: 'good', refreshToken: 'fresh'),
+        profile: profile,
+      ),
+    );
+  }
 }
 
 class _MemoryLanguagePreferenceStore implements LanguagePreferenceStore {

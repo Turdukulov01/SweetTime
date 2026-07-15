@@ -2,9 +2,13 @@
 
 // Сотрудники компании (только owner): роли, филиалы для бариста,
 // приглашение новых. Себя удалить нельзя, свою роль менять нельзя.
+//
+// ВАЖНО: серверных ручек управления сотрудниками в API пока НЕТ — страница
+// работает на демо-данных (lib/demo-data), изменения живут только в памяти
+// вкладки и не сохраняются. Об этом честно сказано баннером на странице.
 
 import { useState, type FormEvent } from "react";
-import { Trash2, UserPlus, X } from "lucide-react";
+import { Info, Trash2, UserPlus, X } from "lucide-react";
 import { RoleGate } from "@/components/role-gate";
 import { useCompanyStore } from "@/lib/company-store";
 import { ROLE_LABELS } from "@/lib/labels";
@@ -101,6 +105,17 @@ function StaffContent() {
           )}
           {inviteOpen ? "Отмена" : "Пригласить сотрудника"}
         </button>
+      </div>
+
+      <div className="surface mt-4 flex items-start gap-2.5 border-amber-500/40 bg-amber-50 px-5 py-3.5 dark:bg-amber-500/10">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+        <p className="text-sm text-coffee-700">
+          <span className="font-semibold text-coffee-900">Демо-данные.</span>{" "}
+          Серверное управление сотрудниками появится позже: API для этого пока
+          нет. Список ниже и любые правки (приглашение, роль, филиал, удаление)
+          живут только в этой вкладке и не сохраняются на сервере. Реально
+          входить в админку могут только аккаунты из базы.
+        </p>
       </div>
 
       {inviteOpen && (

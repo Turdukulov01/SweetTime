@@ -480,6 +480,10 @@ function DashboardContent() {
                 ))}
               </div>
             </DetailSection>
+            <EmptyDetail>
+              Демо-данные: «постоянных заказов» в API пока нет — цифры ниже не
+              боевые.
+            </EmptyDetail>
             <DetailSection title="Товары в постоянных заказах">
               {recurringProducts.size === 0 ? (
                 <EmptyDetail>Активных постоянных заказов нет.</EmptyDetail>

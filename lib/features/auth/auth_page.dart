@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,6 +21,9 @@ class _AuthPageState extends ConsumerState<AuthPage> {
   final _phoneController = TextEditingController();
   final _codeController = TextEditingController();
   bool _codeStep = false;
+
+  /// Проверка кода уходит на сервер: блокируем повторные нажатия.
+  bool _submitting = false;
   String? _error;
 
   String get _subscriberDigits =>
@@ -42,24 +47,40 @@ class _AuthPageState extends ConsumerState<AuthPage> {
       );
       return;
     }
+    // Просим сервер выслать код. SMS-провайдера нет (код всегда демо-1111),
+    // поэтому шаг ввода кода не ждёт ответа и работает офлайн.
+    unawaited(ref.read(appStateProvider.notifier).requestOtp(_normalizedPhone));
     setState(() {
       _error = null;
       _codeStep = true;
     });
   }
 
-  void _confirm() {
-    if (_codeController.text.trim() != DemoData.demoOtpCode) {
-      setState(
-        () => _error = AppLocalizations.of(
-          context,
-        ).invalidDemoCodeError(DemoData.demoOtpCode),
-      );
+  Future<void> _confirm() async {
+    if (_submitting) return;
+    final strings = AppLocalizations.of(context);
+    final controller = ref.read(appStateProvider.notifier);
+    setState(() {
+      _error = null;
+      _submitting = true;
+    });
+
+    final signedIn = await controller.loginWithOtp(
+      _normalizedPhone,
+      _codeController.text.trim(),
+    );
+    if (!mounted) return;
+    if (!signedIn) {
+      setState(() {
+        _submitting = false;
+        _error = strings.invalidDemoCodeError(DemoData.demoOtpCode);
+      });
       return;
     }
-    final controller = ref.read(appStateProvider.notifier);
-    controller.login(_normalizedPhone);
+
+    setState(() => _submitting = false);
     final destination = controller.takePendingAuthReturn();
+    if (!mounted) return;
     context.go(destination?.location ?? '/profile');
   }
 
@@ -192,16 +213,18 @@ class _AuthPageState extends ConsumerState<AuthPage> {
               if (_error != null) _ErrorText(_error!),
               const SizedBox(height: 16),
               FilledButton(
-                onPressed: _confirm,
+                onPressed: _submitting ? null : _confirm,
                 child: Text(strings.confirmAndSignIn),
               ),
               const SizedBox(height: 8),
               TextButton.icon(
-                onPressed: () => setState(() {
-                  _codeStep = false;
-                  _codeController.clear();
-                  _error = null;
-                }),
+                onPressed: _submitting
+                    ? null
+                    : () => setState(() {
+                        _codeStep = false;
+                        _codeController.clear();
+                        _error = null;
+                      }),
                 icon: const Icon(Icons.arrow_back),
                 label: Text(strings.changePhoneNumber),
               ),

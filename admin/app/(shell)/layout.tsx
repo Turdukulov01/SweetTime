@@ -19,6 +19,7 @@ import {
   Tag,
   Users
 } from "lucide-react";
+import { ErrorToast } from "@/components/data-state";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useApiStatus } from "@/lib/api";
 import { CompanyStoreProvider, useCompanyStore } from "@/lib/company-store";
@@ -78,7 +79,7 @@ function ShellFrame({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { company } = useCompanyStore();
+  const { company, errorMessage } = useCompanyStore();
   const apiStatus = useApiStatus();
 
   const navItems = NAV_ITEMS.filter((item) => item.roles.includes(user.role));
@@ -135,7 +136,7 @@ function ShellFrame({
         </nav>
 
         <p className="px-2 pt-4 text-[11px] leading-snug text-coffee-500/70">
-          SweetTime Platform · демо-режим
+          SweetTime Platform
         </p>
       </aside>
 
@@ -153,8 +154,8 @@ function ShellFrame({
             <span
               title={
                 apiStatus === "live"
-                  ? "Данные из API (NEXT_PUBLIC_API_URL)"
-                  : "Мок-данные: API не задан или недоступен"
+                  ? "Данные из боевого API (NEXT_PUBLIC_API_URL)"
+                  : "API не отвечает или адрес не задан"
               }
               className="flex items-center gap-1.5 rounded-full border border-coffee-900/10 px-2.5 py-0.5 text-[11px] font-semibold text-coffee-500"
             >
@@ -194,20 +195,23 @@ function ShellFrame({
 
         <main className="flex-1 px-6 py-6">{children}</main>
       </div>
+
+      {/* Ошибки действий над данными компании (403, сеть) — общий тост shell */}
+      {errorMessage && <ErrorToast message={errorMessage} />}
     </div>
   );
 }
 
 export default function ShellLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const { status, user, company } = useSession();
+  const { status, user, companyId } = useSession();
 
   // Guard: неавторизованных — на страницу входа
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/login");
   }, [status, router]);
 
-  if (status !== "authenticated" || !user || !company) {
+  if (status !== "authenticated" || !user || !companyId) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p className="text-sm text-coffee-500">Загрузка…</p>
@@ -215,9 +219,10 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
     );
   }
 
+  // companyId — из JWT: все данные ниже скоуплены компанией токена
   return (
-    <CompanyStoreProvider key={company.id} companyId={company.id}>
-      <OrdersProvider key={company.id} companyId={company.id}>
+    <CompanyStoreProvider key={companyId} companyId={companyId}>
+      <OrdersProvider key={companyId} companyId={companyId}>
         <ShellFrame user={user}>{children}</ShellFrame>
       </OrdersProvider>
     </CompanyStoreProvider>

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { KeyRound, LogIn } from "lucide-react";
-import { getDemoAccounts } from "@/lib/data";
+import { getDemoAccounts } from "@/lib/demo-data";
 import { login, useSession } from "@/lib/session";
 
 const demoAccounts = getDemoAccounts();
@@ -14,20 +14,25 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   // Уже вошли — сразу в панель
   useEffect(() => {
     if (status === "authenticated") router.replace("/");
   }, [status, router]);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const session = login(email, password);
-    if (!session) {
-      setError("Неверный email или пароль. Пароль всех демо-аккаунтов: demo");
+    if (pending) return;
+    setPending(true);
+    setError(null);
+    // Настоящий вход: POST /api/auth/staff/login, компания — из ответа сервера
+    const result = await login(email, password);
+    if (!result.ok) {
+      setError(result.error);
+      setPending(false);
       return;
     }
-    setError(null);
     router.replace("/");
   }
 
@@ -36,6 +41,8 @@ export default function LoginPage() {
     setPassword("demo");
     setError(null);
   }
+
+  const submitLabel = pending ? "Входим…" : "Войти";
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
@@ -95,10 +102,11 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              className="focus-ring flex h-11 w-full items-center justify-center gap-2 rounded-full bg-candy-500 text-sm font-semibold text-white transition hover:bg-candy-700"
+              disabled={pending}
+              className="focus-ring flex h-11 w-full items-center justify-center gap-2 rounded-full bg-candy-500 text-sm font-semibold text-white transition hover:bg-candy-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <LogIn className="h-4 w-4" />
-              Войти
+              {submitLabel}
             </button>
           </form>
         </div>

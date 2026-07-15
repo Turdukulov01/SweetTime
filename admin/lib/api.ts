@@ -1,12 +1,24 @@
 "use client";
 
-// Тонкий fetch-клиент demo-API (контракт: docs/design/DEMO_API.md).
-// Все ручки тенант-скоупнуты: /api/companies/{companyId}/...
-// При отсутствии NEXT_PUBLIC_API_URL клиент выключен (apiEnabled = false),
-// сторы остаются на мок-данных.
+// Fetch-клиент боевого API (backend/api, JWT). Все доменные ручки тенант-скоупнуты:
+// /api/companies/{companyId}/...
+//
+// Авторизация: в каждый запрос подставляется `Authorization: Bearer <accessToken>`
+// из localStorage-сессии (lib/auth-storage). На 401 клиент один раз пробует
+// обновить пару токенов через /auth/refresh и повторяет запрос; если refresh не
+// удался — сессия чистится и пользователь уходит на /login.
+//
+// Ошибки НЕ глотаются: каждая неуспешная ручка бросает ApiError(status, detail),
+// вызывающий код показывает её пользователю.
 
 import { useSyncExternalStore } from "react";
+import {
+  clearStoredSession,
+  readStoredSession,
+  updateStoredTokens
+} from "@/lib/auth-storage";
 import type {
+  AdminUser,
   Branch,
   Company,
   LocalizedText,
@@ -17,12 +29,13 @@ import type {
   OrderStatus,
   OrderType,
   Product,
-  Promotion
+  Promotion,
+  Role
 } from "@/lib/types";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/+$/, "");
 
-/** Включена ли интеграция с API (задан NEXT_PUBLIC_API_URL) */
+/** Задан ли адрес API (NEXT_PUBLIC_API_URL). Без него админка работать не может. */
 export const apiEnabled = API_URL.length > 0;
 
 export class ApiError extends Error {
@@ -33,6 +46,19 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
   }
+}
+
+/** Человеческий текст ошибки для UI (русский, без технических подробностей) */
+export function describeApiError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 0) {
+      return `API недоступен (${API_URL || "адрес не задан"}). Проверьте, что сервер запущен.`;
+    }
+    if (error.status === 401) return "Сессия истекла — войдите заново.";
+    if (error.status === 403) return "Недостаточно прав";
+    return error.message;
+  }
+  return error instanceof Error ? error.message : "Неизвестная ошибка";
 }
 
 // ---------------------------------------------------------------------------
@@ -55,7 +81,7 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-/** Хук статуса API: "live" — зелёная точка, остальное — серая (моки) */
+/** Хук статуса API: "live" — зелёная точка, остальное — серая */
 export function useApiStatus(): ApiStatus {
   return useSyncExternalStore(
     subscribe,
@@ -65,68 +91,205 @@ export function useApiStatus(): ApiStatus {
 }
 
 // ---------------------------------------------------------------------------
-// Базовый запрос
+// Базовый запрос: Bearer-токен, refresh на 401, разбор ошибок
 // ---------------------------------------------------------------------------
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  if (!apiEnabled) throw new ApiError(0, "API отключён (NEXT_PUBLIC_API_URL)");
-
-  let response: Response;
+/** Тело ошибки FastAPI: {"detail": "..."} */
+async function toApiError(response: Response): Promise<ApiError> {
+  let detail = `HTTP ${response.status}`;
   try {
-    response = await fetch(`${API_URL}${path}`, {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === "string") detail = body.detail;
+  } catch {
+    // тело не JSON — оставляем HTTP-код
+  }
+  return new ApiError(response.status, detail);
+}
+
+async function sendRaw(path: string, init: RequestInit): Promise<Response> {
+  try {
+    const response = await fetch(`${API_URL}${path}`, {
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {})
-      },
       cache: "no-store"
     });
+    // Сервер ответил — он жив, даже если вернул ошибку уровня запроса
+    setApiStatus("live");
+    return response;
   } catch {
     setApiStatus("down");
     throw new ApiError(0, "API недоступен");
   }
+}
 
-  // Сервер ответил — он жив, даже если вернул ошибку уровня запроса
-  setApiStatus("live");
+/** Обновление пары токенов. Параллельные 401 ждут один и тот же запрос. */
+let refreshInFlight: Promise<boolean> | null = null;
 
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
+function refreshTokens(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    const session = readStoredSession();
+    if (!session) return false;
     try {
-      const body = (await response.json()) as { detail?: unknown };
-      if (typeof body.detail === "string") detail = body.detail;
+      const response = await fetch(
+        `${API_URL}/api/companies/${session.user.companyId}/auth/refresh`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken: session.refreshToken }),
+          cache: "no-store"
+        }
+      );
+      if (!response.ok) return false;
+      const body = (await response.json()) as {
+        accessToken?: unknown;
+        refreshToken?: unknown;
+      };
+      if (
+        typeof body.accessToken !== "string" ||
+        typeof body.refreshToken !== "string"
+      ) {
+        return false;
+      }
+      updateStoredTokens(body.accessToken, body.refreshToken);
+      return true;
     } catch {
-      // тело не JSON — оставляем HTTP-код
+      return false;
     }
-    throw new ApiError(response.status, detail);
+  })();
+
+  return refreshInFlight.finally(() => {
+    refreshInFlight = null;
+  });
+}
+
+/** Refresh не помог: чистим сессию и уводим на страницу входа. */
+function forceLogout(): void {
+  clearStoredSession();
+  if (
+    typeof window !== "undefined" &&
+    window.location.pathname !== "/login"
+  ) {
+    window.location.replace("/login");
+  }
+}
+
+/**
+ * Запрос к API с авторизацией. На 401 — одна попытка refresh + повтор;
+ * если и после этого 401 — logout и редирект на /login.
+ */
+async function authorizedFetch(
+  path: string,
+  init: RequestInit
+): Promise<Response> {
+  if (!apiEnabled) {
+    throw new ApiError(0, "Адрес API не задан (NEXT_PUBLIC_API_URL)");
   }
 
+  const send = () => {
+    const headers = new Headers(init.headers);
+    if (init.body !== undefined && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    const token = readStoredSession()?.accessToken;
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return sendRaw(path, { ...init, headers });
+  };
+
+  const response = await send();
+  if (response.status !== 401) return response;
+
+  if (!(await refreshTokens())) {
+    forceLogout();
+    throw new ApiError(401, "Сессия истекла — войдите заново.");
+  }
+
+  const retried = await send();
+  if (retried.status === 401) {
+    forceLogout();
+    throw new ApiError(401, "Сессия истекла — войдите заново.");
+  }
+  return retried;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await authorizedFetch(path, init);
+  if (!response.ok) throw await toApiError(response);
   return (await response.json()) as T;
 }
 
 /** DELETE-запрос без тела ответа (сервер отвечает 204 No Content). */
 async function requestVoid(path: string, method = "DELETE"): Promise<void> {
-  if (!apiEnabled) throw new ApiError(0, "API отключён (NEXT_PUBLIC_API_URL)");
+  const response = await authorizedFetch(path, { method });
+  if (!response.ok) throw await toApiError(response);
+}
 
-  let response: Response;
-  try {
-    response = await fetch(`${API_URL}${path}`, { method, cache: "no-store" });
-  } catch {
-    setApiStatus("down");
-    throw new ApiError(0, "API недоступен");
+// ---------------------------------------------------------------------------
+// Авторизация сотрудника
+// ---------------------------------------------------------------------------
+
+interface ApiStaffUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  companyId: string;
+  branchId?: string | null;
+}
+
+interface ApiLoginResponse {
+  accessToken: string;
+  refreshToken: string;
+  user: ApiStaffUser;
+}
+
+export interface StaffLoginResult {
+  accessToken: string;
+  refreshToken: string;
+  user: AdminUser;
+}
+
+const KNOWN_ROLES: Role[] = ["owner", "manager", "barista"];
+
+function mapStaffUser(u: ApiStaffUser): AdminUser {
+  if (!KNOWN_ROLES.includes(u.role as Role)) {
+    throw new ApiError(0, `Неизвестная роль сотрудника: ${u.role}`);
   }
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    role: u.role as Role,
+    companyId: u.companyId,
+    branchId: u.branchId ?? undefined
+  };
+}
 
-  setApiStatus("live");
-
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const body = (await response.json()) as { detail?: unknown };
-      if (typeof body.detail === "string") detail = body.detail;
-    } catch {
-      // тело не JSON — оставляем HTTP-код
-    }
-    throw new ApiError(response.status, detail);
+/**
+ * Вход сотрудника. Компанию сервер определяет по email — в пути её нет.
+ * Неверные креды → ApiError(401).
+ */
+export async function apiStaffLogin(
+  email: string,
+  password: string
+): Promise<StaffLoginResult> {
+  if (!apiEnabled) {
+    throw new ApiError(0, "Адрес API не задан (NEXT_PUBLIC_API_URL)");
   }
+  // Мимо authorizedFetch: 401 здесь — «неверный пароль», а не истёкшая сессия
+  const response = await sendRaw("/api/auth/staff/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: email.trim(), password })
+  });
+  if (!response.ok) throw await toApiError(response);
+
+  const body = (await response.json()) as ApiLoginResponse;
+  return {
+    accessToken: body.accessToken,
+    refreshToken: body.refreshToken,
+    user: mapStaffUser(body.user)
+  };
 }
 
 // ---------------------------------------------------------------------------

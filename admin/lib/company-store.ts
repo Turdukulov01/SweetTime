@@ -1,12 +1,16 @@
 "use client";
 
-// Клиентское редактируемое состояние компании: брендинг + лояльность,
-// товары, филиалы, сотрудники, «постоянные заказы».
+// Состояние компании: брендинг + лояльность, товары, филиалы, новости, акции.
 //
-// Источник данных: при заданном NEXT_PUBLIC_API_URL стор инициализируется
-// из demo-API (config + products + branches), мутации шлют PATCH/POST и
-// применяют ответ сервера. При недоступном API — graceful fallback на моки
-// (console.warn). Сотрудники и recurring всегда на моках — их нет в API.
+// Источник данных — ТОЛЬКО боевой API (backend/api), скоуп по companyId из JWT.
+// Мок-подмены нет: пока данные не загружены — экран загрузки, если API не
+// ответил — экран ошибки с «Повторить»/«Выйти».
+// Мутации шлют PATCH/POST/DELETE с Bearer-токеном и применяют ответ сервера;
+// при ошибке (403 «Недостаточно прав», сеть) изменение откатывается и
+// показывается тост (errorMessage → ErrorToast в shell).
+//
+// Демо-остатки (нет серверных ручек): сотрудники и «постоянные заказы» —
+// помечены в интерфейсе как демо-данные.
 //
 // Провайдер монтируется в shell с key={companyId}: при перелогине состояние
 // пересоздаётся, данные чужой компании не «протекают».
@@ -22,6 +26,7 @@ import {
   useState,
   type ReactNode
 } from "react";
+import { DataError, DataLoading } from "@/components/data-state";
 import {
   apiCreateBranch,
   apiCreateNews,
@@ -29,7 +34,6 @@ import {
   apiCreatePromotion,
   apiDeleteNews,
   apiDeletePromotion,
-  apiEnabled,
   apiFetchBranches,
   apiFetchConfig,
   apiFetchNews,
@@ -39,9 +43,11 @@ import {
   apiPatchConfig,
   apiPatchNews,
   apiPatchProduct,
-  apiPatchPromotion
+  apiPatchPromotion,
+  describeApiError
 } from "@/lib/api";
-import { getCompanyData } from "@/lib/data";
+import { getDemoRecurring, getDemoStaff } from "@/lib/demo-data";
+import { logout } from "@/lib/session";
 import type {
   AdminUser,
   Branch,
@@ -56,13 +62,17 @@ interface CompanyState {
   company: Company;
   products: Product[];
   branches: Branch[];
-  users: AdminUser[];
-  recurring: RecurringOrder[];
   news: NewsStory[];
   promotions: Promotion[];
+  /** Демо: серверного управления сотрудниками пока нет */
+  users: AdminUser[];
+  /** Демо: «постоянных заказов» на сервере пока нет */
+  recurring: RecurringOrder[];
 }
 
 interface CompanyStoreValue extends CompanyState {
+  /** Текст последней ошибки действия (для тоста), null — нет */
+  errorMessage: string | null;
   /** Брендинг, лояльность, рефералка — частичное обновление компании */
   updateCompany: (patch: Partial<Omit<Company, "id">>) => void;
   addProduct: (product: Product) => void;
@@ -85,11 +95,7 @@ interface CompanyStoreValue extends CompanyState {
 
 const CompanyStoreContext = createContext<CompanyStoreValue | null>(null);
 
-const warnApi = (action: string, error: unknown) =>
-  console.warn(
-    `[admin] API: не удалось ${action} — изменение только локально.`,
-    error
-  );
+type LoadStatus = "loading" | "ready" | "error";
 
 export function CompanyStoreProvider({
   companyId,
@@ -98,31 +104,27 @@ export function CompanyStoreProvider({
   companyId: string;
   children: ReactNode;
 }) {
-  // Мгновенный сид из моков, чтобы UI не ждал сеть; API заменит данные ниже
-  const [state, setState] = useState<CompanyState | null>(() => {
-    const data = getCompanyData(companyId);
-    if (!data) return null;
-    return {
-      company: data.company,
-      products: data.products,
-      branches: data.branches,
-      users: data.users,
-      recurring: data.recurring,
-      news: data.news,
-      promotions: data.promotions
-    };
-  });
+  const [state, setState] = useState<CompanyState | null>(null);
+  const [loadStatus, setLoadStatus] = useState<LoadStatus>("loading");
+  const [loadError, setLoadError] = useState<string>("");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
-  // true после успешной загрузки из API — тогда мутации шлют PATCH/POST
-  const apiModeRef = useRef(false);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Дебаунс PATCH /config: брендинг правится посимвольно
   const configPatchRef = useRef<Partial<Omit<Company, "id">>>({});
   const configTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const showError = useCallback((error: unknown) => {
+    setErrorMessage(describeApiError(error));
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = setTimeout(() => setErrorMessage(null), 4000);
+  }, []);
+
   useEffect(() => {
-    if (!apiEnabled) return;
     let cancelled = false;
+    setLoadStatus("loading");
 
     Promise.all([
       apiFetchConfig(companyId),
@@ -133,25 +135,35 @@ export function CompanyStoreProvider({
     ])
       .then(([company, products, branches, news, promotions]) => {
         if (cancelled) return;
-        apiModeRef.current = true;
-        setState((prev) =>
-          prev
-            ? { ...prev, company, products, branches, news, promotions }
-            : prev
-        );
+        setState({
+          company,
+          products,
+          branches,
+          news,
+          promotions,
+          users: getDemoStaff(companyId),
+          recurring: getDemoRecurring(companyId)
+        });
+        setLoadStatus("ready");
       })
-      .catch((error) => {
-        console.warn(
-          "[admin] API недоступен, работаем на мок-данных:",
-          error instanceof Error ? error.message : error
-        );
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLoadError(describeApiError(error));
+        setLoadStatus("error");
       });
 
     return () => {
       cancelled = true;
-      if (configTimerRef.current) clearTimeout(configTimerRef.current);
     };
-  }, [companyId]);
+  }, [companyId, reloadToken]);
+
+  useEffect(
+    () => () => {
+      if (configTimerRef.current) clearTimeout(configTimerRef.current);
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    },
+    []
+  );
 
   const applyCompany = useCallback((company: Company) => {
     setState((prev) => (prev ? { ...prev, company } : prev));
@@ -162,7 +174,6 @@ export function CompanyStoreProvider({
       setState((prev) =>
         prev ? { ...prev, company: { ...prev.company, ...patch } } : prev
       );
-      if (!apiModeRef.current) return;
 
       // копим патч и шлём одним PATCH после паузы ввода
       configPatchRef.current = { ...configPatchRef.current, ...patch };
@@ -172,18 +183,23 @@ export function CompanyStoreProvider({
         configPatchRef.current = {};
         apiPatchConfig(companyId, merged)
           .then(applyCompany)
-          .catch((error) => warnApi("сохранить настройки компании", error));
+          .catch((error: unknown) => {
+            showError(error);
+            // Сервер не принял правку — возвращаем серверную истину в UI
+            apiFetchConfig(companyId).then(applyCompany).catch(() => undefined);
+          });
       }, 400);
     },
-    [companyId, applyCompany]
+    [companyId, applyCompany, showError]
   );
+
+  // ----- Товары -----
 
   const addProduct = useCallback(
     (product: Product) => {
       setState((prev) =>
         prev ? { ...prev, products: [...prev.products, product] } : prev
       );
-      if (!apiModeRef.current) return;
 
       const { id: tempId, companyId: _cid, ...payload } = product;
       apiCreateProduct(companyId, payload)
@@ -200,24 +216,35 @@ export function CompanyStoreProvider({
               : prev
           );
         })
-        .catch((error) => warnApi("создать товар", error));
+        .catch((error: unknown) => {
+          // Создание не подтвердилось сервером — убираем временную карточку
+          setState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  products: prev.products.filter((p) => p.id !== tempId)
+                }
+              : prev
+          );
+          showError(error);
+        });
     },
-    [companyId]
+    [companyId, showError]
   );
 
   const updateProduct = useCallback(
     (productId: string, patch: Partial<Omit<Product, "id">>) => {
-      setState((prev) =>
-        prev
-          ? {
-              ...prev,
-              products: prev.products.map((p) =>
-                p.id === productId ? { ...p, ...patch } : p
-              )
-            }
-          : prev
-      );
-      if (!apiModeRef.current) return;
+      let previous: Product | undefined;
+      setState((prev) => {
+        if (!prev) return prev;
+        previous = prev.products.find((p) => p.id === productId);
+        return {
+          ...prev,
+          products: prev.products.map((p) =>
+            p.id === productId ? { ...p, ...patch } : p
+          )
+        };
+      });
 
       apiPatchProduct(companyId, productId, patch)
         .then((updated) => {
@@ -232,49 +259,31 @@ export function CompanyStoreProvider({
               : prev
           );
         })
-        .catch((error) => warnApi("сохранить товар", error));
-    },
-    [companyId]
-  );
-
-  const updateBranch = useCallback(
-    (branchId: string, patch: Partial<Omit<Branch, "id">>) => {
-      setState((prev) =>
-        prev
-          ? {
-              ...prev,
-              branches: prev.branches.map((b) =>
-                b.id === branchId ? { ...b, ...patch } : b
-              )
-            }
-          : prev
-      );
-      if (!apiModeRef.current) return;
-
-      apiPatchBranch(companyId, branchId, patch)
-        .then((updated) => {
+        .catch((error: unknown) => {
+          // Откат: сервер не сохранил — UI не должен показывать «сохранено»
           setState((prev) =>
-            prev
+            prev && previous
               ? {
                   ...prev,
-                  branches: prev.branches.map((b) =>
-                    b.id === branchId ? updated : b
+                  products: prev.products.map((p) =>
+                    p.id === productId ? (previous as Product) : p
                   )
                 }
               : prev
           );
-        })
-        .catch((error) => warnApi("сохранить филиал", error));
+          showError(error);
+        });
     },
-    [companyId]
+    [companyId, showError]
   );
+
+  // ----- Филиалы -----
 
   const addBranch = useCallback(
     (branch: Branch) => {
       setState((prev) =>
         prev ? { ...prev, branches: [...prev.branches, branch] } : prev
       );
-      if (!apiModeRef.current) return;
 
       const { id: tempId, companyId: _cid, ...payload } = branch;
       apiCreateBranch(companyId, payload)
@@ -290,9 +299,7 @@ export function CompanyStoreProvider({
               : prev
           );
         })
-        .catch((error) => {
-          // Создание не подтвердилось сервером: убираем временную карточку,
-          // чтобы UI не показывал несуществующий после перезагрузки филиал.
+        .catch((error: unknown) => {
           setState((prev) =>
             prev
               ? {
@@ -301,13 +308,58 @@ export function CompanyStoreProvider({
                 }
               : prev
           );
-          console.warn("[admin] API: не удалось создать филиал, изменение отменено.", error);
+          showError(error);
         });
     },
-    [companyId]
+    [companyId, showError]
   );
 
-  // Сотрудники — только моки (в demo-API их нет)
+  const updateBranch = useCallback(
+    (branchId: string, patch: Partial<Omit<Branch, "id">>) => {
+      let previous: Branch | undefined;
+      setState((prev) => {
+        if (!prev) return prev;
+        previous = prev.branches.find((b) => b.id === branchId);
+        return {
+          ...prev,
+          branches: prev.branches.map((b) =>
+            b.id === branchId ? { ...b, ...patch } : b
+          )
+        };
+      });
+
+      apiPatchBranch(companyId, branchId, patch)
+        .then((updated) => {
+          setState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  branches: prev.branches.map((b) =>
+                    b.id === branchId ? updated : b
+                  )
+                }
+              : prev
+          );
+        })
+        .catch((error: unknown) => {
+          setState((prev) =>
+            prev && previous
+              ? {
+                  ...prev,
+                  branches: prev.branches.map((b) =>
+                    b.id === branchId ? (previous as Branch) : b
+                  )
+                }
+              : prev
+          );
+          showError(error);
+        });
+    },
+    [companyId, showError]
+  );
+
+  // ----- Сотрудники: демо, серверных ручек нет — только локальное состояние -----
+
   const addUser = useCallback((user: AdminUser) => {
     setState((prev) =>
       prev ? { ...prev, users: [...prev.users, user] } : prev
@@ -348,7 +400,6 @@ export function CompanyStoreProvider({
       setState((prev) =>
         prev ? { ...prev, news: sortNews([...prev.news, news]) } : prev
       );
-      if (!apiModeRef.current) return;
 
       const { id: tempId, companyId: _cid, ...payload } = news;
       apiCreateNews(companyId, payload)
@@ -364,35 +415,32 @@ export function CompanyStoreProvider({
               : prev
           );
         })
-        .catch((error) => {
+        .catch((error: unknown) => {
           // Создание не подтвердилось сервером — убираем временную сторис
           setState((prev) =>
             prev
               ? { ...prev, news: prev.news.filter((n) => n.id !== tempId) }
               : prev
           );
-          console.warn(
-            "[admin] API: не удалось создать новость, изменение отменено.",
-            error
-          );
+          showError(error);
         });
     },
-    [companyId]
+    [companyId, showError]
   );
 
   const updateNews = useCallback(
     (newsId: string, patch: Partial<Omit<NewsStory, "id">>) => {
-      setState((prev) =>
-        prev
-          ? {
-              ...prev,
-              news: sortNews(
-                prev.news.map((n) => (n.id === newsId ? { ...n, ...patch } : n))
-              )
-            }
-          : prev
-      );
-      if (!apiModeRef.current) return;
+      let previous: NewsStory | undefined;
+      setState((prev) => {
+        if (!prev) return prev;
+        previous = prev.news.find((n) => n.id === newsId);
+        return {
+          ...prev,
+          news: sortNews(
+            prev.news.map((n) => (n.id === newsId ? { ...n, ...patch } : n))
+          )
+        };
+      });
 
       apiPatchNews(companyId, newsId, patch)
         .then((updated) => {
@@ -407,9 +455,23 @@ export function CompanyStoreProvider({
               : prev
           );
         })
-        .catch((error) => warnApi("сохранить новость", error));
+        .catch((error: unknown) => {
+          setState((prev) =>
+            prev && previous
+              ? {
+                  ...prev,
+                  news: sortNews(
+                    prev.news.map((n) =>
+                      n.id === newsId ? (previous as NewsStory) : n
+                    )
+                  )
+                }
+              : prev
+          );
+          showError(error);
+        });
     },
-    [companyId]
+    [companyId, showError]
   );
 
   const removeNews = useCallback(
@@ -420,22 +482,18 @@ export function CompanyStoreProvider({
         removed = prev.news.find((n) => n.id === newsId);
         return { ...prev, news: prev.news.filter((n) => n.id !== newsId) };
       });
-      if (!apiModeRef.current) return;
 
-      apiDeleteNews(companyId, newsId).catch((error) => {
+      apiDeleteNews(companyId, newsId).catch((error: unknown) => {
         // Откат: возвращаем удалённую сторис на место
         setState((prev) =>
           prev && removed
             ? { ...prev, news: sortNews([...prev.news, removed]) }
             : prev
         );
-        console.warn(
-          "[admin] API: не удалось удалить новость, изменение отменено.",
-          error
-        );
+        showError(error);
       });
     },
-    [companyId]
+    [companyId, showError]
   );
 
   // ----- Сезонные акции -----
@@ -453,7 +511,6 @@ export function CompanyStoreProvider({
             }
           : prev
       );
-      if (!apiModeRef.current) return;
 
       const { id: tempId, companyId: _cid, ...payload } = promotion;
       apiCreatePromotion(companyId, payload)
@@ -469,7 +526,7 @@ export function CompanyStoreProvider({
               : prev
           );
         })
-        .catch((error) => {
+        .catch((error: unknown) => {
           setState((prev) =>
             prev
               ? {
@@ -478,30 +535,27 @@ export function CompanyStoreProvider({
                 }
               : prev
           );
-          console.warn(
-            "[admin] API: не удалось создать акцию, изменение отменено.",
-            error
-          );
+          showError(error);
         });
     },
-    [companyId]
+    [companyId, showError]
   );
 
   const updatePromotion = useCallback(
     (promotionId: string, patch: Partial<Omit<Promotion, "id">>) => {
-      setState((prev) =>
-        prev
-          ? {
-              ...prev,
-              promotions: sortPromotions(
-                prev.promotions.map((p) =>
-                  p.id === promotionId ? { ...p, ...patch } : p
-                )
-              )
-            }
-          : prev
-      );
-      if (!apiModeRef.current) return;
+      let previous: Promotion | undefined;
+      setState((prev) => {
+        if (!prev) return prev;
+        previous = prev.promotions.find((p) => p.id === promotionId);
+        return {
+          ...prev,
+          promotions: sortPromotions(
+            prev.promotions.map((p) =>
+              p.id === promotionId ? { ...p, ...patch } : p
+            )
+          )
+        };
+      });
 
       apiPatchPromotion(companyId, promotionId, patch)
         .then((updated) => {
@@ -518,9 +572,23 @@ export function CompanyStoreProvider({
               : prev
           );
         })
-        .catch((error) => warnApi("сохранить акцию", error));
+        .catch((error: unknown) => {
+          setState((prev) =>
+            prev && previous
+              ? {
+                  ...prev,
+                  promotions: sortPromotions(
+                    prev.promotions.map((p) =>
+                      p.id === promotionId ? (previous as Promotion) : p
+                    )
+                  )
+                }
+              : prev
+          );
+          showError(error);
+        });
     },
-    [companyId]
+    [companyId, showError]
   );
 
   const removePromotion = useCallback(
@@ -534,21 +602,20 @@ export function CompanyStoreProvider({
           promotions: prev.promotions.filter((p) => p.id !== promotionId)
         };
       });
-      if (!apiModeRef.current) return;
 
-      apiDeletePromotion(companyId, promotionId).catch((error) => {
+      apiDeletePromotion(companyId, promotionId).catch((error: unknown) => {
         setState((prev) =>
           prev && removed
-            ? { ...prev, promotions: sortPromotions([...prev.promotions, removed]) }
+            ? {
+                ...prev,
+                promotions: sortPromotions([...prev.promotions, removed])
+              }
             : prev
         );
-        console.warn(
-          "[admin] API: не удалось удалить акцию, изменение отменено.",
-          error
-        );
+        showError(error);
       });
     },
-    [companyId]
+    [companyId, showError]
   );
 
   const value = useMemo<CompanyStoreValue | null>(
@@ -556,6 +623,7 @@ export function CompanyStoreProvider({
       state
         ? {
             ...state,
+            errorMessage,
             updateCompany,
             addProduct,
             updateProduct,
@@ -574,6 +642,7 @@ export function CompanyStoreProvider({
         : null,
     [
       state,
+      errorMessage,
       updateCompany,
       addProduct,
       updateProduct,
@@ -591,7 +660,17 @@ export function CompanyStoreProvider({
     ]
   );
 
-  if (!value) return null;
+  if (loadStatus === "error" || (loadStatus === "ready" && !value)) {
+    return createElement(DataError, {
+      message: loadError || "Сервер вернул пустой ответ",
+      onRetry: () => setReloadToken((n) => n + 1),
+      onLogout: logout
+    });
+  }
+
+  if (!value) {
+    return createElement(DataLoading, { message: "Загружаем данные компании…" });
+  }
 
   return createElement(CompanyStoreContext.Provider, { value }, children);
 }

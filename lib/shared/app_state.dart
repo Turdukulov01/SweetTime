@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api_client.dart';
+import '../core/auth_store.dart';
 import '../core/theme/app_theme.dart';
 import 'app_models.dart';
 import 'demo_data.dart';
@@ -242,10 +243,15 @@ class AppState {
 }
 
 class AppStateController extends StateNotifier<AppState> {
-  AppStateController({LanguagePreferenceStore? languagePreferences})
-    : _languagePreferences =
-          languagePreferences ?? SharedPreferencesLanguagePreferenceStore(),
-      super(
+  AppStateController({
+    LanguagePreferenceStore? languagePreferences,
+    AuthStore? authStore,
+    ApiClient? api,
+  }) : _languagePreferences =
+           languagePreferences ?? SharedPreferencesLanguagePreferenceStore(),
+       _authStore = authStore ?? SecureAuthStore(),
+       _api = api ?? ApiClient(),
+       super(
         AppState(
           apiConnected: false,
           appName: 'SweetTime',
@@ -279,8 +285,11 @@ class AppStateController extends StateNotifier<AppState> {
         ),
       );
 
-  final ApiClient _api = ApiClient();
+  final ApiClient _api;
   final LanguagePreferenceStore _languagePreferences;
+
+  /// Токены сессии на устройстве: вход переживает перезапуск приложения.
+  final AuthStore _authStore;
   static const languagePreferenceKey = 'app_language';
   static const themePreferenceKey = 'app_theme_mode';
   bool _bootstrapped = false;
@@ -310,6 +319,11 @@ class AppStateController extends StateNotifier<AppState> {
     } catch (_) {
       // Настройки языка/темы не должны блокировать автономный запуск приложения.
     }
+    await _loadCompanyData();
+    await _restoreSession();
+  }
+
+  Future<void> _loadCompanyData() async {
     try {
       final config = await _api.fetchConfig();
       if (config == null) return; // сервер недоступен — остаёмся на демо
@@ -357,8 +371,117 @@ class AppStateController extends StateNotifier<AppState> {
     }
   }
 
+  /// Восстановление сессии по сохранённому токену: профиль живёт на сервере,
+  /// поэтому вход переживает перезапуск и переустановку приложения.
+  ///
+  /// Токен протух -> пробуем refresh; refresh не принят -> чистим токены и
+  /// остаёмся гостем. Сеть недоступна -> ничего не трогаем: офлайн не должен
+  /// разлогинивать пользователя.
+  Future<void> _restoreSession() async {
+    try {
+      final accessToken = await _authStore.readAccessToken();
+      if (accessToken == null || accessToken.isEmpty) return;
+
+      var result = await _api.fetchCustomerMe(accessToken);
+      if (result.isRejected) {
+        final refreshed = await _refreshAccessToken();
+        if (refreshed != null) result = await _api.fetchCustomerMe(refreshed);
+      }
+      switch (result.status) {
+        case ApiAuthStatus.ok:
+          _applyCustomerProfile(result.value!);
+        case ApiAuthStatus.rejected:
+          await _authStore.clear();
+        case ApiAuthStatus.unavailable:
+          break; // офлайн: состояние не меняем
+      }
+    } catch (_) {
+      // Восстановление сессии не должно ронять запуск приложения.
+    }
+  }
+
+  /// Новая пара токенов по refresh-токену. null — обновиться не удалось;
+  /// при явном отказе сервера токены с устройства удаляются.
+  Future<String?> _refreshAccessToken() async {
+    final refreshToken = await _authStore.readRefreshToken();
+    if (refreshToken == null || refreshToken.isEmpty) {
+      await _authStore.clear();
+      return null;
+    }
+    final result = await _api.refreshTokens(refreshToken);
+    if (!result.isOk) {
+      if (result.isRejected) await _authStore.clear();
+      return null;
+    }
+    final tokens = result.value!;
+    await _authStore.writeTokens(
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    );
+    return tokens.accessToken;
+  }
+
+  /// Серверный профиль -> состояние приложения. Личные данные показываем
+  /// такими, какими их хранит сервер, а не такими, какими их помнит устройство.
+  void _applyCustomerProfile(CustomerProfile profile) {
+    state = state.copyWith(
+      isGuest: false,
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      birthDate: profile.birthDate,
+      clearBirthDate: profile.birthDate == null,
+      userContact: profile.phone,
+      points: profile.points,
+    );
+  }
+
+  /// Вход по OTP через API: токены сохраняются на устройстве, профиль
+  /// приходит с сервера. true — вошли.
+  ///
+  /// Сервер отверг код -> false (UI показывает ошибку). Сервер недоступен ->
+  /// прежний локальный демо-вход (APK обязан работать автономно), но токенов
+  /// нет: заказ на сервер такой сессией не отправить.
+  Future<bool> loginWithOtp(String phone, String code) async {
+    final result = await _api.otpVerify(phone, code);
+    switch (result.status) {
+      case ApiAuthStatus.ok:
+        final session = result.value!;
+        try {
+          await _authStore.writeTokens(
+            accessToken: session.tokens.accessToken,
+            refreshToken: session.tokens.refreshToken,
+          );
+        } catch (_) {
+          // Хранилище недоступно: сессия останется только до перезапуска.
+        }
+        login(phone);
+        _applyCustomerProfile(session.profile);
+        return true;
+      case ApiAuthStatus.rejected:
+        return false;
+      case ApiAuthStatus.unavailable:
+        if (code != DemoData.demoOtpCode) return false;
+        login(phone);
+        return true;
+    }
+  }
+
+  /// Просьба к серверу выслать код. SMS-провайдера нет: код всегда `1111`,
+  /// поэтому отказ/офлайн не блокирует шаг ввода кода.
+  Future<void> requestOtp(String phone) async {
+    try {
+      await _api.otpRequest(phone);
+    } catch (_) {
+      // Демо-код работает и без сервера.
+    }
+  }
+
   /// POST заказа на сервер (если API доступен). null — офлайн/ошибка сети:
   /// заказ при этом уже оформлен локально, поведение прежнее.
+  ///
+  /// Сервер принимает заказ только по токену клиента (401 без него) и берёт имя
+  /// заказчика из токена. Без токена (демо-вход офлайн) запрос ожидаемо не
+  /// пройдёт — заказ останется локальным, как и раньше.
   Future<CreatedOrder?> submitOrder({
     required OrderType type,
     required String readyTime,
@@ -366,15 +489,16 @@ class AppStateController extends StateNotifier<AppState> {
     required Branch branch,
     required int total,
     required int pointsUsed,
-  }) {
-    if (state.isGuest || items.isEmpty) {
-      return Future<CreatedOrder?>.value();
+  }) async {
+    if (state.isGuest || items.isEmpty) return null;
+    String? accessToken;
+    try {
+      accessToken = await _authStore.readAccessToken();
+    } catch (_) {
+      accessToken = null;
     }
-    final customerName = state.userName.isNotEmpty
-        ? state.userName
-        : state.userContact.trim();
     return _api.createOrder(
-      customerName: customerName,
+      accessToken: accessToken,
       branchId: branch.id,
       type: switch (type) {
         OrderType.pickup => 'pickup',
@@ -463,6 +587,9 @@ class AppStateController extends StateNotifier<AppState> {
     state = state.copyWith(clearPendingAuthReturn: true);
   }
 
+  /// Имя/фамилия/дата рождения. Локально применяем сразу (UI не ждёт сеть),
+  /// затем сохраняем на сервере — там профиль переживает переустановку.
+  /// Аватар остаётся локальным: серверной загрузки файлов пока нет (CX-013).
   void updateProfile({
     required String firstName,
     required String lastName,
@@ -479,9 +606,56 @@ class AppStateController extends StateNotifier<AppState> {
       clearBirthDate: clearBirthDate,
       clearAvatarPath: clearAvatarPath,
     );
+    unawaited(
+      _syncProfileToServer(
+        firstName: state.firstName,
+        lastName: state.lastName,
+        birthDate: state.birthDate,
+      ),
+    );
   }
 
+  /// `PATCH auth/customer/me`. Без токена (демо-вход офлайн) — тихо выходим:
+  /// локальное изменение уже применено. Ответ сервера считаем истиной.
+  Future<void> _syncProfileToServer({
+    required String firstName,
+    required String lastName,
+    required DateTime? birthDate,
+  }) async {
+    try {
+      final token = await _authStore.readAccessToken();
+      if (token == null || token.isEmpty) return;
+      // Пустая строка = очистить дату на сервере (контракт customer/me).
+      final isoBirthDate = birthDate == null ? '' : _isoDate(birthDate);
+      var result = await _api.patchCustomerMe(
+        token,
+        firstName: firstName,
+        lastName: lastName,
+        birthDate: isoBirthDate,
+      );
+      if (result.isRejected) {
+        final refreshed = await _refreshAccessToken();
+        if (refreshed == null) return;
+        result = await _api.patchCustomerMe(
+          refreshed,
+          firstName: firstName,
+          lastName: lastName,
+          birthDate: isoBirthDate,
+        );
+      }
+      if (result.isOk) _applyCustomerProfile(result.value!);
+    } catch (_) {
+      // Офлайн: локальные данные остаются, сервер догонит при следующем сохранении.
+    }
+  }
+
+  static String _isoDate(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-'
+      '${date.month.toString().padLeft(2, '0')}-'
+      '${date.day.toString().padLeft(2, '0')}';
+
   void logout() {
+    unawaited(_clearTokens());
     state = state.copyWith(
       isGuest: true,
       firstName: '',
@@ -498,7 +672,20 @@ class AppStateController extends StateNotifier<AppState> {
     );
   }
 
+  /// Токены с устройства убираем всегда, даже если хранилище ругнулось:
+  /// иначе следующий запуск восстановит «выключённую» сессию.
+  Future<void> _clearTokens() async {
+    try {
+      await _authStore.clear();
+    } catch (_) {
+      // Хранилище недоступно — сессия всё равно уже сброшена в состоянии.
+    }
+  }
+
   void deleteAccount() {
+    // Серверного удаления аккаунта ещё нет: убираем токены, чтобы устройство
+    // не восстановило сессию, и чистим локальные данные, как раньше.
+    unawaited(_clearTokens());
     state = state.copyWith(
       isGuest: true,
       firstName: '',

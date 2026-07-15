@@ -2,6 +2,8 @@
 
 // Очередь заказов: доска Новый → Готовится → Готов → Выдан.
 // Крупные кнопки для баристы, фильтр по филиалу (barista жёстко привязан к своему).
+// Данные — из боевого API (GET /orders требует токен стаффа); если API не
+// ответил, показываем ошибку, а не мок-очередь.
 
 import { useState } from "react";
 import { Ban, ChevronRight, MapPin, TriangleAlert } from "lucide-react";
@@ -111,7 +113,7 @@ function OrderCard({
 export default function OrdersPage() {
   const { user } = useSession();
   const { company, branches } = useCompanyStore();
-  const { orders, errorMessage } = useOrders();
+  const { orders, errorMessage, loading, loadFailed } = useOrders();
   const [branchFilter, setBranchFilter] = useState<string>("all");
 
   if (!user) return null;
@@ -213,7 +215,28 @@ export default function OrdersPage() {
         )}
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      {loadFailed && (
+        <div className="surface mt-6 px-6 py-16 text-center">
+          <p className="text-sm font-semibold text-coffee-900">
+            Очередь заказов недоступна
+          </p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-coffee-500">
+            {errorMessage ?? "Сервер не ответил."} Показываем пустую очередь:
+            мок-данные вместо боевых не подставляются.
+          </p>
+        </div>
+      )}
+
+      {!loadFailed && loading && orders.length === 0 && (
+        <p className="mt-6 text-sm text-coffee-500">Загружаем очередь…</p>
+      )}
+
+      <div
+        className={cn(
+          "mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4",
+          (loadFailed || (loading && orders.length === 0)) && "hidden"
+        )}
+      >
         {BOARD_COLUMNS.map((status) => {
           const columnOrders = byStatus(status);
           return (
@@ -274,8 +297,8 @@ export default function OrdersPage() {
         </div>
       )}
 
-      {/* Тост ошибки сохранения статуса (409 и сеть) */}
-      {errorMessage && (
+      {/* Тост ошибки действия (403, 409, сеть). Ошибку загрузки показываем выше */}
+      {errorMessage && !loadFailed && (
         <div
           role="alert"
           className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-medium text-white shadow-soft"
