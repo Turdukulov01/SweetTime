@@ -218,7 +218,10 @@ class OrderOut(BaseModel):
 
 
 class OrderCreate(BaseModel):
-    customerName: str
+    """Тело POST /orders. customerName/customerId сюда НЕ входят: с S2 заказ
+    создаётся только по токену клиента, и имя берётся из его профиля (клиенту
+    нельзя дать представиться кем угодно). Лишние поля игнорируются."""
+
     branchId: str
     type: OrderType
     readyTime: str | None = None
@@ -319,6 +322,77 @@ class PromotionPatch(BaseModel):
     accentColor: HexColor | None = None
     active: bool | None = None
     sortOrder: int | None = None
+
+
+# ---------------------------------------------------------------------------
+# Auth (S2): стафф — email+пароль, клиент — телефон+OTP (mock)
+# ---------------------------------------------------------------------------
+
+StaffRole = Literal["owner", "manager", "barista"]
+
+
+class TokenPair(BaseModel):
+    """Пара токенов. Ответ на refresh; часть ответов логина."""
+
+    accessToken: str
+    refreshToken: str
+
+
+class RefreshIn(BaseModel):
+    refreshToken: str = Field(min_length=1)
+
+
+class StaffLoginIn(BaseModel):
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=1)
+
+
+class StaffUserOut(BaseModel):
+    """Профиль сотрудника. Пароля/хэша тут нет и быть не должно."""
+
+    id: str
+    email: str
+    name: str
+    role: StaffRole
+    branchId: str | None = None
+    companyId: str
+
+
+class StaffLoginOut(TokenPair):
+    user: StaffUserOut
+
+
+class OtpRequestIn(BaseModel):
+    phone: str = Field(min_length=6, max_length=32)
+
+
+class OtpRequestOut(BaseModel):
+    """ЯВНО mock: SMS не отправляется, код возвращается в ответе.
+
+    Реальный SMS-провайдер не подключён (нужен договор) — до тех пор `mode`
+    всегда "mock", а `demoCode` показывает код, который примет /otp/verify.
+    """
+
+    sent: bool = True
+    demoCode: str
+    mode: Literal["mock"] = "mock"
+
+
+class OtpVerifyIn(BaseModel):
+    phone: str = Field(min_length=6, max_length=32)
+    code: str = Field(min_length=1, max_length=16)
+
+
+class CustomerOut(BaseModel):
+    id: str
+    phone: str
+    name: str
+    points: int
+    referralCode: str
+
+
+class CustomerLoginOut(TokenPair):
+    user: CustomerOut
 
 
 # ---------------------------------------------------------------------------

@@ -71,8 +71,90 @@ py -m uvicorn api.main:app --port 8010
 ```
 Порты: **8010 — боевой API (`backend/api`)**, 8000 — старый demo (`backend/app_demo`), 3020 — админка.
 
-## S2 — авторизация (следующий)
-JWT: стафф (email+пароль) и клиент (OTP-mock по телефону), access/refresh, зависимость
-get_current_* + require_staff/role, company_id из токена. Клиентские мутации требуют токен.
+## S2 — авторизация (JWT) и роли (НА ПРИЁМКУ)
+
+Цель: JWT для стаффа (email+пароль) и клиента (OTP-mock по телефону), access/refresh,
+зависимости get_current_* + require_role, company_id ИЗ ТОКЕНА. SMS-провайдера нет — OTP mock.
+
+Подшаги:
+- [x] S2.1 `security.py`: bcrypt-пароли + JWT (pyjwt, HS256). Payload: `sub`, `typ` (staff|customer),
+  `cid`, `role` (у стаффа), `kind` (access|refresh), `iat`/`exp`. Секретов/паролей в payload нет.
+  Сроки — из настроек (`access_token_minutes`=30, `refresh_token_days`=30).
+- [x] S2.2 Эндпоинты стаффа: POST `auth/staff/login`, POST `auth/refresh`, GET `auth/me`.
+- [x] S2.3 Эндпоинты клиента: POST `auth/otp/request` (mock), POST `auth/otp/verify` (код `1111`,
+  создаёт клиента при первом входе).
+- [x] S2.4 Зависимости (`api/deps.py`): get_current_staff / get_current_customer / require_role.
+  Сюда же переехал мультитенантный скоуп из `main.py` (get_company + get_company_*).
+- [x] S2.5 Защита эндпоинтов (см. таблицу прав ниже).
+- [x] S2.6 Alembic: **миграция не нужна** — модели не менялись (`alembic check` → "No new upgrade
+  operations detected"). Токены stateless, таблиц под них не заводили.
+- [x] S2.7 Проверки curl (ниже).
+
+### Модель прав (кто что может)
+
+| Ручка | Доступ |
+|---|---|
+| `/health`, GET `config`/`products`/`branches`/`news`/`promotions` | **публично** (гость смотрит меню без входа) |
+| POST/PATCH/DELETE `products`/`branches`/`news`/`promotions`, PATCH `config` | staff: **owner, manager** |
+| PATCH `orders/{id}/status` | staff: **owner, manager, barista** |
+| GET `orders` (очередь админки) | **любой staff** компании |
+| POST `orders` | **токен клиента** (customerName/customerId — из токена, не из тела) |
+
+**Ключевая защита**: `company_id` берётся из claim `cid` токена и сверяется с `{companyId}` пути —
+не совпало → **403**, даже если токен валиден. Плюс сверка company_id по БД (роль/компанию могли
+изменить после выпуска токена). Refresh-токен не принимается как access (claim `kind`).
+
+### Доказательства (S2.7, порт 8010)
+
+| # | Проверка | Результат |
+|---|---|---|
+| 1 | login `owner@sweettime.kg`/`demo` | 200, пара токенов + `{"id":"u-sw-owner","role":"owner","companyId":"sweettime"}` |
+| 2 | login с неверным паролем | **401** `Invalid email or password` |
+| 3 | GET `auth/me` с токеном owner | 200, профиль без пароля/хэша |
+| 4 | PATCH товара БЕЗ токена | **401** `Not authenticated` |
+| 5 | PATCH товара с токеном owner | 200, поле изменилось |
+| 6 | **токен sweettime → PATCH в `/api/companies/coffeego/...`** | **403** `Token was issued for another company` |
+| 7 | POST `auth/refresh` с refreshToken | 200, новая пара |
+| 7b | refresh-токен подсунут как access в `auth/me` | **401** `Expected a access token` |
+| 8 | barista → PATCH товара | **403** `Role 'barista' is not allowed here (allowed: manager, owner)` |
+| 9 | barista → PATCH статуса заказа (new→ready) | **200** |
+| 10 | GET `orders` без токена | **401** |
+| 11 | POST `auth/otp/request` | 200 `{"sent":true,"demoCode":"1111","mode":"mock"}` |
+| 12 | POST `auth/otp/verify` код `1111` | 200, токены + `{"id":"c-sw-aigerim","points":1240,"referralCode":"SWEET-AIGERIM"}` |
+| 12b | verify с кодом `9999` | **400** `Invalid code` |
+| 12c | verify нового телефона | 200, клиент создан (`name":"Гость"`, свежий referralCode) |
+| 13 | POST заказа без токена | **401** |
+| 14 | POST заказа с токеном клиента | **201**, `customerName` подставлен из профиля токена |
+| 14c | подделка `customerName":"HACKER"` в теле | поле проигнорировано → `customerName":"Айгерим"` |
+| 14d | токен клиента sweettime → POST заказа в coffeego | **403** |
+| 14e | токен клиента → PATCH товара (админская ручка) | **401** `Staff token required` |
+| 15 | GET `config`/`products`/`branches`/`news`/`promotions` без токена | **200** (публичны) |
+
+Тестовые данные после проверок вычищены (БД в состоянии сида: sweettime 50 заказов, 1 клиент).
+
+### Как тестировать (следующая сессия)
+```bash
+B=http://127.0.0.1:8010/api/companies
+# 1) токен стаффа
+TOKEN=$(curl -s -X POST $B/sweettime/auth/staff/login -H 'Content-Type: application/json' \
+  -d '{"email":"owner@sweettime.kg","password":"demo"}' | py -c "import sys,json;print(json.load(sys.stdin)['accessToken'])")
+curl -s $B/sweettime/auth/me -H "Authorization: Bearer $TOKEN"
+# 2) токен клиента (OTP mock: код всегда 1111)
+curl -s -X POST $B/sweettime/auth/otp/request -H 'Content-Type: application/json' -d '{"phone":"+996 555 123 456"}'
+curl -s -X POST $B/sweettime/auth/otp/verify  -H 'Content-Type: application/json' -d '{"phone":"+996 555 123 456","code":"1111"}'
+# 3) изоляция компаний: тем же TOKEN в чужую компанию → 403
+curl -s -X PATCH $B/coffeego/products/cg1 -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"isNew":true}'
+```
+Тело POST с кириллицей в Git Bash лучше слать файлом (`--data-binary @order.json`): инлайн-JSON
+ломается на перекодировке и даёт 400 «error parsing the body» — это артефакт shell, не API.
+
+### Осознанно НЕ сделано в S2 (следующие шаги)
+- **Revocation/logout**: токены stateless, чёрного списка нет — выданный access живёт до `exp` (30 мин).
+- **Реальный SMS**: провайдера нет (нужен договор) — `/otp/request` ничего не шлёт и открыто отдаёт код.
+  Rate-limit на запрос OTP тоже не делали (нужен вместе с провайдером).
+- **Клиенты на JWT** (Flutter/админка) — это S5; сейчас приложение шлёт POST /orders без токена и
+  получит 401, админка — тоже (её мутации теперь под токеном). Пока не обновлены — ожидаемо.
+- `JWT_SECRET` в проде обязателен через env (дефолт `change-me-in-production` — только локально).
+- Серверные цены/лояльность/рефералка (+100 инвайтеру, invited_by) — S3, здесь не трогали.
 
 ## S3+ — см. PRODUCTION_PLAN.md (серверные цены/лояльность, контент, клиенты на API, деплой S6–S7).

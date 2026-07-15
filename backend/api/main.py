@@ -8,25 +8,44 @@
     py -m uvicorn api.main:app --port 8010
 
 Мультитенантность: все ручки под /api/companies/{companyId}/...; компания и
-доменные ресурсы резолвятся зависимостями (get_company / scoped-геттеры),
-выборки жёстко фильтруются по company_id. Чужой ресурс → 404.
+доменные ресурсы резолвятся зависимостями (api.deps), выборки жёстко
+фильтруются по company_id. Чужой ресурс → 404.
 
-Авторизация (JWT) в S1 ещё НЕ включена в вызовы — это этап S2.
+Авторизация (S2, api.auth + api.deps):
+  * публично (приложение читает витрину без входа): /health и GET config,
+    products, branches, news, promotions;
+  * staff-токен: GET orders (очередь админки) и PATCH статуса заказа
+    (owner|manager|barista);
+  * staff owner|manager: мутации меню/контента/настроек;
+  * customer-токен: POST orders.
+company_id всегда берётся из токена и сверяется с {companyId} пути (403).
 """
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Response
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import schemas
+from .auth import router as auth_router
 from .config import settings
 from .database import engine, get_db
-from .models import Branch, Company, News, Order, Product, Promotion
+from .deps import (
+    get_company,
+    get_company_branch,
+    get_company_news,
+    get_company_order,
+    get_company_product,
+    get_company_promotion,
+    get_current_customer,
+    get_current_staff,
+    require_role,
+)
+from .models import Branch, Company, Customer, News, Order, Product, Promotion
 from .seed import seed_if_empty
 
 
@@ -57,73 +76,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# Мультитенантные зависимости: company и ресурсы строго внутри компании
-# ---------------------------------------------------------------------------
+# Логин/refresh/me/OTP: /api/companies/{companyId}/auth/...
+app.include_router(auth_router)
 
-
-def get_company(
-    companyId: str = Path(...), db: Session = Depends(get_db)
-) -> Company:
-    company = db.get(Company, companyId)
-    if company is None:
-        raise HTTPException(status_code=404, detail="Company not found")
-    return company
-
-
-def get_company_product(
-    productId: str = Path(...),
-    company: Company = Depends(get_company),
-    db: Session = Depends(get_db),
-) -> Product:
-    product = db.get(Product, productId)
-    if product is None or product.company_id != company.id:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return product
-
-
-def get_company_branch(
-    branchId: str = Path(...),
-    company: Company = Depends(get_company),
-    db: Session = Depends(get_db),
-) -> Branch:
-    branch = db.get(Branch, branchId)
-    if branch is None or branch.company_id != company.id:
-        raise HTTPException(status_code=404, detail="Branch not found")
-    return branch
-
-
-def get_company_order(
-    orderId: str = Path(...),
-    company: Company = Depends(get_company),
-    db: Session = Depends(get_db),
-) -> Order:
-    order = db.get(Order, orderId)
-    if order is None or order.company_id != company.id:
-        raise HTTPException(status_code=404, detail="Order not found")
-    return order
-
-
-def get_company_news(
-    newsId: str = Path(...),
-    company: Company = Depends(get_company),
-    db: Session = Depends(get_db),
-) -> News:
-    news = db.get(News, newsId)
-    if news is None or news.company_id != company.id:
-        raise HTTPException(status_code=404, detail="News not found")
-    return news
-
-
-def get_company_promotion(
-    promotionId: str = Path(...),
-    company: Company = Depends(get_company),
-    db: Session = Depends(get_db),
-) -> Promotion:
-    promotion = db.get(Promotion, promotionId)
-    if promotion is None or promotion.company_id != company.id:
-        raise HTTPException(status_code=404, detail="Promotion not found")
-    return promotion
+# Роли: контент/меню/настройки правят владелец и менеджер; бариста — только
+# статусы заказов (см. ADMIN_PANEL.md).
+require_content_staff = require_role("owner", "manager")
+require_queue_staff = require_role("owner", "manager", "barista")
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +206,7 @@ def get_config(company: Company = Depends(get_company)) -> schemas.CompanyOut:
     "/api/companies/{companyId}/config",
     response_model=schemas.CompanyOut,
     tags=["config"],
+    dependencies=[Depends(require_content_staff)],
 )
 def patch_config(
     patch: schemas.CompanyPatch,
@@ -295,6 +255,7 @@ def list_products(
     response_model=schemas.ProductOut,
     status_code=201,
     tags=["products"],
+    dependencies=[Depends(require_content_staff)],
 )
 def create_product(
     body: schemas.ProductCreate,
@@ -325,6 +286,7 @@ def create_product(
     "/api/companies/{companyId}/products/{productId}",
     response_model=schemas.ProductOut,
     tags=["products"],
+    dependencies=[Depends(require_content_staff)],
 )
 def patch_product(
     patch: schemas.ProductPatch,
@@ -384,6 +346,7 @@ def list_branches(
     response_model=schemas.BranchOut,
     status_code=201,
     tags=["branches"],
+    dependencies=[Depends(require_content_staff)],
 )
 def create_branch(
     body: schemas.BranchCreate,
@@ -408,6 +371,7 @@ def create_branch(
     "/api/companies/{companyId}/branches/{branchId}",
     response_model=schemas.BranchOut,
     tags=["branches"],
+    dependencies=[Depends(require_content_staff)],
 )
 def patch_branch(
     patch: schemas.BranchPatch,
@@ -466,6 +430,8 @@ def _next_order_number(db: Session, company: Company) -> tuple[str, int]:
     "/api/companies/{companyId}/orders",
     response_model=list[schemas.OrderOut],
     tags=["orders"],
+    # Очередь заказов компании — админская ручка, любой сотрудник компании.
+    dependencies=[Depends(get_current_staff)],
 )
 def list_orders(
     company: Company = Depends(get_company), db: Session = Depends(get_db)
@@ -487,6 +453,7 @@ def list_orders(
 def create_order(
     body: schemas.OrderCreate,
     company: Company = Depends(get_company),
+    customer: Customer = Depends(get_current_customer),
     db: Session = Depends(get_db),
 ) -> schemas.OrderOut:
     branch = db.get(Branch, body.branchId)
@@ -499,7 +466,9 @@ def create_order(
         id=f"o-{company.order_prefix.lower()}-{seq}",
         company_id=company.id,
         number=number,
-        customer_name=body.customerName,
+        # Личность заказчика — из токена, не из тела запроса.
+        customer_name=customer.name,
+        customer_id=customer.id,
         branch_id=body.branchId,
         type=body.type,
         # Заказ уже оплачен демо-оплатой — сразу preparing
@@ -522,6 +491,8 @@ def create_order(
     "/api/companies/{companyId}/orders/{orderId}/status",
     response_model=schemas.OrderOut,
     tags=["orders"],
+    # Статусы двигает и бариста — это его основная работа в очереди.
+    dependencies=[Depends(require_queue_staff)],
 )
 def patch_order_status(
     body: schemas.OrderStatusPatch,
@@ -567,6 +538,7 @@ def list_news(
     response_model=schemas.NewsOut,
     status_code=201,
     tags=["news"],
+    dependencies=[Depends(require_content_staff)],
 )
 def create_news(
     body: schemas.NewsCreate,
@@ -598,6 +570,7 @@ def create_news(
     "/api/companies/{companyId}/news/{newsId}",
     response_model=schemas.NewsOut,
     tags=["news"],
+    dependencies=[Depends(require_content_staff)],
 )
 def patch_news(
     patch: schemas.NewsPatch,
@@ -631,6 +604,7 @@ def patch_news(
     "/api/companies/{companyId}/news/{newsId}",
     status_code=204,
     tags=["news"],
+    dependencies=[Depends(require_content_staff)],
 )
 def delete_news(
     news: News = Depends(get_company_news),
@@ -667,6 +641,7 @@ def list_promotions(
     response_model=schemas.PromotionOut,
     status_code=201,
     tags=["promotions"],
+    dependencies=[Depends(require_content_staff)],
 )
 def create_promotion(
     body: schemas.PromotionCreate,
@@ -692,6 +667,7 @@ def create_promotion(
     "/api/companies/{companyId}/promotions/{promotionId}",
     response_model=schemas.PromotionOut,
     tags=["promotions"],
+    dependencies=[Depends(require_content_staff)],
 )
 def patch_promotion(
     patch: schemas.PromotionPatch,
@@ -719,6 +695,7 @@ def patch_promotion(
     "/api/companies/{companyId}/promotions/{promotionId}",
     status_code=204,
     tags=["promotions"],
+    dependencies=[Depends(require_content_staff)],
 )
 def delete_promotion(
     promotion: Promotion = Depends(get_company_promotion),
