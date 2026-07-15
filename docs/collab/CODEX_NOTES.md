@@ -938,3 +938,11 @@ Production `.env` создан владельцем на сервере с mode 
 `ranex` (1000:1000), с mode 700/600. Пароль генерируется вне repo, сохраняется владельцем в password
 manager и не передаётся агентам. Следующий шаг — dependency-driven migrate + one-shot bootstrap на
 свежей БД, затем проверка результата до запуска nginx/backend.
+
+One-shot bootstrap выполнен на физическом сервере успешно (`bootstrap_exit=0`). Compose создал network
+`production_default`, поднял `production-postgres-1` healthy, запустил migrate и затем создал production
+SweetTime для реального owner. Пароль хранится только в `/srv/sweetime/secrets/bootstrap-owner-password`
+с owner/mode 1000:1000/600; его нельзя удалять до успешной проверки owner login и сохранения владельцем.
+Bootstrap повторно не запускать: его fail-closed поведение при существующей компании является защитой.
+Следующий шаг — базовый `docker compose up -d`, проверки service health, loopback/HTTPS `/ready`, company
+config и host deny `/media/temp/`, затем owner auth test и удаление bootstrap secret.
