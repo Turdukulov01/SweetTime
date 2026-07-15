@@ -85,7 +85,9 @@ below remains authoritative; this section records the current execution order.
   the generated password is stored safely, the plaintext bootstrap secret was removed. Initial verified
   snapshot `20260715T125752Z` was created with a valid PostgreSQL custom dump at Alembic `f5a9c2e41d07`,
   a valid empty-media archive and checksums; all services returned healthy and public `/ready` returned
-  200. The disposable restore drill, an independent off-host copy and mobile Google HTTPS QA remain undone.
+  200. A disposable PostgreSQL restore drill then passed at the same Alembic head/media count, removed its
+  temporary container and left production healthy. An independent off-host copy remains a later resilience
+  task; the active release blocker is physical Android Google HTTPS/contact/checkout QA.
 
 ## Audit Snapshot — 2026-07-12
 

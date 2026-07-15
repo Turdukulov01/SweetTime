@@ -976,3 +976,13 @@ backup останавливает только SweetTime backend/nginx, дела
 повторно прогнал idempotent migrate при resume и вернул backend/nginx/postgres/redis healthy; внешний
 `/ready` снова 200. Это пока local same-host snapshot, не независимая защита. Следующий шаг — disposable
 `restore-drill.sh`, который не подключается к production DB и удаляет временный контейнер после проверки.
+
+Physical-server restore drill завершён успешно: checksums OK, PostgreSQL restore exit 0,
+Alembic=`f5a9c2e41d07`, media_files=0, временный `sweettime-restore-drill-*` контейнер удалён, production
+services healthy и внешний `/ready`=200. Основной S7 server rollout технически рабочий; off-host copy и
+firewall hardening остаются отдельными задачами, чтобы не задерживать mobile QA.
+
+Локальная проверка перед Android QA: `C:/Users/user/sweettime-upload.jks` существует, но игнорируемого
+`android/key.properties` ещё нет; ADB не видит подключённого устройства. Владелец должен локально создать
+key.properties из example без передачи паролей агентам и подключить телефон. После этого: release APK с
+production API/Web OAuth audience → SHA-1/package verification → USB install → Google→contact→checkout.
