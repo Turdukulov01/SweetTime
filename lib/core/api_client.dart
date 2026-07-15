@@ -1291,7 +1291,9 @@ class ApiClient {
       id: json['id'].toString(),
       title: _mapLocalizedText(
         json['title'],
-        fallback: const LocalizedText(ru: 'Новость', ky: 'Жаңылык', en: 'News'),
+        // Media-only stories are valid. Never invent a visible title when the
+        // owner intentionally left all localized fields empty in the admin.
+        fallback: const LocalizedText(ru: '', ky: '', en: ''),
       ),
       body: _mapLocalizedText(
         json['body'],

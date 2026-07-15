@@ -100,6 +100,19 @@ void main() {
     expect(post.id, 'post-17');
     expect(post.body.resolve(AppLanguage.en), 'Full body');
     expect(post.effectiveMediaType, NewsMediaType.image);
+
+    final mediaOnlyStory = ApiClient.mapNewsStory({
+      'id': 'story-media-only',
+      'title': {'ru': '', 'ky': '', 'en': ''},
+      'body': {'ru': '', 'ky': '', 'en': ''},
+      'badge': {'ru': '', 'ky': '', 'en': ''},
+      'publishedAt': '2026-07-01T00:00:00Z',
+      'mediaType': 'image',
+      'mediaUrl': 'https://cdn.example/media-only.webp',
+    });
+    for (final language in AppLanguage.values) {
+      expect(mediaOnlyStory.title.resolve(language), isEmpty);
+    }
   });
 
   testWidgets(

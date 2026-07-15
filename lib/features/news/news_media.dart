@@ -189,6 +189,9 @@ class _NewsMediaViewState extends State<NewsMediaView>
         value.position >= duration - const Duration(milliseconds: 90);
     if (completed && !_completionReported) {
       _completionReported = true;
+      // Make the last frame visibly fill the active story segment before the
+      // parent advances to the next item.
+      widget.onVideoProgress?.call(duration, duration);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) widget.onVideoEnded?.call();
       });

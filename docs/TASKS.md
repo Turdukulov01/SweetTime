@@ -315,7 +315,9 @@ below remains authoritative; this section records the current execution order.
 - [ ] **[implemented and installed 2026-07-16; owner visual acceptance pending]
   Full-screen story and feed-media UX.** Flutter stories now use a black full-screen
   contain stage for portrait/landscape image and MP4 content, segmented 2GIS-style timed progress,
-  automatic advance, left/right tap zones, and press-and-hold pause/resume. Story video starts with
+  automatic advance, left/right tap zones, and press-and-hold pause/resume. Image/text stories use
+  a six-second smooth timeline; video progress is continuously animated and synchronized to the exact
+  media duration. Media-only stories with blank admin fields show no invented title. Story video starts with
   system-controlled sound and pauses both playback and sound while held. The obsolete CTA and bottom
   arrows are removed. Feed-post detail now opens at 98% screen height with a 78% black media stage;
   video autoplays muted, media tap toggles sound, and the central control toggles play/pause. Collection

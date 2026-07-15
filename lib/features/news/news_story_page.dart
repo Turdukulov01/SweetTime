@@ -21,7 +21,7 @@ class NewsStoryPage extends ConsumerStatefulWidget {
 
 class _NewsStoryPageState extends ConsumerState<NewsStoryPage>
     with SingleTickerProviderStateMixin {
-  static const _imageDuration = Duration(seconds: 7);
+  static const _imageDuration = Duration(seconds: 6);
   static const _videoFallbackDuration = Duration(seconds: 15);
 
   PageController? _pageController;
@@ -35,6 +35,10 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage>
   bool _held = false;
   bool _navigating = false;
   bool _currentVideoReady = false;
+  bool _videoEndedWhileHeld = false;
+  Duration _currentVideoPosition = Duration.zero;
+  Duration _currentVideoDuration = Duration.zero;
+  int _videoEndSequence = 0;
   String? _scheduledPlaybackKey;
 
   @override
@@ -301,6 +305,10 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage>
   void _activateStory(NewsStory story) {
     _progressController.stop();
     _currentVideoReady = false;
+    _videoEndedWhileHeld = false;
+    _currentVideoPosition = Duration.zero;
+    _currentVideoDuration = Duration.zero;
+    _videoEndSequence++;
     _progressController.duration = _isVideo(story)
         ? _videoFallbackDuration
         : _imageDuration;
@@ -398,16 +406,29 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage>
     if (!_held || !mounted) return;
     setState(() => _held = false);
     final current = _currentStory;
-    if (current != null && (!_isVideo(current) || !_currentVideoReady)) {
+    if (current == null) return;
+    if (_videoEndedWhileHeld) {
+      _scheduleVideoAdvance(current);
+    } else if (_isVideo(current) && _currentVideoReady) {
+      _animateVideoProgressToEnd();
+    } else {
       _progressController.forward();
     }
   }
 
   void _handleVideoReady(NewsStory story, Duration duration) {
-    if (!mounted || _currentStory?.id != story.id) return;
+    if (!mounted ||
+        _currentStory?.id != story.id ||
+        duration <= Duration.zero) {
+      return;
+    }
     _currentVideoReady = true;
+    _currentVideoPosition = Duration.zero;
+    _currentVideoDuration = duration;
     _progressController.stop();
+    _progressController.duration = duration;
     _progressController.value = 0;
+    if (!_held) _animateVideoProgressToEnd();
   }
 
   void _handleVideoProgress(
@@ -420,13 +441,44 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage>
         duration <= Duration.zero) {
       return;
     }
+    _currentVideoPosition = position;
+    _currentVideoDuration = duration;
     final value = position.inMilliseconds / duration.inMilliseconds;
-    _progressController.value = value.clamp(0.0, 1.0);
+    final synchronizedValue = value.clamp(0.0, 1.0);
+    if ((_progressController.value - synchronizedValue).abs() > 0.02) {
+      _progressController.value = synchronizedValue;
+    }
+    if (!_held && synchronizedValue < 1) _animateVideoProgressToEnd();
   }
 
   void _handleVideoEnded(NewsStory story) {
-    if (!mounted || _currentStory?.id != story.id || _held) return;
-    _advance();
+    if (!mounted || _currentStory?.id != story.id) return;
+    _progressController.value = 1;
+    _videoEndedWhileHeld = true;
+    if (!_held) _scheduleVideoAdvance(story);
+  }
+
+  void _scheduleVideoAdvance(NewsStory story) {
+    final sequence = ++_videoEndSequence;
+    Future<void>.delayed(const Duration(milliseconds: 100), () {
+      if (!mounted ||
+          sequence != _videoEndSequence ||
+          _currentStory?.id != story.id ||
+          _held) {
+        return;
+      }
+      _videoEndedWhileHeld = false;
+      _advance();
+    });
+  }
+
+  void _animateVideoProgressToEnd() {
+    final remaining = _currentVideoDuration - _currentVideoPosition;
+    if (remaining <= Duration.zero) {
+      _progressController.value = 1;
+      return;
+    }
+    _progressController.animateTo(1, duration: remaining, curve: Curves.linear);
   }
 }
 
@@ -450,7 +502,7 @@ class _StoryProgress extends StatelessWidget {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(999),
               child: SizedBox(
-                height: 3,
+                height: 4,
                 child: ColoredBox(
                   color: Colors.white.withValues(alpha: 0.2),
                   child: Align(
