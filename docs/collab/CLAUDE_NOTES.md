@@ -273,11 +273,24 @@ Client ID **не секреты** (зашиты в приложение) — в 
 - **Android client IDs в коде не упоминаются вообще**: Google сопоставляет их по package+SHA-1.
   Они просто должны существовать в консоли.
 
-Незакрытое (спросить владельца): (1) какой package name реально введён в консоли — должен быть
-`kg.sweettime.app`, а НЕ `kg.sweettime.demo`; (2) release-клиент создан под SHA-1 из реального
-`sweettime-upload.jks` или под временный отпечаток. Если package в консоли и в build.gradle
-разойдутся — вход упадёт с `ApiException: 10 (DEVELOPER_ERROR)`, и это будет выглядеть как
-«код не работает», хотя дело в конфиге.
+**Подтверждено владельцем 2026-07-15:** в консоли введён package **`kg.sweettime.app`** (без
+`.demo`). Значит `build.gradle` (`applicationId = kg.sweettime.demo`, `namespace =
+com.example.sweettime`) и iOS bundle **обязаны** быть переименованы в `kg.sweettime.app` — иначе
+`ApiException: 10 (DEVELOPER_ERROR)`, что выглядит как «код не работает», хотя дело в конфиге.
+
+Release keystore **создан** владельцем: `C:\Users\user\sweettime-upload.jks`, alias `upload`,
+JKS, RSA-2048, годен до 2053 (Play требует ≥2033 — ок).
+
+| SHA-1 | Назначение |
+|---|---|
+| `F6:B6:ED:07:AD:1A:D9:C0:74:12:2B:4C:58:08:27:E1:5A:13:C6:35` | debug (`~/.android/debug.keystore`) |
+| `51:DC:A2:E5:1D:37:6E:BB:B1:B7:E8:A8:A8:77:8A:2D:D4:92:16:54` | release (`sweettime-upload.jks`) |
+| — | Play App Signing: **появится только после 1-й загрузки в Play Console** |
+
+Подпись релиза: сейчас `signingConfig = signingConfigs.getByName("debug")` — заменить на реальный
+release signingConfig через `android/key.properties`. Проверено: `key.properties` и `**/*.jks` уже
+закрыты `android/.gitignore`, ключей в репо нет. **Пароль keystore в репозиторий//journal не
+писать никогда**; в CI — только через secrets.
 
 ## 8. Журнал значимых изменений
 
