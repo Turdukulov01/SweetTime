@@ -64,3 +64,7 @@ admin/dist/
 admin/next-env.d.ts
 # Python bytecode боевого backend
 backend/**/__pycache__/
+
+# Local and production secrets. Keep only documented examples in Git.
+.env
+**/.env
