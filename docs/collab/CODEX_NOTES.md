@@ -986,3 +986,32 @@ firewall hardening остаются отдельными задачами, чт�
 `android/key.properties` ещё нет; ADB не видит подключённого устройства. Владелец должен локально создать
 key.properties из example без передачи паролей агентам и подключить телефон. После этого: release APK с
 production API/Web OAuth audience → SHA-1/package verification → USB install → Google→contact→checkout.
+
+Владелец локально создал ignored `android/key.properties`; release build подтвердил корректность обоих
+паролей, не выводя их. APK собран с `API_BASE=https://lnp-corporation.duckdns.org` и Web OAuth audience.
+`apkanalyzer`: package `kg.sweettime.app`; `apksigner`: v2 verified, RSA-2048, certificate SHA-1
+`51:DC:A2:E5:1D:37:6E:BB:B1:B7:E8:A8:A8:77:8A:2D:D4:92:16:54` — точное совпадение с release Android
+OAuth client. APK SHA-256=`442F0F2FDE85BB90C52644B2998AF0DF4B8C9A309F08E2432222A7E4132891F9`, size 79,408,142 bytes.
+
+Release `1.0.0+1` установлен на Redmi Note 9 Pro и запущен; foreground activity подтверждён как
+`kg.sweettime.app/.MainActivity`. ADB install вернул пустой nonzero после streamed transfer, но package
+manager подтвердил fresh install time, а прямой `am start -W` вернул Status=ok; приложение активно.
+Осталась ручная acceptance-проверка: guest browse → Google account picker/sign-in → обязательный KG
+contact → сохранённая корзина → checkout/order через production HTTPS, плюс визуальная плавность release.
+
+Physical QA подтвердил сохранение Google-профиля, телефона, аватара, истории и recurring, но нашёл два
+дефекта. Кнопка удаления очищала только Flutter state/tokens, поэтому прежний CustomerIdentity восстанавливал
+все серверные данные. Добавлен `DELETE /auth/customer/me`: Customer/identity/media удаляются транзакционно,
+orders и оплаченный recurring остаются только обезличенными/неактивными; старые JWT больше не проходят, а
+тот же Google `sub` получает новый customer с `phone=null`, points=0. Миграция `b91e7c4a2d10` добавляет
+`ON DELETE SET NULL` и nullable recurring customer; fresh PostgreSQL upgrade f5→head проверен отдельно.
+
+QR-камера имела `CAMERA granted=true`, но release logcat + retrace текущего mapping.txt показали NPE в
+`BarcodeScanning.getClient` после R8: consumer rule `com.google.mlkit.*` не сохранял вложенные пакеты.
+Добавлен app ProGuard `-keep class com.google.mlkit.** { *; }`. Profile image_picker отдельно усилен:
+убран OEM-hint принудительной front camera, PlatformException теперь логирует code/message. `flutter analyze`
+чист; Flutter 52/52 и backend 43/43 тестов проходят; release APK успешно собран, подписан прежним upload key
+и установлен через `adb install --no-streaming -r`. На Redmi QR теперь открывает CameraX/ML Kit без NPE,
+фонарь включается, scanner повторно запускается после смены subtab/root tab; внешняя Xiaomi OneShotCamera
+успешно открывается из редактирования профиля. Осталось загрузить revision на сервер, выполнить migrate до
+`b91e7c4a2d10`, затем проверить delete→same Google→обязательный phone prompt.

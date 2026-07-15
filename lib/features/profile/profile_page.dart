@@ -199,32 +199,55 @@ class _ProfileContent extends ConsumerWidget {
     );
   }
 
-  void _confirmDelete(BuildContext context, AppStateController controller) {
+  Future<void> _confirmDelete(
+    BuildContext context,
+    AppStateController controller,
+  ) async {
     final strings = AppLocalizations.of(context);
-    showDialog<void>(
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(strings.profileDeleteAccountTitle),
         content: Text(strings.profileDeleteAccountBody),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: Text(strings.profileCancelDelete),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
-            onPressed: () {
-              controller.deleteAccount();
-              Navigator.pop(dialogContext);
-              context.go('/');
-            },
+            onPressed: () => Navigator.pop(dialogContext, true),
             child: Text(strings.profileConfirmDelete),
           ),
         ],
       ),
     );
+    if (confirmed != true || !context.mounted) return;
+
+    final result = await controller.deleteAccount();
+    if (!context.mounted) return;
+    switch (result) {
+      case AccountDeletionResult.success:
+        context.go('/');
+      case AccountDeletionResult.rejected:
+        showTopNotice(
+          context,
+          message: strings.profileDeleteSessionExpired,
+          actionLabel: strings.close,
+          onAction: () {},
+        );
+      case AccountDeletionResult.unavailable:
+        showTopNotice(
+          context,
+          message: strings.profileDeleteAccountFailed,
+          actionLabel: strings.close,
+          onAction: () {},
+        );
+      case AccountDeletionResult.busy:
+        break;
+    }
   }
 }
 

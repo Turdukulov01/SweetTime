@@ -50,6 +50,8 @@ enum GoogleLoginResult {
 
 enum ContactSaveResult { success, rejected, unavailable, busy }
 
+enum AccountDeletionResult { success, rejected, unavailable, busy }
+
 abstract interface class LanguagePreferenceStore {
   Future<String?> readLanguageCode();
   Future<void> writeLanguageCode(String code);
@@ -341,6 +343,7 @@ class AppStateController extends StateNotifier<AppState> {
   int _accountEpoch = 0;
   bool _authInProgress = false;
   bool _contactSaveInProgress = false;
+  bool _accountDeletionInProgress = false;
   bool _favoritesSyncRunning = false;
   bool _favoritesSyncDirty = false;
   Completer<void>? _favoritesSyncCompleter;
@@ -1018,13 +1021,32 @@ class AppStateController extends StateNotifier<AppState> {
     }
   }
 
-  Future<void> deleteAccount() async {
-    // Серверного удаления аккаунта ещё нет: убираем токены, чтобы устройство
-    // не восстановило сессию, и чистим локальные данные, как раньше.
+  Future<AccountDeletionResult> deleteAccount() async {
+    if (_accountDeletionInProgress) return AccountDeletionResult.busy;
+    if (state.isGuest) return AccountDeletionResult.rejected;
+
+    // Preview/demo sessions have no server identity. Production identities
+    // always carry a customer id and must be deleted remotely first.
+    final serverCustomerId = state.customerId;
+    if (serverCustomerId != null) {
+      _accountDeletionInProgress = true;
+      try {
+        final result = await _withCustomerToken(_api.deleteCustomerAccount);
+        if (result.isRejected) return AccountDeletionResult.rejected;
+        if (!result.isOk) return AccountDeletionResult.unavailable;
+      } finally {
+        _accountDeletionInProgress = false;
+      }
+    }
+
     _accountEpoch++;
     _favoritesSyncDirty = false;
-    unawaited(_clearTokens());
-    unawaited(_googleIdentity.signOut());
+    await _clearTokens();
+    try {
+      await _googleIdentity.signOut();
+    } catch (_) {
+      // Server deletion already succeeded; provider sign-out is best effort.
+    }
     state = state.copyWith(
       isGuest: true,
       clearCustomerId: true,
@@ -1046,6 +1068,7 @@ class AppStateController extends StateNotifier<AppState> {
     );
     _cartRevision++;
     await _queueCartPersist();
+    return AccountDeletionResult.success;
   }
 
   void selectBranch(Branch branch) {

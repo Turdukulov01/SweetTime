@@ -647,6 +647,24 @@ class ApiClient {
     }
   }
 
+  /// `DELETE /auth/customer/me` — окончательное удаление серверного аккаунта.
+  Future<ApiResult<bool>> deleteCustomerAccount(String accessToken) async {
+    try {
+      final response = await http
+          .delete(_uri('/auth/customer/me'), headers: _bearer(accessToken))
+          .timeout(_timeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<bool>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<bool>.unavailable();
+      }
+      return const ApiResult<bool>.ok(true);
+    } catch (_) {
+      return const ApiResult<bool>.unavailable();
+    }
+  }
+
   /// `PATCH /auth/customer/me` — свои имя/фамилия/дата рождения на сервере.
   /// `birthDate`: ISO `YYYY-MM-DD`; пустая строка — очистить поле.
   Future<ApiResult<CustomerProfile>> patchCustomerMe(

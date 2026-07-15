@@ -219,7 +219,6 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
     try {
       final image = await _picker.pickImage(
         source: source,
-        preferredCameraDevice: CameraDevice.front,
         maxWidth: 1024,
         maxHeight: 1024,
         imageQuality: 85,
@@ -231,9 +230,15 @@ class _EditProfilePageState extends ConsumerState<EditProfilePage> {
           _removeAvatar = false;
         });
       }
-    } on PlatformException {
+    } on PlatformException catch (error, stackTrace) {
+      debugPrint(
+        'Profile image picker failed (${error.code}): ${error.message}',
+      );
+      debugPrintStack(stackTrace: stackTrace);
       _showPickerError();
-    } catch (_) {
+    } catch (error, stackTrace) {
+      debugPrint('Profile image picker failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
       _showPickerError();
     }
   }

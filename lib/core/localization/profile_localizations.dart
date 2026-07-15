@@ -321,17 +321,32 @@ extension ProfileLocalizations on AppLocalizations {
       _pick('Удалить аккаунт?', 'Аккаунтту өчүрөсүзбү?', 'Delete account?');
 
   String get profileDeleteAccountBody => _pick(
-    'Данные профиля, баллы и постоянный заказ будут удалены '
-        '(демо-режим). Это действие необратимо.',
-    'Профиль маалыматы, упайлар жана туруктуу заказ өчүрүлөт '
-        '(демо режим). Бул аракетти артка кайтаруу мүмкүн эмес.',
-    'Your profile data, points, and recurring order will be deleted '
-        '(demo mode). This action cannot be undone.',
+    'Профиль, телефон, фото, баллы, избранное и постоянный заказ будут '
+        'удалены с сервера. История покупок останется только в обезличенном '
+        'виде. Это действие необратимо.',
+    'Профиль, телефон, сүрөт, упайлар, тандалмалар жана туруктуу заказ '
+        'серверден өчүрүлөт. Сатып алуулар тарыхы аты-жөнү жок гана сакталат. '
+        'Бул аракетти артка кайтаруу мүмкүн эмес.',
+    'Your profile, phone, photo, points, favorites, and recurring order will '
+        'be removed from the server. Purchase records will remain anonymous. '
+        'This action cannot be undone.',
   );
 
   String get profileCancelDelete => _pick('Отмена', 'Жокко чыгаруу', 'Cancel');
 
   String get profileConfirmDelete => _pick('Удалить', 'Өчүрүү', 'Delete');
+
+  String get profileDeleteAccountFailed => _pick(
+    'Не удалось удалить аккаунт. Проверьте интернет и повторите попытку.',
+    'Аккаунт өчүрүлгөн жок. Интернетти текшерип, кайра аракет кылыңыз.',
+    'Could not delete the account. Check your connection and try again.',
+  );
+
+  String get profileDeleteSessionExpired => _pick(
+    'Сессия завершилась. Войдите снова, затем повторите удаление аккаунта.',
+    'Сеанс аяктады. Кайра кирип, аккаунтту өчүрүүнү кайталаңыз.',
+    'Your session expired. Sign in again, then retry account deletion.',
+  );
 
   String get recurringOrderTitle =>
       _pick('Постоянный заказ', 'Туруктуу заказ', 'Recurring order');

@@ -21,7 +21,8 @@ import re
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
-from sqlalchemy import func, select
+from sqlalchemy import delete as sql_delete
+from sqlalchemy import func, select, update as sql_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -527,6 +528,82 @@ def customer_update_me(
     db.commit()
     db.refresh(customer)
     return customer_out(customer)
+
+
+@router.delete(
+    "/customer/me",
+    status_code=204,
+    summary="Удалить свой аккаунт и отвязать персональные данные",
+    tags=["customer"],
+)
+def customer_delete_me(
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Hard-delete customer identity/profile while retaining anonymous ledgers.
+
+    Orders and paid recurring rows are business records, so they remain in the
+    database without a customer link or customer name. Everything that can
+    restore the account on the next Google login is removed atomically.
+    """
+    locked_customer = db.scalar(
+        select(Customer)
+        .where(
+            Customer.id == customer.id,
+            Customer.company_id == customer.company_id,
+        )
+        .with_for_update()
+    )
+    if locked_customer is None:
+        raise HTTPException(status_code=401, detail="Unknown customer")
+
+    media = db.scalars(
+        select(MediaFile).where(
+            MediaFile.tenant_id == locked_customer.company_id,
+            MediaFile.entity_type == "customer_avatar",
+            MediaFile.entity_id == locked_customer.id,
+        )
+    ).all()
+    storage_keys = [item.storage_key for item in media]
+
+    try:
+        db.execute(
+            sql_update(Order)
+            .where(
+                Order.company_id == locked_customer.company_id,
+                Order.customer_id == locked_customer.id,
+            )
+            .values(customer_id=None, customer_name="Deleted customer")
+        )
+        db.execute(
+            sql_update(RecurringOrder)
+            .where(
+                RecurringOrder.company_id == locked_customer.company_id,
+                RecurringOrder.customer_id == locked_customer.id,
+            )
+            .values(customer_id=None, active=False)
+        )
+        db.execute(
+            sql_delete(CustomerIdentity).where(
+                CustomerIdentity.company_id == locked_customer.company_id,
+                CustomerIdentity.customer_id == locked_customer.id,
+            )
+        )
+        for item in media:
+            db.delete(item)
+        db.delete(locked_customer)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    # File cleanup must happen after the database commit. A failed unlink must
+    # not resurrect an account; an orphan-media reconciler can retry it later.
+    try:
+        storage_service.delete_image_variants(storage_keys)
+    except OSError:
+        pass
+    return Response(status_code=204)
 
 
 @router.patch(

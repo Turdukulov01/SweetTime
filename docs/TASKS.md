@@ -46,8 +46,19 @@ below remains authoritative; this section records the current execution order.
   final Android/iOS identifier is `kg.sweettime.app`; release signing is fail-closed and no longer falls
   back to the debug key. Before acceptance: create the ignored local `android/key.properties`, build and
   verify a release signed by the existing upload key, deploy migration `f5a9c2e41d07`, then run a
-  physical-device HTTPS Google sign-in/contact/checkout test. An iOS OAuth client and URL scheme remain
-  future iOS-release work. SMS verification remains a later provider task.
+  physical-device HTTPS Google sign-in/contact/checkout test. A production release APK was successfully
+  built with the upload keystore, verified as package `kg.sweettime.app` and release SHA-1
+  `51:DC:A2:E5:1D:37:6E:BB:B1:B7:E8:A8:A8:77:8A:2D:D4:92:16:54`, installed and launched on the Redmi
+  Note 9 Pro. Physical QA confirmed Google profile/contact/avatar/history/recurring persistence, then
+  exposed two release defects: account deletion was local-only and QR camera crashed inside ML Kit after
+  R8. The fixes now add transactional server deletion (profile/identity/media removed; financial ledgers
+  anonymized), invalidate old tokens, recreate the same Google subject as a fresh phone-less customer,
+  and keep nested ML Kit classes in release builds. Backend 43 tests, Flutter 52 tests, analyze, a
+  disposable PostgreSQL migration to `b91e7c4a2d10`, and signed release APK build pass locally. Remaining
+  acceptance: deploy/migrate this revision and repeat delete→Google login/contact. The rebuilt APK already
+  passed Redmi release smoke for QR preview initialization, torch, tab leave/re-entry, and launching the
+  external profile camera without an ML Kit crash. An iOS OAuth client and URL scheme remain future iOS-release work. SMS
+  verification remains a later task.
 - [ ] **S6 — Ubuntu deployment artifacts.** **[partial—verified locally]** `backend/api/Dockerfile`
   and `deploy/production/` contain PostgreSQL, Redis, backend, nginx, media volume and an environment
   example. PostgreSQL/backend/nginx now have ordered healthchecks; `/ready` probes the real database.

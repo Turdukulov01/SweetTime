@@ -632,7 +632,11 @@ void main() {
       controller.logout();
       expect(controller.state.cart, isNotEmpty);
 
-      await controller.deleteAccount();
+      controller.login('+996700123456');
+      expect(
+        await controller.deleteAccount(),
+        AccountDeletionResult.success,
+      );
       expect(controller.state.cart, isEmpty);
       expect(cartStore.items, isEmpty);
     },
@@ -679,7 +683,7 @@ void main() {
     expect(controller.state.userContact, isEmpty);
   });
 
-  test('demo account deletion clears personal and commerce state', () {
+  test('demo account deletion clears personal and commerce state', () async {
     final controller = AppStateController(
       languagePreferences: _MemoryLanguagePreferenceStore(),
     )..seedDemo(auth: true, cart: true, history: true, recurring: true);
@@ -690,7 +694,7 @@ void main() {
     expect(controller.state.orders, isNotEmpty);
     expect(controller.state.recurring, isNotNull);
 
-    controller.deleteAccount();
+    expect(await controller.deleteAccount(), AccountDeletionResult.success);
 
     expect(controller.state.isGuest, isTrue);
     expect(controller.state.userName, isEmpty);
@@ -701,6 +705,60 @@ void main() {
     expect(controller.state.orders, isEmpty);
     expect(controller.state.pointEvents, isEmpty);
     expect(controller.state.recurring, isNull);
+  });
+
+  test(
+    'server account deletion succeeds before local data is cleared',
+    () async {
+      final authStore = _MemoryAuthStore(
+        accessToken: 'good',
+        refreshToken: 'fresh',
+      );
+      final cartStore = _MemoryCartStore();
+      final api = _FakeAuthApiClient(profile: _testCustomerProfile);
+      final google = _FakeGoogleIdentityProvider();
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: authStore,
+        cartStore: cartStore,
+        api: api,
+        googleIdentity: google,
+      );
+      await controller.bootstrap();
+      await controller.quickAdd(DemoData.products.first);
+
+      expect(await controller.deleteAccount(), AccountDeletionResult.success);
+      expect(api.accountDeleteCalls, 1);
+      expect(controller.state.isGuest, isTrue);
+      expect(controller.state.cart, isEmpty);
+      expect(authStore.accessToken, isNull);
+      expect(authStore.refreshToken, isNull);
+      expect(google.signOutCalls, 1);
+    },
+  );
+
+  test('failed server deletion keeps the signed-in account intact', () async {
+    final authStore = _MemoryAuthStore(
+      accessToken: 'good',
+      refreshToken: 'fresh',
+    );
+    final api = _FakeAuthApiClient(
+      profile: _testCustomerProfile,
+      accountDeleteResult: const ApiResult<bool>.unavailable(),
+    );
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: authStore,
+      cartStore: _MemoryCartStore(),
+      api: api,
+    );
+    await controller.bootstrap();
+
+    expect(await controller.deleteAccount(), AccountDeletionResult.unavailable);
+    expect(api.accountDeleteCalls, 1);
+    expect(controller.state.isGuest, isFalse);
+    expect(controller.state.customerId, _testCustomerProfile.id);
+    expect(authStore.accessToken, 'good');
   });
 
   test(
@@ -1694,12 +1752,14 @@ class _FakeAuthApiClient extends ApiClient {
     this.favoriteIds = const [],
     this.orders = const [],
     RecurringOrder? recurring,
+    this.accountDeleteResult = const ApiResult<bool>.ok(true),
   }) : serverRecurring = recurring;
 
   final CustomerProfile profile;
   final List<String> favoriteIds;
   final List<OrderHistoryEntry> orders;
   RecurringOrder? serverRecurring;
+  final ApiResult<bool> accountDeleteResult;
   final List<String> customerMeCalls = [];
   final List<String> favoriteGetCalls = [];
   final List<String> orderGetCalls = [];
@@ -1708,6 +1768,7 @@ class _FakeAuthApiClient extends ApiClient {
   final List<String> contactPhoneCalls = [];
   final List<List<String>> recurringPutCalls = [];
   int recurringDeleteCalls = 0;
+  int accountDeleteCalls = 0;
   final List<List<String>> favoritePutCalls = [];
 
   @override
@@ -1720,6 +1781,13 @@ class _FakeAuthApiClient extends ApiClient {
       return const ApiResult<CustomerProfile>.rejected();
     }
     return ApiResult<CustomerProfile>.ok(profile);
+  }
+
+  @override
+  Future<ApiResult<bool>> deleteCustomerAccount(String accessToken) async {
+    accountDeleteCalls++;
+    if (accessToken != 'good') return const ApiResult<bool>.rejected();
+    return accountDeleteResult;
   }
 
   @override

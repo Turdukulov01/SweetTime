@@ -306,7 +306,7 @@ class Order(Base):
     created_at: Mapped[str] = mapped_column(index=True)
     # Привязка к клиенту (для лояльности/рефералки S2/S3); null для demo-заказов
     customer_id: Mapped[str | None] = mapped_column(
-        ForeignKey("customers.id"), nullable=True, default=None
+        ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, default=None
     )
 
 
@@ -331,8 +331,10 @@ class RecurringOrder(Base):
     company_id: Mapped[str] = mapped_column(
         ForeignKey("companies.id"), index=True
     )
-    customer_id: Mapped[str] = mapped_column(
-        ForeignKey("customers.id"), index=True
+    customer_id: Mapped[str | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     # ["p1", "p4"] — id товаров этой же компании (проверяется на PUT)
     product_ids: Mapped[list] = mapped_column(JSON, default=list)
