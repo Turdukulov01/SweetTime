@@ -45,6 +45,34 @@ class AppLocalizations {
     'Биздеги жаңылыктар',
     'See what’s new',
   );
+  String get openNews =>
+      _pick('Открыть все новости', 'Бардык жаңылыктарды ачуу', 'Open all news');
+  String get storyCollections =>
+      _pick('Истории', 'Окуялар', 'Story collections');
+  String get newsFeed =>
+      _pick('Лента новостей', 'Жаңылыктар түрмөгү', 'News feed');
+  String get newsFeedEmptyTitle =>
+      _pick('Новостей пока нет', 'Азырынча жаңылык жок', 'No news yet');
+  String get newsFeedEmptyMessage => _pick(
+    'Свежие публикации появятся здесь.',
+    'Жаңы жарыялар бул жерде чыгат.',
+    'Fresh posts will appear here.',
+  );
+  String get collectionEmpty => _pick(
+    'В этой подборке пока нет историй.',
+    'Бул жыйнакта азырынча окуя жок.',
+    'There are no stories in this collection yet.',
+  );
+  String get newsLoadFailed => _pick(
+    'Не удалось загрузить новости.',
+    'Жаңылыктар жүктөлбөй калды.',
+    'Could not load news.',
+  );
+  String get retry => _pick('Повторить', 'Кайра аракет кылуу', 'Retry');
+  String get readFullStory =>
+      _pick('Читать полностью', 'Толук окуу', 'Read full story');
+  String get playVideo => _pick('Воспроизвести', 'Ойнотуу', 'Play video');
+  String get pauseVideo => _pick('Пауза', 'Тыныгуу', 'Pause video');
   String get popular => _pick('Популярное', 'Популярдуу', 'Popular');
   String get bestSellers =>
       _pick('Хиты продаж', 'Көп сатылгандар', 'Best sellers');

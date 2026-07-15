@@ -64,6 +64,8 @@ class MenuCategory {
 
 enum NewsStoryVisual { sparkle, storefront, qr, loyalty }
 
+enum NewsMediaType { none, image, video }
+
 extension NewsStoryVisualUi on NewsStoryVisual {
   IconData get icon => switch (this) {
     NewsStoryVisual.sparkle => Icons.auto_awesome,
@@ -85,8 +87,15 @@ class NewsStory {
     required this.sortOrder,
     this.expiresAt,
     this.isPublished = true,
+    this.companyId,
+    this.collectionId,
+    this.showOnHome = true,
+    this.isPinned = false,
     this.assetImage,
     this.imageUrl,
+    this.mediaType = NewsMediaType.none,
+    this.mediaUrl,
+    this.thumbnailUrl,
     this.ctaLabel,
     this.ctaRoute,
   });
@@ -103,21 +112,135 @@ class NewsStory {
   final String? expiresAt;
   final bool isPublished;
   final int sortOrder;
+  final String? companyId;
+  final String? collectionId;
+  final bool showOnHome;
+  final bool isPinned;
   final String? assetImage;
   final String? imageUrl;
+  final NewsMediaType mediaType;
+  final String? mediaUrl;
+  final String? thumbnailUrl;
   final LocalizedText? ctaLabel;
   final String? ctaRoute;
 
   Color get accentColor => Color(accentHex);
 
+  String? get effectiveMediaUrl => mediaUrl ?? imageUrl;
+
+  NewsMediaType get effectiveMediaType {
+    if (mediaType != NewsMediaType.none) return mediaType;
+    return effectiveMediaUrl == null ? NewsMediaType.none : NewsMediaType.image;
+  }
+
+  DateTime? get publishedDate => DateTime.tryParse(publishedAt);
+
   bool isActiveAt(DateTime now) {
     if (!isPublished) return false;
     final start = DateTime.tryParse(publishedAt);
     final end = expiresAt == null ? null : DateTime.tryParse(expiresAt!);
-    if (start != null && start.isAfter(now)) return false;
+    if (start == null || start.isAfter(now)) return false;
     if (end != null && !end.isAfter(now)) return false;
     return true;
   }
+}
+
+class StoryCollection {
+  const StoryCollection({
+    required this.id,
+    required this.name,
+    required this.sortOrder,
+    this.companyId,
+    this.description,
+    this.coverImageUrl,
+    this.accentHex = 0xFFFF5A96,
+    this.visual = NewsStoryVisual.sparkle,
+    this.isPublished = true,
+  });
+
+  final String id;
+  final String? companyId;
+  final LocalizedText name;
+  final LocalizedText? description;
+  final String? coverImageUrl;
+  final int accentHex;
+  final NewsStoryVisual visual;
+  final int sortOrder;
+  final bool isPublished;
+
+  Color get accentColor => Color(accentHex);
+}
+
+class NewsPost {
+  const NewsPost({
+    required this.id,
+    required this.title,
+    required this.summary,
+    required this.body,
+    required this.publishedAt,
+    this.companyId,
+    this.isPublished = true,
+    this.mediaType = NewsMediaType.none,
+    this.mediaUrl,
+    this.thumbnailUrl,
+    this.imageUrl,
+  });
+
+  final String id;
+  final String? companyId;
+  final LocalizedText title;
+  final LocalizedText summary;
+  final LocalizedText body;
+  final bool isPublished;
+  final String publishedAt;
+  final NewsMediaType mediaType;
+  final String? mediaUrl;
+  final String? thumbnailUrl;
+  final String? imageUrl;
+
+  String? get effectiveMediaUrl => mediaUrl ?? imageUrl;
+
+  NewsMediaType get effectiveMediaType {
+    if (mediaType != NewsMediaType.none) return mediaType;
+    return effectiveMediaUrl == null ? NewsMediaType.none : NewsMediaType.image;
+  }
+
+  DateTime? get publishedDate => DateTime.tryParse(publishedAt);
+
+  bool isActiveAt(DateTime now) {
+    final date = publishedDate;
+    return isPublished && date != null && !date.isAfter(now);
+  }
+}
+
+List<NewsStory> selectHomeStories(
+  Iterable<NewsStory> stories, {
+  DateTime? now,
+  int limit = 30,
+}) {
+  final effectiveNow = now ?? DateTime.now().toUtc();
+  final safeLimit = limit.clamp(0, 30);
+  final result =
+      stories
+          .where((story) => story.showOnHome && story.isActiveAt(effectiveNow))
+          .toList(growable: false)
+        ..sort(compareNewsStories);
+  return result.take(safeLimit).toList(growable: false);
+}
+
+int compareNewsStories(NewsStory left, NewsStory right) {
+  if (left.isPinned != right.isPinned) return left.isPinned ? -1 : 1;
+  final leftDate = left.publishedDate;
+  final rightDate = right.publishedDate;
+  if (leftDate != null && rightDate != null) {
+    final dateResult = rightDate.compareTo(leftDate);
+    if (dateResult != 0) return dateResult;
+  } else if (leftDate != null) {
+    return -1;
+  } else if (rightDate != null) {
+    return 1;
+  }
+  return left.id.compareTo(right.id);
 }
 
 /// Правила лояльности SweetTime: 1 балл = 1 сом.

@@ -112,6 +112,8 @@ class AppState {
     required this.products,
     required this.promotions,
     required this.newsStories,
+    required this.storyCollections,
+    required this.newsPosts,
     required this.favoriteIds,
     required this.cart,
     required this.useBonus,
@@ -165,6 +167,8 @@ class AppState {
   final List<Product> products;
   final List<Promotion> promotions;
   final List<NewsStory> newsStories;
+  final List<StoryCollection> storyCollections;
+  final List<NewsPost> newsPosts;
   final List<String> favoriteIds;
   final List<CartItem> cart;
   final bool useBonus;
@@ -224,6 +228,8 @@ class AppState {
     List<Product>? products,
     List<Promotion>? promotions,
     List<NewsStory>? newsStories,
+    List<StoryCollection>? storyCollections,
+    List<NewsPost>? newsPosts,
     List<String>? favoriteIds,
     List<CartItem>? cart,
     bool? useBonus,
@@ -268,6 +274,8 @@ class AppState {
       products: products ?? this.products,
       promotions: promotions ?? this.promotions,
       newsStories: newsStories ?? this.newsStories,
+      storyCollections: storyCollections ?? this.storyCollections,
+      newsPosts: newsPosts ?? this.newsPosts,
       favoriteIds: favoriteIds ?? this.favoriteIds,
       cart: cart ?? this.cart,
       useBonus: useBonus ?? this.useBonus,
@@ -321,6 +329,8 @@ class AppStateController extends StateNotifier<AppState> {
            products: DemoData.products,
            promotions: DemoData.promotions,
            newsStories: DemoData.newsStories,
+           storyCollections: DemoData.storyCollections,
+           newsPosts: DemoData.newsPosts,
            favoriteIds: DemoData.favoriteIds,
            cart: const [],
            useBonus: false,
@@ -488,7 +498,10 @@ class AppStateController extends StateNotifier<AppState> {
       final products = await _api.fetchProducts();
       final branches = await _api.fetchBranches();
       // null означает ошибку сети; пустой список — валидное состояние админки.
-      final news = await _api.fetchNews();
+      final homeStories = await _api.fetchHomeStories();
+      final legacyNews = homeStories == null ? await _api.fetchNews() : null;
+      final collections = await _api.fetchStoryCollections();
+      final newsPosts = await _api.fetchNewsPosts();
       final promotions = await _api.fetchPromotions();
       final catalogAuthoritative =
           products != null && branches != null && branches.isNotEmpty;
@@ -519,7 +532,16 @@ class AppStateController extends StateNotifier<AppState> {
         branches: nextBranches,
         selectedBranch: selected,
         categories: products == null ? state.categories : categories,
-        newsStories: news ?? state.newsStories,
+        newsStories: homeStories != null
+            ? selectHomeStories(homeStories)
+            : legacyNews != null
+            ? selectHomeStories(legacyNews)
+            : state.newsStories,
+        storyCollections:
+            collections ??
+            (legacyNews != null ? const [] : state.storyCollections),
+        newsPosts:
+            newsPosts ?? (legacyNews != null ? const [] : state.newsPosts),
         promotions: promotions ?? state.promotions,
       );
       return true;
@@ -527,6 +549,10 @@ class AppStateController extends StateNotifier<AppState> {
       // Любая неожиданная ошибка не должна ронять запуск приложения.
       return false;
     }
+  }
+
+  Future<List<NewsStory>?> fetchCollectionStories(String collectionId) {
+    return _api.fetchCollectionStories(collectionId);
   }
 
   /// Восстановление сессии по сохранённому токену: профиль живёт на сервере,

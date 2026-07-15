@@ -1978,6 +1978,15 @@ class _CatalogAuthApiClient extends _FakeAuthApiClient {
   Future<List<NewsStory>?> fetchNews() async => null;
 
   @override
+  Future<List<NewsStory>?> fetchHomeStories({int limit = 30}) async => null;
+
+  @override
+  Future<List<StoryCollection>?> fetchStoryCollections() async => null;
+
+  @override
+  Future<List<NewsPost>?> fetchNewsPosts() async => null;
+
+  @override
   Future<List<Promotion>?> fetchPromotions() async => null;
 }
 
@@ -2010,6 +2019,15 @@ class _MutableCompanyContentApiClient extends ApiClient {
     newsCalls++;
     return news;
   }
+
+  @override
+  Future<List<NewsStory>?> fetchHomeStories({int limit = 30}) async => null;
+
+  @override
+  Future<List<StoryCollection>?> fetchStoryCollections() async => null;
+
+  @override
+  Future<List<NewsPost>?> fetchNewsPosts() async => null;
 
   @override
   Future<List<Promotion>?> fetchPromotions() async => promotions;

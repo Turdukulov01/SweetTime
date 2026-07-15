@@ -46,6 +46,7 @@ dependencies:
   mobile_scanner: ^6.0.2
   qr_flutter: ^4.1.0
   shared_preferences: ^2.5.5
+  video_player: ^2.10.0
   # flutter_secure_storage — токены сессии клиента (lib/core/auth_store.dart).
   # dio / firebase_* / url_launcher вернём позже: пуши и HTTP-слой пока не требуют их.
 

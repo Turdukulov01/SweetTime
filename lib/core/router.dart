@@ -8,6 +8,7 @@ import '../features/catalog/catalog_page.dart';
 import '../features/checkout/checkout_page.dart';
 import '../features/home/home_page.dart';
 import '../features/news/news_story_page.dart';
+import '../features/news/news_page.dart';
 import '../features/product/product_page.dart';
 import '../features/profile/faq_page.dart';
 import '../features/profile/loyalty_page.dart';
@@ -76,10 +77,25 @@ final appRouter = GoRouter(
       ],
     ),
     GoRoute(
-      path: '/news/:id',
+      path: '/news',
+      parentNavigatorKey: _rootKey,
+      builder: (context, state) => const NewsPage(),
+    ),
+    GoRoute(
+      path: '/news/story/:id',
       parentNavigatorKey: _rootKey,
       builder: (context, state) =>
           NewsStoryPage(initialStoryId: state.pathParameters['id']!),
+    ),
+    GoRoute(
+      path: '/news/collection/:id',
+      parentNavigatorKey: _rootKey,
+      builder: (context, state) =>
+          NewsStoryPage(collectionId: state.pathParameters['id']!),
+    ),
+    GoRoute(
+      path: '/news/:id',
+      redirect: (context, state) => '/news/story/${state.pathParameters['id']}',
     ),
     GoRoute(
       path: '/checkout',

@@ -390,6 +390,7 @@ class DemoData {
   static const newsStories = [
     NewsStory(
       id: 'news-week-flavor',
+      collectionId: 'collection-new',
       title: LocalizedText(
         ru: 'Новый вкус недели',
         ky: 'Аптанын жаңы даамы',
@@ -408,6 +409,7 @@ class DemoData {
     ),
     NewsStory(
       id: 'news-manas',
+      collectionId: 'collection-new',
       title: LocalizedText(
         ru: 'Мы открылись на Манаса',
         ky: 'Манас көчөсүндө ачылдык',
@@ -426,6 +428,7 @@ class DemoData {
     ),
     NewsStory(
       id: 'news-table-qr',
+      collectionId: 'collection-tips',
       title: LocalizedText(
         ru: 'Заказ со столика',
         ky: 'Столдон заказ бериңиз',
@@ -444,6 +447,7 @@ class DemoData {
     ),
     NewsStory(
       id: 'news-double-points',
+      collectionId: 'collection-tips',
       title: LocalizedText(
         ru: 'Двойные баллы',
         ky: 'Эки эсе упай',
@@ -459,6 +463,68 @@ class DemoData {
       visual: NewsStoryVisual.loyalty,
       publishedAt: '2026-07-06T00:00:00Z',
       sortOrder: 40,
+    ),
+  ];
+
+  static const storyCollections = [
+    StoryCollection(
+      id: 'collection-new',
+      name: LocalizedText(
+        ru: 'Что нового',
+        ky: 'Эмне жаңылык',
+        en: 'What is new',
+      ),
+      sortOrder: 10,
+      accentHex: 0xFFFF8FBD,
+      visual: NewsStoryVisual.sparkle,
+    ),
+    StoryCollection(
+      id: 'collection-tips',
+      name: LocalizedText(ru: 'Полезное', ky: 'Пайдалуу', en: 'Useful tips'),
+      sortOrder: 20,
+      accentHex: 0xFFFFC96B,
+      visual: NewsStoryVisual.qr,
+    ),
+  ];
+
+  static const newsPosts = [
+    NewsPost(
+      id: 'post-new-branch',
+      title: LocalizedText(
+        ru: 'Новый филиал на Манаса',
+        ky: 'Манас көчөсүндө жаңы филиал',
+        en: 'New branch on Manas',
+      ),
+      summary: LocalizedText(
+        ru: 'Мы открылись и уже принимаем заказы.',
+        ky: 'Биз ачылдык жана заказдарды кабыл алып жатабыз.',
+        en: 'We are open and already taking orders.',
+      ),
+      body: LocalizedText(
+        ru: 'Заходите каждый день с 10:00 до 22:00. Заказ можно оформить заранее в приложении.',
+        ky: 'Күн сайын 10:00дөн 22:00гө чейин келиңиз. Заказды тиркемеден алдын ала берсеңиз болот.',
+        en: 'Visit us daily from 10:00 to 22:00. You can order ahead in the app.',
+      ),
+      publishedAt: '2026-07-10T00:00:00Z',
+    ),
+    NewsPost(
+      id: 'post-double-points',
+      title: LocalizedText(
+        ru: 'Двойные баллы по понедельникам',
+        ky: 'Дүйшөмбүдө эки эсе упай',
+        en: 'Double points on Mondays',
+      ),
+      summary: LocalizedText(
+        ru: 'Больше баллов за напитки с матчей.',
+        ky: 'Матча суусундуктарына көбүрөөк упай.',
+        en: 'More points on matcha drinks.',
+      ),
+      body: LocalizedText(
+        ru: 'Каждый понедельник начисляем вдвое больше баллов за напитки с матчей.',
+        ky: 'Ар дүйшөмбүдө матча суусундуктарына эки эсе көп упай беребиз.',
+        en: 'Every Monday you earn double points on matcha drinks.',
+      ),
+      publishedAt: '2026-07-06T00:00:00Z',
     ),
   ];
 

@@ -489,12 +489,114 @@ class ApiClient {
       final json = await _getJson('/news') as List<dynamic>;
       final stories = [
         for (final item in json.whereType<Map<String, dynamic>>())
-          if (item['isPublished'] != false) _mapNews(item),
+          if (item['isPublished'] != false) mapNewsStory(item),
       ]..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
       return stories;
     } catch (_) {
       return null;
     }
+  }
+
+  Future<List<NewsStory>?> fetchHomeStories({int limit = 30}) async {
+    try {
+      final safeLimit = limit.clamp(0, 30);
+      final json = await _getJson('/stories/home?limit=$safeLimit');
+      return selectHomeStories([
+        for (final item in _pageItems(json).whereType<Map<String, dynamic>>())
+          mapNewsStory(item),
+      ], limit: safeLimit);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<StoryCollection>?> fetchStoryCollections() async {
+    try {
+      final json = await _getJson('/story-collections');
+      final collections =
+          [
+            for (final item in _pageItems(
+              json,
+            ).whereType<Map<String, dynamic>>())
+              if (item['isPublished'] != false) mapStoryCollection(item),
+          ]..sort((left, right) {
+            final order = left.sortOrder.compareTo(right.sortOrder);
+            return order == 0 ? left.id.compareTo(right.id) : order;
+          });
+      return collections;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<NewsStory>?> fetchCollectionStories(String collectionId) async {
+    try {
+      final encodedId = Uri.encodeComponent(collectionId);
+      final json = await _fetchAllPages(
+        '/story-collections/$encodedId/stories',
+      );
+      final stories =
+          [
+                for (final item in json.whereType<Map<String, dynamic>>())
+                  mapNewsStory(item),
+              ]
+              .where((story) => story.isActiveAt(DateTime.now().toUtc()))
+              .toList()
+            ..sort(compareNewsStories);
+      return stories;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<NewsPost>?> fetchNewsPosts() async {
+    try {
+      final json = await _fetchAllPages('/news-posts');
+      final now = DateTime.now().toUtc();
+      final posts =
+          [
+            for (final item in json.whereType<Map<String, dynamic>>())
+              mapNewsPost(item),
+          ].where((post) => post.isActiveAt(now)).toList()..sort((left, right) {
+            final leftDate = left.publishedDate;
+            final rightDate = right.publishedDate;
+            if (leftDate != null && rightDate != null) {
+              final date = rightDate.compareTo(leftDate);
+              if (date != 0) return date;
+            }
+            return left.id.compareTo(right.id);
+          });
+      return posts;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static List<dynamic> _pageItems(Object? json) {
+    if (json is List<dynamic>) return json;
+    if (json is Map<String, dynamic> && json['items'] is List<dynamic>) {
+      return json['items'] as List<dynamic>;
+    }
+    throw const FormatException('Expected a list or page envelope');
+  }
+
+  Future<List<dynamic>> _fetchAllPages(String path) async {
+    final result = <dynamic>[];
+    String? cursor;
+    final seenCursors = <String>{};
+    for (var page = 0; page < 100; page++) {
+      final separator = path.contains('?') ? '&' : '?';
+      final cursorQuery = cursor == null
+          ? ''
+          : '&cursor=${Uri.encodeQueryComponent(cursor)}';
+      final json = await _getJson('$path${separator}limit=50$cursorQuery');
+      result.addAll(_pageItems(json));
+      if (json is! Map<String, dynamic>) break;
+      final next = json['nextCursor']?.toString().trim();
+      if (next == null || next.isEmpty || !seenCursors.add(next)) break;
+      cursor = next;
+    }
+    return result;
   }
 
   /// `GET /promotions` — сезонные акции (только активные, по sortOrder).
@@ -1170,7 +1272,15 @@ class ApiClient {
     return value == null ? fallback : (0xFF000000 | value);
   }
 
-  static NewsStory _mapNews(Map<String, dynamic> json) {
+  static NewsMediaType _mapNewsMediaType(Object? raw) {
+    final value = raw?.toString().trim().toLowerCase();
+    return NewsMediaType.values.firstWhere(
+      (type) => type.name == value,
+      orElse: () => NewsMediaType.none,
+    );
+  }
+
+  static NewsStory mapNewsStory(Map<String, dynamic> json) {
     final visualRaw = (json['visual'] as String?)?.trim();
     final visual = NewsStoryVisual.values.firstWhere(
       (v) => v.name == visualRaw,
@@ -1193,12 +1303,18 @@ class ApiClient {
       ),
       accentHex: _parseHexInt(json['accentColor'] as String?, 0xFFFF5C9A),
       visual: visual,
-      publishedAt:
-          (json['publishedAt'] as String?) ?? DateTime.now().toIso8601String(),
+      publishedAt: (json['publishedAt'] as String?)?.trim() ?? '',
       expiresAt: json['expiresAt'] as String?,
       isPublished: (json['isPublished'] as bool?) ?? true,
       sortOrder: (json['sortOrder'] as num?)?.toInt() ?? 0,
+      companyId: json['companyId']?.toString(),
+      collectionId: json['collectionId']?.toString(),
+      showOnHome: (json['showOnHome'] as bool?) ?? true,
+      isPinned: (json['isPinned'] as bool?) ?? false,
       imageUrl: json['imageUrl'] as String?,
+      mediaType: _mapNewsMediaType(json['mediaType']),
+      mediaUrl: json['mediaUrl'] as String?,
+      thumbnailUrl: json['thumbnailUrl'] as String?,
       ctaLabel: ctaLabelRaw == null
           ? null
           : _mapLocalizedText(
@@ -1206,6 +1322,64 @@ class ApiClient {
               fallback: const LocalizedText(ru: '', ky: '', en: ''),
             ),
       ctaRoute: json['ctaRoute'] as String?,
+    );
+  }
+
+  static StoryCollection mapStoryCollection(Map<String, dynamic> json) {
+    final visualRaw = (json['visual'] as String?)?.trim();
+    final visual = NewsStoryVisual.values.firstWhere(
+      (candidate) => candidate.name == visualRaw,
+      orElse: () => NewsStoryVisual.sparkle,
+    );
+    final description = json['description'];
+    return StoryCollection(
+      id: json['id'].toString(),
+      companyId: json['companyId']?.toString(),
+      name: _mapLocalizedText(
+        json['name'] ?? json['title'],
+        fallback: const LocalizedText(
+          ru: 'Новости',
+          ky: 'Жаңылыктар',
+          en: 'News',
+        ),
+      ),
+      description: description == null
+          ? null
+          : _mapLocalizedText(
+              description,
+              fallback: const LocalizedText(ru: '', ky: '', en: ''),
+            ),
+      coverImageUrl:
+          (json['coverImageUrl'] ?? json['coverThumbnail']) as String?,
+      accentHex: _parseHexInt(json['accentColor'] as String?, 0xFFFF5C9A),
+      visual: visual,
+      sortOrder: (json['sortOrder'] as num?)?.toInt() ?? 0,
+      isPublished: (json['isPublished'] as bool?) ?? true,
+    );
+  }
+
+  static NewsPost mapNewsPost(Map<String, dynamic> json) {
+    return NewsPost(
+      id: json['id'].toString(),
+      companyId: json['companyId']?.toString(),
+      title: _mapLocalizedText(
+        json['title'],
+        fallback: const LocalizedText(ru: 'Новость', ky: 'Жаңылык', en: 'News'),
+      ),
+      summary: _mapLocalizedText(
+        json['summary'],
+        fallback: const LocalizedText(ru: '', ky: '', en: ''),
+      ),
+      body: _mapLocalizedText(
+        json['body'],
+        fallback: const LocalizedText(ru: '', ky: '', en: ''),
+      ),
+      isPublished: (json['isPublished'] as bool?) ?? true,
+      publishedAt: (json['publishedAt'] as String?)?.trim() ?? '',
+      mediaType: _mapNewsMediaType(json['mediaType']),
+      mediaUrl: json['mediaUrl'] as String?,
+      thumbnailUrl: json['thumbnailUrl'] as String?,
+      imageUrl: json['imageUrl'] as String?,
     );
   }
 

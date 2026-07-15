@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/localization/app_localizations.dart';
+import '../news/news_media.dart';
 import '../../shared/app_models.dart';
 import '../../shared/app_state.dart';
 import '../../shared/widgets/common.dart';
@@ -35,11 +36,7 @@ class HomePage extends ConsumerWidget {
 
     final bestSellers = state.products.where((p) => p.isBestSeller).toList();
     final fresh = state.products.where((p) => p.isNew).toList();
-    final newsStories =
-        state.newsStories
-            .where((story) => story.isActiveAt(DateTime.now()))
-            .toList()
-          ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    final newsStories = selectHomeStories(state.newsStories);
 
     return Scaffold(
       body: SafeArea(
@@ -90,6 +87,9 @@ class HomePage extends ConsumerWidget {
                   SectionHeader(
                     overline: strings.news,
                     title: strings.whatsNew,
+                    actionIcon: Icons.arrow_forward_rounded,
+                    actionTooltip: strings.openNews,
+                    onAction: () => context.push('/news'),
                   ),
                 ),
                 SliverToBoxAdapter(
@@ -486,7 +486,7 @@ class _NewsStoryRail extends StatelessWidget {
             width: 88,
             child: InkWell(
               borderRadius: BorderRadius.circular(18),
-              onTap: () => context.push('/news/${story.id}'),
+              onTap: () => context.push('/news/story/${story.id}'),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
                 child: Column(
@@ -513,10 +513,17 @@ class _NewsStoryRail extends StatelessWidget {
                             width: 2,
                           ),
                         ),
-                        child: Icon(
-                          story.visual.icon,
-                          color: story.accentColor,
-                          size: 30,
+                        child: ClipOval(
+                          child: NewsMediaView(
+                            mediaType: story.effectiveMediaType,
+                            url: story.effectiveMediaUrl,
+                            thumbnailUrl: story.thumbnailUrl,
+                            assetImage: story.assetImage,
+                            allowVideo: false,
+                            aspectRatio: 1,
+                            borderRadius: BorderRadius.zero,
+                            fallbackIcon: story.visual.icon,
+                          ),
                         ),
                       ),
                     ),

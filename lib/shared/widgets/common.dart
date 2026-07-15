@@ -61,12 +61,16 @@ class SectionHeader extends StatelessWidget {
     required this.title,
     this.overline,
     this.actionLabel,
+    this.actionIcon,
+    this.actionTooltip,
     this.onAction,
   });
 
   final String title;
   final String? overline;
   final String? actionLabel;
+  final IconData? actionIcon;
+  final String? actionTooltip;
   final VoidCallback? onAction;
 
   @override
@@ -93,7 +97,13 @@ class SectionHeader extends StatelessWidget {
             ],
           ),
         ),
-        if (actionLabel != null)
+        if (actionIcon != null)
+          IconButton(
+            tooltip: actionTooltip,
+            onPressed: onAction,
+            icon: Icon(actionIcon),
+          )
+        else if (actionLabel != null)
           TextButton(onPressed: onAction, child: Text(actionLabel!)),
       ],
     );
