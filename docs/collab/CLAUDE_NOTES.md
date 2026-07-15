@@ -210,8 +210,53 @@ Docker на dev-машине НЕТ (на сервере есть). Тема/я�
 (shared_preferences). Codex: это большая многосессионная работа; если подключишься к backend —
 согласуем канонический пакет и НЕ ломаем контракт клиентов (camelCase, /api/companies/{cid}).
 
+## 9. CL-007 — решения владельца по Google OAuth (2026-07-15). Codex: читать до кода!
+
+Владелец отложил SMS и делает Google OAuth сейчас. Два решения приняты им явно:
+
+**1. Identity: телефон становится НЕОБЯЗАТЕЛЬНЫМ.** Google отдаёт `sub`+`email`, телефона нет.
+Сейчас `Customer.phone` — NOT NULL и `UniqueConstraint(company_id, phone)`, то есть Google-вход
+в текущую модель просто не ложится. Решение: phone → nullable, уникальность только для не-NULL
+(в PostgreSQL несколько NULL не конфликтуют, но нужен partial unique index — обычный
+UniqueConstraint даст ложное чувство защиты). Телефон спрашиваем **один раз перед первым
+заказом**, а не на входе: баристе нужно найти заказ и позвонить.
+Честно: без SMS этот телефон **не подтверждён** — не выдавать его за верифицированный.
+
+Тенант-идентичность: ключ — `(company_id, google_sub)`, НЕ email. Email у Google меняется,
+`sub` — нет. Один Google-аккаунт в разных компаниях = разные строки Customer (баллы и
+`referral_code` per-company) — это соответствует уже принятой мультитенантности.
+
+**2. Package/bundle ID чиним ДО создания OAuth-клиентов.** Сейчас в репо:
+`applicationId = kg.sweettime.demo`, `namespace = com.example.sweettime`, iOS
+`PRODUCT_BUNDLE_IDENTIFIER = com.example.sweettime`, а release подписан **debug-ключом**
+(`signingConfig = signingConfigs.getByName("debug")`). Согласовано: **`kg.sweettime.app`**
+(Android+iOS). Причина: Android OAuth client привязан к паре package+SHA-1, а в Play
+applicationId неизменяем после публикации.
+
+Правку package/namespace/bundle оставляю Codex — это его текущая зона (OAuth трогает те же
+build.gradle/Info.plist, и `google-services.json` ключуется по package). Я туда не лезу, чтобы
+не словить конфликт.
+
+**Проверка токена на сервере (не срезать углы):** валидировать подпись публичными ключами Google,
+`iss` ∈ {accounts.google.com, https://accounts.google.com}, `aud` == Web client ID, `exp`, и
+`email_verified == true`. `email`/`name` от клиента — не доказательство. Google-email не имеет
+права повышать роль до staff/admin (см. CX-018). Client secret для проверки ID-токена НЕ нужен.
+
+Web client ID — **один на все брендированные сборки** (это аудитория единственного backend);
+Android-клиентов будет по одному на бизнес (свой package+SHA-1). Мультитенантность не ломается.
+
+SHA-1 будет три: debug (есть), release/upload (keystore ещё не создан!), Play App Signing
+(появится только после первой загрузки в Play Console — без него вход упадёт именно в
+опубликованной версии).
+
 ## 8. Журнал значимых изменений
 
+- 2026-07-15 (2) — CL-007: решения владельца по Google OAuth (phone → nullable + `(company_id,
+  google_sub)` как identity; package `kg.sweettime.app` до создания клиентов). Проверено внешне:
+  DNS `lnp-corparation.duckdns.org` → `81.88.192.41` (оба резолвера, AAAA нет). **Порты 80/443
+  снаружи таймаутят** (фаервол DROP), 22 открыт, хост пингуется → Let's Encrypt HTTP-01 сейчас
+  невозможен, нужен DNS-01 через DuckDNS-токен; 443 всё равно придётся открыть. Preflight сервера
+  ещё не получен — S7 заблокирован на нём.
 - 2026-07-15 — **приёмка большого среза Codex (S5.3 + S6) и коммит**. Вся работа лежала
   незакоммиченной (4208 вставок / 29 файлов) — закоммичено 4 связными коммитами по областям:
   `baffe6f` deploy S6, `e57c88b` backend (S5.3 + аватары + OrderItem V2 + fail-closed prod),
