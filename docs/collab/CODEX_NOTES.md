@@ -1091,8 +1091,12 @@ authoritative и скрывают секцию вместо возврата Dem
   Android back и RU/KY/EN. Коммиты `d1d1384`, `e1f9d07`.
 - Проверки: backend Docker `53 passed`; Flutter analyze clean и `58 passed`; admin typecheck и 4/4 content
   tests; Linux production admin image build; disposable PostgreSQL+HTTP: head=`e73c8f2a1b04`, переименование
-  подборки прочитано публично, `41/41` сторис без дублей/пропусков, Home=`30`.
+  подборки прочитано публично, `41/41` сторис без дублей/пропусков, Home=`30`. Production release APK
+  с новым video_player успешно собран и подписан v2: 81,017,866 bytes,
+  SHA-256=`4E101493F642956C6CAB8879AC99A846E6494CCDF22D7B015E4A177F7C15870B`.
 - Осталось: выкатить архив с обязательным backup, migration и rebuild backend/admin; обновить фактический
   host nginx `client_max_body_size` с 11M до 52M; проверить на production реальную замену обложки, MP4 range,
   RU/KY/EN и Android UX/back. Встроенное окно браузера в текущей сессии недоступно, поэтому локальная
-  визуальная проверка admin выполнена сборкой/код-ревью, а не интерактивным screenshot-smoke.
+  визуальная проверка admin выполнена сборкой/код-ревью, а не интерактивным screenshot-smoke. Flutter также
+  предупреждает, что `mobile_scanner` пока сам применяет Kotlin Gradle Plugin; перед будущим крупным Flutter
+  upgrade нужно обновить плагин до версии с Built-in Kotlin support.
