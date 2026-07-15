@@ -345,3 +345,447 @@
   ограничен fixed `+996` + 9 digits, Apple/SMS masquerade удалён, Google OAuth честно помечен
   не настроенным; analyze/24 tests/profile APK проходят, сборка установлена на Redmi; добавлены
   `CX-017`–`CX-018` и backend/OAuth handoff.
+
+## Обновление Codex — 2026-07-15: серверные аватары (этап на приёмке)
+
+Пользователь заменил решение по аватару: фото должно храниться на физическом сервере, host root
+уже создан как `/srv/sweetime/media`. Важная адаптация: операционный host path остаётся с одним
+`t` (`sweetime`), но tenant/company ID проекта не меняется — `sweettime`. Итоговый storage key:
+`tenants/sweettime/avatars/YYYY/MM/<uuid>/medium.webp`. Tenant не принимается от клиента и
+выводится из customer JWT + company route.
+
+Сделано:
+
+- `backend/api/storage.py`: локальный `StorageService` с `save_image/delete_file/get_public_url/
+  build_storage_key`; jpeg/png/webp, limit 10 MiB, реальное декодирование Pillow, pixel cap,
+  EXIF orientation + повторное WebP-кодирование без EXIF, variants original/medium/thumbnail,
+  UUID paths, temp → atomic directory replace, traversal checks.
+- `MediaFile` metadata + `Customer.avatar_storage_key`; Alembic `a31d5e3f9c20` следует за свежей
+  Claude-миграцией `7c003983b74d`. В БД нет полного URL, только storage key.
+- JWT customer endpoints: `PUT /api/companies/{cid}/auth/customer/me/avatar` (multipart) и
+  идемпотентный `DELETE`; замена сначала сохраняет новый набор и коммитит профиль, только затем
+  удаляет старые файлы. `CustomerOut.avatarUrl` возвращается при login/me/patch/upload.
+- Production-ready media scaffold: `backend/api/Dockerfile`, `deploy/production/docker-compose.yml`,
+  `nginx.conf`, `.env.example`, `backup-media.sh`. Volume: `/srv/sweetime/media:/app/media`, nginx
+  отдаёт `/media` напрямую; `proxy_pass` без trailing slash, чтобы не срезать `/api`.
+- Flutter больше не считает picker path профилем: `CustomerProfile.avatarUrl`/`AppState.avatarUrl`,
+  multipart upload с Bearer + refresh, 30-second upload timeout, server-confirmed delete, network
+  rendering и локальный preview только внутри edit screen. Экран не закрывается и не показывает
+  «сохранено», если сервер не подтвердил фото. RU/KG/EN тексты обновлены.
+- В dev FastAPI монтирует `/media` только не-production режимом; production обслуживает nginx.
+
+Изменённые зоны Codex: `backend/api/{auth,config,main,models,schemas,storage}.py`, новая media
+migration/tests/Dockerfile, backend requirements/pyproject, `deploy/production/*`, Flutter
+`api_client.dart`, `app_state.dart`, Profile edit/view/localization, pubspec/lock, widget tests.
+Свежие незакоммиченные favorites/recurring/orders изменения Claude сохранены и не откатывались;
+`docs/design/BACKEND_BUILD_LOG.md` — его запись, Codex её не переписывал.
+
+Проверки:
+
+- `py -m pytest api/tests/test_storage.py -q` → 6 passed.
+- production PostgreSQL: `alembic upgrade head` OK; `alembic check` → no changes.
+- реальный local API e2e: OTP → upload PNG 200 → GET WebP 200 (`image/webp`) → delete 204;
+  upload без token → 401; key tenant = `sweettime`.
+- `flutter analyze --no-pub` → clean; `flutter test --no-pub` → 27/27.
+- profile APK (`API_BASE=http://127.0.0.1:8010`) собран и установлен на Redmi `f3bff2a5`;
+  `adb reverse tcp:8010` активен, device `/health` → ok. Локальный API перезапущен PID 15008.
+
+Открытые риски/следующий handoff:
+
+- Код и migration готовы локально, но на физический сервер ещё НЕ развёрнуты; `deploy/production`
+  требует реальные `.env`, UID/GID владельца volume, DNS/TLS и отдельную проверку backup/restore.
+- По прямому решению пользователя nginx сейчас отдаёт avatar URL как public immutable media.
+  Перед публичным запуском желательно явно утвердить privacy: оставить UUID public URL либо сделать
+  avatars private через authenticated endpoint + nginx `X-Accel-Redirect`.
+- Однодисковый `rsync --delete` — зеркало, не disaster-recovery backup; нужен внешний versioned
+  backup и тест восстановления.
+- Root `docker-compose.yml`/`backend/Dockerfile` относятся к старому `backend/app`; новый канон для
+  production API находится в `deploy/production` + `backend/api/Dockerfile`. Не запускать старый
+  root compose как боевой, пока он не выведен из эксплуатации/не перенаправлен явно.
+- Следующий отдельный S5.3 этап: Flutter server favorites/history/recurring, локальная корзина и
+  top notice. До истории сначала расширить OrderItem стабильными `productId/sizeId/toppingIds/
+  sugarPercent/ice`; не восстанавливать товар из локализованного `productName`.
+
+## Обновление Codex — 2026-07-15: Flutter ↔ server favorites (этап на приёмке)
+
+Выполнена одна изолированная часть S5.3 — серверное избранное во Flutter. Остальные части S5.3
+(история, recurring, локальная корзина, top notice) в этот этап не смешивались.
+
+Сделано:
+
+- `lib/core/api_client.dart`: добавлены GET/PUT
+  `/auth/customer/me/favorites`; пустой `productIds` считается успешным авторитетным ответом;
+  401/403 идут через существующий refresh flow; некорректный JSON/прочие статусы не принимаются
+  за пустое избранное.
+- `lib/shared/app_state.dart`: favorites загружаются после восстановления сохранённой сессии и до
+  завершения успешного OTP login; login/logout/delete очищают видимые account-scoped favorites,
+  но logout не отправляет `PUT []` и не удаляет данные аккаунта на сервере.
+- Быстрые нажатия сердечка остаются оптимистичными, но полные PUT сериализованы и coalesced:
+  параллельных записей нет, старый ответ не откатывает более новое локальное состояние, ответ API
+  применяется как канонический только если аккаунт и запрошенный snapshot не изменились.
+- `test/widget_test.dart`: добавлены/расширены тесты saved-token hydration, OTP hydration,
+  authoritative empty, logout cleanup и controlled race двух быстрых toggle. Offline/fake API
+  явно переопределяют новые методы и не обращаются случайно к localhost.
+
+Проверки:
+
+- `flutter analyze --no-pub` — clean.
+- `flutter test --no-pub` — 29/29 passed.
+- Реальный local production API e2e: mock OTP → GET favorites → PUT `[p2]` → GET `[p2]` →
+  восстановление прежнего списка; tenant/customer Bearer contract подтверждён.
+- `git diff --check` — clean (только существующее предупреждение Git о CRLF `pubspec.yaml`).
+- profile APK с `API_BASE=http://127.0.0.1:8010` собран, установлен и запущен на Redmi
+  `f3bff2a5`; `adb reverse tcp:8010` включён.
+
+Риски и следующий handoff:
+
+- При временной недоступности PUT оптимистичное значение остаётся в текущей сессии и повторно
+  отправится при следующем изменении; отдельный persistent outbox/offline indicator ещё не сделан.
+- Backend GET возвращает сохранённый список как есть; очистка устаревших ID происходит при PUT.
+  Flutter UI и так показывает только совпавшие с текущим каталогом товары.
+- Следующий рекомендуемый отдельный этап: расширить production OrderItem стабильными
+  `productId/sizeId/toppingIds/sugarPercent/ice` и миграцией. Только после этого безопасно
+  подключать серверную историю и точный reorder; сопоставление по русскому `productName` запрещено.
+
+## Обновление Codex — 2026-07-15: локальная корзина + единая очередь S5.3–S7
+
+По физической проверке владельца серверные фото и favorites сохранялись, а корзина после
+перезапуска — нет. Выполнен отдельный этап device-scoped cart persistence.
+
+Сделано:
+
+- Новый `lib/core/cart_store.dart`: injectable `CartStore` и production
+  `SharedPreferencesCartStore`, ключ версионирован и изолирован по company ID. JSON хранит только
+  `productId`, quantity, `sizeId`, sugar, ice и topping IDs; названия, Product целиком, total,
+  бонусы и платёжные данные не сохраняются.
+- `AppStateController.bootstrap()` читает draft параллельно со стартом, но применяет его только
+  после загрузки актуального каталога. Product/size/toppings восстанавливаются по stable IDs,
+  total пересчитывается из текущих цен. Unknown product/size/ice/quantity/sugar удаляют позицию,
+  unknown toppings фильтруются; очищенный snapshot записывается обратно.
+- Все реальные cart mutations (`addConfigured/quickAdd/updateQuantity/remove/repeatOrder`) пишут
+  snapshot. Успешный локальный checkout, удаление последней позиции и deleteAccount очищают ключ.
+  Login/logout корзину не очищают: гостевой draft переживает auth return-to-checkout.
+- Записи SharedPreferences сериализованы и coalesced, поэтому быстрые add/update/remove не могут
+  завершиться в обратном порядке и воскресить старую корзину. Поздний bootstrap не перезаписывает
+  корзину, если пользователь уже успел её изменить.
+- `docs/TASKS.md` обновлён: вверху добавлена общая operational queue S5.3 backend, S5.3 Flutter,
+  S6 и S7. Зафиксирован target `ranex@81.88.192.41` и подготовленные `/srv/sweetime/*`; старое
+  утверждение «Git не инициализирован» исправлено текущим baseline status.
+
+Проверки:
+
+- `flutter analyze --no-pub` — clean.
+- `flutter test --no-pub` — 33/33 passed. Новые тесты: restart round-trip, price recomputation,
+  stale product/size/topping cleanup, last-item removal, login/logout preservation и account-delete
+  cleanup.
+- `git diff --check` — clean кроме существующего CRLF warning для `pubspec.yaml`.
+- Profile APK (`API_BASE=http://127.0.0.1:8010`) собран (107.1 MB), установлен и запущен на Redmi
+  `f3bff2a5`; `adb reverse tcp:8010` активен.
+
+Актуальный остаток короткой очереди:
+
+1. S5.3 backend — функционально готов локально, но нужны automated PostgreSQL endpoint tests,
+   stable OrderItem contract, commit и deployment/migration.
+2. S5.3 Flutter — avatar + favorites + local cart готовы; остаются history, recurring и top notice.
+3. S6 — deploy scaffold partial; нужны production env/secrets, healthchecks, DB/off-host backup,
+   TLS/IP pilot decision, admin deployment decision и Ubuntu validation.
+4. S7 — IP/SSH/path известны, но upload/build/migrations/nginx/firewall/smoke ещё не выполнялись.
+
+Риск: корзина намеренно device-scoped и после logout видна следующему аккаунту на том же телефоне.
+Это соответствует уже принятому guest cart → auth flow. Если владелец захочет приватную корзину
+на аккаунт, потребуется отдельная политика guest/customer merge, а не простая смена storage key.
+
+## Обновление Codex — 2026-07-15: stable OrderItem V2 (этап на приёмке)
+
+Выполнен обязательный контрактный этап перед Flutter history/reorder. Аудит показал, что backend
+Product modifiers не имели ID, Flutter синтезировал их из fallback, а admin заменял на `s0/t0` и
+удалял при PATCH. Поэтому исправление сделано сквозным: backend catalog → admin → order POST.
+
+Сделано:
+
+- Backend Product modifier contract разделён на output (обязательный stable `id`) и write
+  (`id` optional только для нового option). API генерирует opaque ID один раз; rename/reorder
+  сохраняет присланный ID; дубли запрещены.
+- Seed получил канонические IDs размеров/топпингов. Alembic `d42f10c8b6e1` следует за
+  `a31d5e3f9c20`, добавляет `orders.items_version` с constraint 1/2 и назначает IDs существующим
+  Product JSON. Для известных SweetTime options одноразовый compatibility map сохраняет уже
+  используемые Flutter IDs; неизвестные получают UUID. Runtime никогда не выводит ID из названия.
+- Legacy order JSON не переписывается: существующие строки получают `itemsVersion=1`, новые
+  strict requests записываются как V2. V1 response имеет nullable stable fields и остаётся
+  display-only; никакого поиска productId по русскому productName нет.
+- Strict `OrderItemCreate` принимает только `productId`, `sizeId`, unique `toppingIds`,
+  sugar enum, ice enum и quantity. `productName`, unit/item/order prices запрещены (`422`).
+  Backend проверяет tenant, active/branch availability, size/toppings и считает unit/line/order
+  totals и pointsEarned по серверному каталогу.
+- Admin `ApiModifier` теперь читает настоящий ID и отправляет его обратно при PATCH; временные
+  index IDs удалены.
+- Flutter submitOrder больше не отправляет localized productName/price. Payload не зависит от
+  RU/KG/EN и включает stable selection; paymentMethod теперь реально передаётся, `qrDemo` мапится
+  в API `qr`.
+
+Проверки:
+
+- Alembic upgrade `a31 -> d42`, current=head и `alembic check` — OK/no operations.
+- Backend `py -m pytest api/tests -q` — 11 passed (legacy V1 + strict V2 schema + storage).
+- Real local PostgreSQL/API: order `SW-1064`, itemsVersion=2, p1/m/tapioca, server unit/total=430,
+  payment=qr; customer history returns V2; injected `total=1` rejected 422.
+- Staff queue returns legacy `SW-1063` as itemsVersion=1/productId=null. Product PATCH preserved
+  modifier IDs `s,m,l` exactly.
+- `corepack pnpm typecheck` in admin — clean.
+- `flutter analyze --no-pub` — clean; `flutter test --no-pub` — 34/34. Captured RU/EN requests
+  are identical and contain no display name/price.
+- Profile APK built and installed on Redmi `f3bff2a5`; adb reverse 8010 active. Local API restarted
+  with new code, PID 10152.
+
+Изменённые зоны этого этапа: backend `models/schemas/main/seed/serializers`, migration d42 and
+order contract tests; admin `lib/api.ts`; Flutter `api_client/app_state/checkout`, widget tests;
+TASKS/CODEX_NOTES. Существующие незакоммиченные Claude S5.3 и Codex avatar/favorites/cart changes
+сохранены; `docs/design/BACKEND_BUILD_LOG.md` не редактировался.
+
+Следующий отдельный этап: Flutter server history DTO/UI. V2 history может делать exact reorder
+только если все current product/size/topping IDs разрешились; V1 показывается без кнопки точного
+повтора. Snapshot пока сохраняет display product/size строки (как legacy/admin contract), а не
+гарантированные полные RU/KG/EN — не выдавать это за завершённый localized history contract.
+
+## Обновление Codex — 2026-07-15: Flutter server history + safe V2 reorder
+
+Завершён следующий отдельный этап S5.3: Flutter теперь читает серверную историю клиента и не
+восстанавливает заказ по локализованным названиям.
+
+Сделано:
+
+- Добавлены snapshot-модели `OrderHistoryEntry`/`OrderHistoryItem`, отделённые от текущего
+  `Product`/`CartItem`. История сохраняет server number, branch ID, itemsVersion, snapshot,
+  stable selection и суммы; удалённый товар/филиал не роняет экран.
+- `ApiClient.fetchCustomerOrders()` читает `GET /auth/customer/me/orders`. Пустой список
+  авторитетен; некорректный envelope/enum/V2 stable selection не маскируется под пустую историю.
+  Parser принимает текущие string snapshots и future complete `{ru,ky,en}` snapshots.
+- История загружается после saved-token restore и OTP login с account-epoch guard. Успешный
+  server checkout обновляет историю и заменяет временную локальную запись; unavailable response
+  оставляет локальную запись, logout/delete очищают account-scoped history.
+- Profile показывает публичный `number`, snapshot/current localized name и fallback удалённого
+  филиала. V1 явно display-only без кнопки repeat. V2 repeat ищет только точные product/size/
+  topping IDs, проверяет выбранный филиал, пересчитывает цену по текущему каталогу и либо добавляет
+  весь заказ, либо ничего.
+- Добавлен отдельный `catalogAuthoritative`: успешный `/config` при fallback на DemoData больше не
+  разрешает V2 repeat. Это закрывает риск безопасного повторения при частично недоступном API.
+- RU/KG/EN добавлены для legacy/conflict/offline catalog/unknown branch состояний.
+
+Проверки:
+
+- `flutter analyze --no-pub` — clean.
+- `flutter test --no-pub` — 42/42 passed. Покрыты V2 parser/localized snapshot, malformed V2,
+  authoritative empty, stale response after logout, V1 name-matching prohibition, current-price
+  recalculation, atomic conflict и offline DemoData rejection.
+- Реальный local PostgreSQL/API: создан `SW-1065`; history первым возвращает V2 с
+  `p1/m/tapioca`, server total 430, рядом legacy V1 остаётся читаемым.
+- Profile APK (118.6 MB, `API_BASE=http://127.0.0.1:8010`) собран и установлен на Redmi
+  `f3bff2a5`; `adb reverse tcp:8010` активен.
+
+Открытые ограничения:
+
+- Backend текущего V2 сохраняет `productName/size` как строки, поэтому для удалённого товара
+  сервер пока не гарантирует переключаемый RU/KG/EN snapshot. Flutter уже принимает полную форму,
+  но backend/admin migration полного localized snapshot остаётся отдельной задачей.
+- V2 с `sizeId=null` показывается, но точный repeat временно блокируется: текущий `CartItem`
+  требует sizeId. Нельзя молча выбирать размер по умолчанию.
+- Повтор применяет актуальную цену без отдельного диалога сравнения old/new. Перед production UX
+  желательно добавить явное подтверждение, если итог изменился.
+
+Следующий этап по прямому указанию владельца начат без паузы: Flutter recurring-order API
+integration. После него остаётся top add-to-cart notice, затем S6/S7 согласно очереди.
+
+## Обновление Codex — 2026-07-15: Flutter recurring-order API integration
+
+Следующий S5.3 этап завершён без паузы по прямому указанию владельца.
+
+Сделано:
+
+- Flutter использует фактический контракт `GET/PUT/DELETE
+  /auth/customer/me/recurring`. GET `200 null` авторитетно очищает старое состояние; network/5xx
+  его не выдают за отсутствие подписки. PUT отправляет только productIds/time/branchId/plan,
+  DELETE принимает только 204.
+- `RecurringOrder` больше не хранит mutable `Product`/`Branch`: источник identity — stable
+  productIds/branchId. UI динамически разрешает текущий каталог и показывает RU/KG/EN fallback
+  для удалённых товаров/филиала. `paidUntil` берётся только с сервера; nullable legacy value
+  отображается безопасно.
+- Recurring hydrate добавлен после saved-token restore и OTP login с account-epoch guard.
+  Поздний PUT после logout не возвращает приватное состояние гостю; PUT/DELETE имеют общий
+  mutation revision для защиты локального state от старого ответа.
+- Настройка открывается с текущими product/time/branch/plan, ждёт server response, блокирует
+  double tap, закрывается только при успехе и остаётся открытой с локализованной ошибкой при сбое.
+  Cancel очищает карточку только после server 204.
+- Платёж по-прежнему честно помечен `(демо)`: API лишь сохраняет подписку и сам считает срок,
+  реального payment provider в этом этапе нет.
+
+Проверки:
+
+- `flutter analyze --no-pub` — clean.
+- `flutter test --no-pub` — 46/46 passed. Новые проверки: parser/time/date, hydration,
+  authoritative null, server paidUntil, PUT/DELETE и late PUT after logout.
+- Реальный local PostgreSQL/API: PUT p1/11:00/b1/week → GET active=true с server paidUntil →
+  DELETE 204 → GET body `null`.
+- Profile APK (118.6 MB) собран и установлен на Redmi `f3bff2a5`; adb reverse 8010 активен.
+
+Production blockers recurring (не скрывать): backend пока хранит только product IDs без
+size/toppings/sugar/ice/quantity, не проверяет Product.active/branch availability/branch open,
+выставляет paidUntil без реальной оплаты, не определяет refund/остаток при DELETE/повторном PUT и
+не деактивирует автоматически истёкший paidUntil. Поэтому это server-persistent demo/MVP-light,
+а не готовая платная подписка.
+
+Следующий S5.3 Flutter этап начат: единый верхний add-to-cart notice. После него короткая очередь
+переходит к S6 deployment artifacts/validation и S7 physical server rollout.
+
+## Обновление Codex — 2026-07-15: Flutter top add-to-cart notice; S5.3 Flutter завершён локально
+
+Завершён последний отдельный Flutter-пункт короткой очереди S5.3.
+
+Сделано:
+
+- Добавлен общий `lib/shared/widgets/top_notice.dart`: уведомление рендерится через root overlay
+  сверху с учётом SafeArea, имеет короткие fade/slide-анимации и доступный action. Одновременно
+  существует только одно уведомление; повторное быстрое действие заменяет старое, а не строит очередь.
+- Home, Catalog, product detail и точный повтор заказа используют один и тот же верхний notice.
+  Сообщение показывается только после реального успешного добавления; action открывает корзину.
+- `quickAdd` и `addConfigured` возвращают результат. `addConfigured` повторно разрешает текущий товар
+  по stable ID, проверяет выбранный филиал, active/availability, size/topping IDs, уникальность toppings
+  и сам пересчитывает цену по актуальному каталогу. Клиентский `total` больше не считается источником истины.
+- Добавлена RU/KG/EN-локализация общего сообщения об успешном добавлении.
+
+Проверки:
+
+- `flutter analyze --no-pub` — clean.
+- `flutter test --no-pub` — 48/48 passed. Добавлены тесты отказа для недоступного товара и одного
+  верхнего notice при быстрых повторных действиях с автоматическим исчезновением.
+- `git diff --check` — clean, кроме уже существующего предупреждения о CRLF для `pubspec`.
+- Profile APK 124,428,825 bytes (`API_BASE=http://127.0.0.1:8010`) собран и установлен на Redmi
+  `f3bff2a5`; `adb reverse tcp:8010` восстановлен.
+
+Статус: короткая очередь **S5.3 Flutter** завершена и отмечена локально проверенной в `docs/TASKS.md`.
+Следующий этап по прямому указанию владельца начат без паузы: S6 deployment artifacts/validation.
+
+## Обновление Codex — 2026-07-15: S6 readiness + fail-closed production contract
+
+По прямому указанию владельца после S5.3 начат S6. Завершены два последовательных локально
+проверяемых блока deployment-артефактов.
+
+S6-A — readiness/healthchecks:
+
+- `/health` оставлен process-liveness, добавлен `/ready` с реальным `SELECT 1` в PostgreSQL и
+  безопасным 503 без текста внутренней ошибки.
+- PostgreSQL, Redis, backend и nginx получили healthchecks. Backend ждёт healthy PostgreSQL, nginx
+  ждёт healthy backend; `/ready` проксируется наружу.
+- Dockerfile содержит тот же DB-backed healthcheck, поэтому образ проверяет готовность и вне Compose.
+
+S6-B — fail-closed production configuration:
+
+- Production `Settings` отвергает короткий/placeholder JWT, placeholder/non-PostgreSQL DATABASE_URL,
+  wildcard или non-HTTPS CORS, mock OTP и demo seed. Пока реального SMS-провайдера нет,
+  `OTP_MODE=disabled`; OTP endpoints честно отвечают 503.
+- Demo seed выполняется только при явном локальном `SEED_MODE=demo`. Production `SEED_MODE=none`
+  не создаёт известных owner/manager/barista (`demo`) и demo-клиента.
+- Alembic вынесен в one-shot Compose service `migrate`; обычный backend больше не меняет схему при
+  каждом restart. Backend стартует только после успешной миграции.
+- Compose больше не передаёт общий `.env` целиком каждому контейнеру: сервисы получают минимальный
+  набор переменных; критичные значения обязательны через `${VAR:?message}`. nginx по умолчанию
+  слушает только `127.0.0.1:8080` за внешним TLS reverse proxy, а не публичный host port 80.
+- `deploy/production/.env` и `backend/api/.env` защищены `.gitignore`; root `.dockerignore` исключает
+  секреты, Git, Flutter/Node/Python build/cache. Реальный build context уменьшился с ~424 KB до 64 KB.
+
+Проверки:
+
+- `py -m pytest api/tests -q` — 23/23 passed.
+- Compose с полными тестовыми secrets проходит `config`; без `POSTGRES_PASSWORD` завершается exit 1
+  до запуска контейнеров. `git check-ignore` подтверждает оба secret-файла.
+- Production image `sweettime-backend:s6-secure` собран; healthcheck присутствует в image metadata.
+- `nginx:1.27-alpine nginx -t` — successful для текущего конфига.
+- Disposable PostgreSQL: отдельный Alembic job применил все 5 revisions; затем production backend
+  стал healthy, `/ready` вернул ok, `companies_after_production_start=0` — demo seed не произошёл.
+
+Открытые P0/P1 до S7: нужен безопасный bootstrap реальной компании/первого owner; утверждённый TLS
+reverse-proxy/domain; решение о приватности avatar media; versioned DB+media off-host backup и restore
+drill; pin зависимостей/image digest; server preflight прав/портов/диска; deployment admin. Следующий
+локальный S6-блок начат без паузы: backup/restore artifacts, без обращения к физическому серверу.
+
+## Обновление Codex — 2026-07-15: S6 versioned backup + restore drill
+
+Завершён S6-C. Старый `backup-media.sh` с same-disk `rsync --delete` удалён: он мог зеркально удалить
+копию после ошибки/пустого source и не содержал PostgreSQL.
+
+Новый workflow в `deploy/production/`:
+
+- `backup-production.sh` открывает короткое maintenance window (останавливает nginx/backend), делает
+  PostgreSQL custom dump и media archive в неизменяемой timestamp-папке, записывает Alembic head и
+  число media-файлов, проверяет SHA-256/структуру архивов и возобновляет только ранее запущенные сервисы.
+- `copy-backup-offsite.sh` повторно проверяет checksums и копирует snapshot в отдельный rsync-target
+  без `--delete`; отсутствие `OFFSITE_RSYNC_TARGET` является ошибкой, поэтому same-host snapshot не
+  маскируется под полноценный backup.
+- `restore-drill.sh` никогда не трогает production: восстанавливает dump в disposable PostgreSQL 16,
+  сравнивает Alembic version, извлекает media во временную папку и сверяет число файлов.
+- `README.md` фиксирует TLS-loopback topology, preflight, backup/off-site/restore порядок и честные
+  блокеры production bootstrap/OTP.
+
+Проверки на полностью поднятом тестовом Compose stack:
+
+- backup snapshot `20260715T083125Z`: `database.dump`, `media.tar.gz`, `metadata.env` и `SHA256SUMS`
+  прошли проверку; backend/nginx остановились и вернулись healthy.
+- restore drill: `alembic=d42f10c8b6e1`, `media_files=1`, exit 0.
+- append-only copy в отдельный тестовый target сохранил все четыре файла, exit 0.
+- Свежий image tag при `docker compose up --build` собирается один раз; migrate не пытается pull
+  локального/private tag, завершает Alembic и только после этого стартуют healthy backend/nginx.
+- Bash syntax — clean; backend tests 23/23; `git diff --check` — только существующие CRLF warnings.
+- Тестовый stack, test `.env` и все локальные snapshots/off-site fixtures удалены после проверки.
+
+Не закрыто: реальный off-host target, его encryption/retention/monitoring и регулярный restore drill
+на Ubuntu должны быть настроены в S7; локальный артефакт не доказывает наличие внешней копии.
+
+## Обновление Codex — 2026-07-15: S6 one-shot production bootstrap
+
+Завершён S6-D: production DB теперь можно сделать пригодной к работе без возврата demo seed.
+
+- `api.bootstrap` читает owner email/name из окружения, а пароль только из read-only secret file.
+  Пароль не передаётся аргументом CLI, не попадает в image/repo и проверяется как 16–72 UTF-8 bytes.
+- `bootstrap_production_sweettime()` создаёт только tenant `sweettime`, 3 филиала, 8 товаров,
+  4 новости, 3 акции и одного owner с bcrypt hash. CoffeeGo, demo customer, demo staff и orders не
+  создаются. Повторный запуск при любой существующей компании fail-closed и ничего не меняет.
+- Отдельный `docker-compose.bootstrap.yml` подключается только к явной one-shot команде; требует
+  реальный email/name и абсолютный host path к password file. Базовый production stack от этих
+  переменных не зависит.
+- `deploy/production/README.md` содержит безопасную генерацию secret file, команду запуска,
+  обязательную проверку логина/сохранение в password manager и удаление bootstrap secret после успеха.
+
+Проверки:
+
+- Backend unit/config/input tests: 29/29 passed.
+- Fresh tmpfs PostgreSQL 16: 5 migrations → bootstrap exit 0. Counts: companies=1, sweettime=1,
+  coffeego=0, owners=1, branches=3, products=8, news=4, promotions=3, customers=0, orders=0.
+- Пароль из secret file успешно проверен против сохранённого bcrypt hash.
+- Второй запуск завершился exit 1 с `a company already exists`; дубликатов нет.
+- Combined base+bootstrap Compose config валиден с явными тестовыми inputs; временный password file,
+  контейнер, сеть и тестовая БД удалены.
+
+Дальше: реальный bootstrap выполняется только на целевом Ubuntu после backup/migrations и до трафика.
+Следующий безопасный блок — read-only preflight физического сервера (ОС/Docker/proxy/порты/права/диск),
+без upload, запуска контейнеров или изменения firewall.
+
+## Обновление Codex — 2026-07-15: target preflight prepared; SSH auth required
+
+S6-E начат, но ни одной команды на физическом сервере не выполнилось. Попытка
+`ssh -o BatchMode=yes ranex@81.88.192.41` завершилась `Permission denied (publickey,password)`;
+локальный ssh-agent отсутствует. Пароль не запрашивался/не выводился/не сохранялся.
+
+Добавлен read-only `deploy/production/server-preflight.sh`. Он собирает только необходимые факты:
+Ubuntu/kernel/CPU/RAM, Docker/Compose, running containers без env, active nginx/caddy, listeners,
+nginx route/TLS summary, Certbot, UFW, владельцев/режим/writability подготовленных `/srv` путей,
+disk bytes и inodes. Скрипт не создаёт файлы, не рестартует сервисы и не меняет firewall.
+
+Команда для владельца (с локальным интерактивным вводом SSH password):
+
+`ssh ranex@81.88.192.41 'bash -s' < deploy/production/server-preflight.sh`
+
+Альтернатива предпочтительнее: добавить отдельный SSH public key для Codex/деплоя и повторить
+read-only аудит. До получения вывода нельзя выбирать внешний порт, домен/TLS integration или
+запускать S7 рядом с существующим проектом.
+
+Финальная локальная проверка этого цикла: backend 29/29, Flutter analyze clean, Bash syntax clean,
+`git diff --check` без новых whitespace ошибок (только существующие CRLF warnings).

@@ -1,6 +1,6 @@
 # SweetTime Status Backlog
 
-Updated: 2026-07-13. Work is sequential unless the owner explicitly approves a skip.
+Updated: 2026-07-15. Work is sequential unless the owner explicitly approves a skip.
 
 ## Status Rules
 
@@ -10,6 +10,46 @@ Updated: 2026-07-13. Work is sequential unless the owner explicitly approves a s
 - `[ ] [partial—verified]` means the existing slice was inspected, but known gaps still block phase acceptance.
 - `[ ] [blocked—owner input]` requires a business decision or asset.
 - Demo screenshots, routes, mocks, or extension points alone do not prove production completion.
+
+## Current Execution Queue — S5.3 to S7
+
+This is the short operational list shared by Claude Code and Codex. Detailed phase acceptance
+below remains authoritative; this section records the current execution order.
+
+- [ ] **S5.3 backend — customer persistence.** **[partial—verified locally]** Production API now
+  has customer favorites, order history, recurring orders and server avatar storage, with Alembic
+  revisions and manual auth/tenant checks. Product sizes/toppings and OrderItem V2 now use stable
+  IDs; new order prices/display snapshots are server-owned, while legacy V1 orders remain readable.
+  Before release: add isolated PostgreSQL endpoint tests, commit the shared dirty worktree and
+  deploy/migrate the server.
+- [x] **S5.3 Flutter — personal data and device draft.** **[verified locally]** Server avatar
+  and favorites are connected. Cart is stored locally by stable IDs, restored after the current
+  catalog loads, repriced from current catalog data and covered by restart/stale-data tests. Server
+  order history is loaded after session restore/login: V1 stays display-only and V2 exact reorder
+  resolves only current stable IDs against an authoritative server catalog, reprices every line and
+  fails atomically on any conflict. Recurring orders now load/save/cancel through the customer API,
+  keep stable product/branch IDs, trust server `paidUntil`, and retain honest demo-payment wording.
+  Home, Catalog, product detail and exact reorder share a single top add-to-cart notice; rapid actions
+  replace the active notice instead of building a queue, and the controller rejects unavailable or
+  stale selections before reporting success. Flutter checks pass locally; server rollout remains S7.
+  Photo is intentionally server-side now, not a device-only picker file.
+- [ ] **S6 — Ubuntu deployment artifacts.** **[partial—verified locally]** `backend/api/Dockerfile`
+  and `deploy/production/` contain PostgreSQL, Redis, backend, nginx, media volume and an environment
+  example. PostgreSQL/backend/nginx now have ordered healthchecks; `/ready` probes the real database.
+  Production config rejects placeholder secrets, wildcard/non-HTTPS CORS, mock OTP and demo seed;
+  migrations run as a one-shot service, the API starts without known demo accounts, `.env` is ignored,
+  and nginx binds to host loopback by default for a future TLS reverse proxy. Versioned PostgreSQL +
+  media snapshots now use a short write-maintenance window, checksums and a non-destructive disposable
+  restore drill; off-host copy is append-only and requires an explicit target. Still required: real
+  production secrets, execution of the locally verified one-shot real owner/catalog bootstrap on the
+  target, a real independent off-host destination with retention/encryption policy, approved TLS/domain
+  topology, avatar privacy decision, admin deployment decision, and validation on the target Ubuntu host.
+- [ ] **S7 — deploy to physical server.** **[ready, not started]** Target is
+  `ranex@81.88.192.41`; `/srv/sweetime/media`, `/srv/sweetime/backups` and
+  `/srv/projects/sweetime` are prepared. A read-only `server-preflight.sh` now covers OS/Docker,
+  proxy/TLS, listeners, firewall, directory ownership, disk and inodes, but the first non-interactive
+  SSH attempt was rejected because no key/agent is available; no server command ran. Upload/build,
+  `.env`, migrations, nginx integration, firewall/port checks and end-to-end smoke tests remain undone.
 
 ## Audit Snapshot — 2026-07-12
 
@@ -79,7 +119,7 @@ Updated: 2026-07-13. Work is sequential unless the owner explicitly approves a s
 
 ## Repository Hygiene — Before The Next Code Task
 
-- [ ] Confirm the repository boundary and initialize Git with a clean baseline; do not mix generated build output or local databases into history.
+- [x] Repository boundary and Git baseline are initialized (`8a74eed`); generated build output and local databases are ignored. Current S5.x work remains intentionally uncommitted pending owner review.
 - [ ] Mark `sweetime/` and `admin-legacy/` as reference/archive surfaces and remove them from active build/deploy claims.
 - [ ] Reconcile root `README.md`, `.env.example`, agent guidance, ports, environment-variable names, and the chosen canonical runtime before advertising a full-stack launch command.
 
