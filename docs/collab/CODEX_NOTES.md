@@ -908,3 +908,10 @@ rollout config`). На момент коммита tests: backend 42/42, Flutter
 эталону репозитория. Immutable-кэш безопасен для текущего storage: `save_image()` создаёт новый UUID и
 новый URL при каждой замене изображения, после чего старые варианты удаляются. После последней правки
 на хосте нужно ещё раз выполнить `sudo nginx -t && sudo systemctl reload nginx`.
+
+Архив snapshot `352f161` успешно передан владельцем в `/tmp`, SHA-256 на сервере совпал:
+`7fcd685de1d733bd0c340f230de3c7c20d5a437454260f1781b91e5706db6430`. Архив распакован в чистый
+`/srv/projects/sweetime`; `deploy/production/` содержит ожидаемые Compose, Nginx, backup/restore,
+bootstrap и preflight артефакты. `.env` и keystore в архив не попали. Следующий шаг — выполнить
+`bash ./server-preflight.sh` непосредственно на Ubuntu, проверить UID/GID каталогов и Docker/Compose,
+и только затем создавать production `.env`.

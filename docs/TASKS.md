@@ -70,8 +70,10 @@ below remains authoritative; this section records the current execution order.
   uploads to 11 MiB and denies `/media/temp/`; its syntax/reload and free loopback port were verified by
   the owner. The final media alias uses `^~`, disables autoindex, omits the incompatible `try_files $uri`
   and sends immutable/nosniff headers. UUID-versioned media URLs make the 30-day immutable cache safe.
-  Upload/build, real `.env` secrets, migrations, one-shot production bootstrap, firewall/port checks and
-  end-to-end HTTPS smoke tests remain undone.
+  Git snapshot `352f161` was uploaded as a secret-free archive, its SHA-256 was verified on the host and
+  it was extracted into `/srv/projects/sweetime`. Target preflight, image build, real `.env` secrets,
+  migrations, one-shot production bootstrap, firewall/port checks and end-to-end HTTPS smoke tests
+  remain undone.
 
 ## Audit Snapshot — 2026-07-12
 
