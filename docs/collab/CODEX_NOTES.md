@@ -915,3 +915,16 @@ rollout config`). На момент коммита tests: backend 42/42, Flutter
 bootstrap и preflight артефакты. `.env` и keystore в архив не попали. Следующий шаг — выполнить
 `bash ./server-preflight.sh` непосредственно на Ubuntu, проверить UID/GID каталогов и Docker/Compose,
 и только затем создавать production `.env`.
+
+Server preflight выполнен владельцем успешно. Ubuntu 26.04, Docker 29.1.3, Compose 2.40.3, Nginx и
+Docker active; `ranex` входит в `docker`, sudo noninteractive доступен. `/srv` имеет около 21 TiB
+свободного места и 1% inode usage. `/srv/sweetime/{media,backups,postgres}` и проект доступны владельцу;
+`/srv/sweetime/secrets` ещё отсутствует и должен создаваться с mode 700 перед bootstrap. Port 8080
+свободен; существующие Nton PostgreSQL/Redis опубликованы только на loopback 5432/6379 и не конфликтуют
+с непубликуемыми Compose-сервисами SweetTime. TLS-сертификат валиден до 2026-10-13.
+
+Риск: UFW inactive, при этом Nton frontend слушает `0.0.0.0:3000`, а Cockpit — `*:9090`. Не включать и
+не менять firewall вслепую: сначала отдельно подтвердить SSH allow, необходимость внешних 3000/9090 и
+провайдерский firewall, чтобы не сломать Nton/Cockpit/доступ. Следующий безопасный шаг — создать mode 600
+production `.env` с отдельными случайными PostgreSQL/JWT secrets и проверить `docker compose config -q`
+без печати конфигурации или секретов.

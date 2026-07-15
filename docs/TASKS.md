@@ -71,9 +71,11 @@ below remains authoritative; this section records the current execution order.
   the owner. The final media alias uses `^~`, disables autoindex, omits the incompatible `try_files $uri`
   and sends immutable/nosniff headers. UUID-versioned media URLs make the 30-day immutable cache safe.
   Git snapshot `352f161` was uploaded as a secret-free archive, its SHA-256 was verified on the host and
-  it was extracted into `/srv/projects/sweetime`. Target preflight, image build, real `.env` secrets,
-  migrations, one-shot production bootstrap, firewall/port checks and end-to-end HTTPS smoke tests
-  remain undone.
+  it was extracted into `/srv/projects/sweetime`. Target preflight passed: Ubuntu, Docker/Compose,
+  Nginx/TLS, writable storage, 21 TiB free space and the free loopback port are suitable. UFW is inactive
+  while existing services expose ports 3000 and 9090; any firewall hardening needs a separate audited
+  change so Nton, Cockpit and SSH are not broken. Image build, real `.env` secrets, migrations, one-shot
+  production bootstrap and end-to-end HTTPS smoke tests remain undone.
 
 ## Audit Snapshot — 2026-07-12
 
