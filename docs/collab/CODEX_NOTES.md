@@ -887,3 +887,18 @@ Release build отдельно проверен на fail-closed и законо
 непубликуемый production `.env`, запускаются build/migrations/one-shot bootstrap и HTTPS smoke tests.
 После смены Android package со старого demo ID приложение установится как другое приложение, поэтому
 старые локальные preferences/cart автоматически не мигрируют.
+
+## Обновление Codex — 2026-07-15: S7 host Nginx проверен, snapshot готов
+
+Владелец применил host-Nginx конфигурацию для `lnp-corporation.duckdns.org`: `nginx -t` проходит,
+reload выполнен, HTTP возвращает 301 на HTTPS, `/ready` возвращает ожидаемый 502 до запуска Compose,
+а `127.0.0.1:8080` свободен. В конфиге присутствуют лимит 11 MiB и отдельный deny для
+`/media/temp/`. Последняя рекомендованная чистка — убрать `try_files $uri =404` из `alias`-location,
+поскольку `alias` сам возвращает 404, и использовать эталонный блок из
+`deploy/production/host-nginx.conf.example`.
+
+Перед upload создан проверенный Git snapshot `5b0d00a` (`feat(auth): add Google sign-in and production
+rollout config`). На момент коммита tests: backend 42/42, Flutter 50/50, analyze clean; реальных секретов,
+`.env`, `android/key.properties` и keystore в snapshot нет. Следующая операция — сформировать архив уже
+из финального HEAD после этой записи, передать его владельцу для интерактивного `scp` и сверить SHA-256
+на сервере до распаковки в `/srv/projects/sweetime`.

@@ -66,10 +66,11 @@ below remains authoritative; this section records the current execution order.
   `lnp-corporation.duckdns.org` to loopback `127.0.0.1:8080`; HTTP returns the expected HTTPS redirect
   and HTTPS currently returns the expected `502` because the SweetTime stack has not started. The repo's
   Compose mapping intentionally exposes container Nginx as `127.0.0.1:8080:80`, then proxies API traffic
-  to backend port 8000; it must not be replaced with a direct `8080:8000` mapping. Before traffic, add the
-  documented host-Nginx denial for `/media/temp/` so the direct media alias cannot expose temporary
-  uploads. Upload/build, real `.env` secrets, migrations, one-shot production bootstrap, firewall/port
-  checks and end-to-end HTTPS smoke tests remain undone.
+  to backend port 8000; it must not be replaced with a direct `8080:8000` mapping. Host Nginx now limits
+  uploads to 11 MiB and denies `/media/temp/`; its syntax/reload and free loopback port were verified by
+  the owner. The final media alias should omit `try_files $uri` because the `alias` itself already returns
+  404 for missing files. Upload/build, real `.env` secrets, migrations, one-shot production bootstrap,
+  firewall/port checks and end-to-end HTTPS smoke tests remain undone.
 
 ## Audit Snapshot — 2026-07-12
 
