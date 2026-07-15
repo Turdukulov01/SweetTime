@@ -1,0 +1,13 @@
+# SweetTime боевой backend (backend/api) — зависимости.
+# Установка: py -m pip install -r backend/api/requirements.txt
+fastapi
+uvicorn[standard]
+sqlalchemy
+alembic
+psycopg[binary]
+pydantic-settings
+passlib[bcrypt]
+# bcrypt пинуется < 5: passlib 1.7.4 несовместим с bcrypt 5.x
+# (detect_wrap_bug падает на строке > 72 байт). 4.0.1 — стабильно.
+bcrypt==4.0.1
+pyjwt

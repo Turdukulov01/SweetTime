@@ -62,3 +62,5 @@ admin/dist/
 **/.plugin_symlinks/
 # next-env автогенерируется
 admin/next-env.d.ts
+# Python bytecode боевого backend
+backend/**/__pycache__/

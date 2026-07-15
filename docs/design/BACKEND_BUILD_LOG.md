@@ -43,7 +43,33 @@ GET/POST/PATCH эндпоинты контракта (пока БЕЗ прове
 - [ ] S1.5 Эндпоинты контракта на Postgres: GET config/products/branches/orders/news/promotions; POST/PATCH products/branches/orders/news/promotions; PATCH order status. Формы — по DEMO_API.md (camelCase). Без auth (S2).
 - [ ] S1.6 Проверки: `alembic upgrade head` с нуля; `uvicorn api.main:app` стартует на :8000; curl GET по обеим компаниям; изоляция (нет чужих данных). Коммит `feat(api): production backend foundation on Postgres`.
 
-Статус S1: старт. Исполнитель: агент backend-api под супервизией Claude.
+**Статус S1: ✅ ПРИНЯТ 2026-07-13** (все подшаги S1.1–S1.6 выполнены). Исполнитель: агент
+backend-api (упёрся в лимит на Alembic); Alembic-миграции, фикс дефекта и приёмку доделал Claude.
+
+Дефект агента, найденный и исправленный при приёмке: в `seed_if_empty()` `flush()` стоял ПОСЛЕ
+филиалов → `ForeignKeyViolation` (у моделей нет ORM-relationship, поэтому порядок вставки FK надо
+задавать явными `flush()` по уровням: компании → филиалы → остальное). Исправлено.
+
+Доказательства (S1.6):
+- `py -m alembic -c api/alembic.ini upgrade head` с нуля → 9 таблиц: companies, admin_users,
+  customers, branches, products, orders, news, promotions, alembic_version. Ревизия `c23573f41ea6`.
+- `/health` → `{"status":"ok"}`; приложение = 24 роута.
+- Данные: sweettime 8 товаров / 3 филиала / 4 новости / 3 акции / 50 заказов; coffeego 7/2/2/2/25.
+- Изоляция: пересечение id новостей sweettime∩coffeego = 0; PATCH sweettime-товара через coffeego → 404.
+- Запись: PATCH `isBestSeller` false→true работает.
+- Стафф с bcrypt-хэшами (`$2b$12$`): owner/manager/barista@sweettime.kg, owner@coffeego.kg (пароль
+  `demo`); клиент +996 555 123 456 (1240 баллов, код SWEET-AIGERIM) — готовы под JWT в S2.
+
+### Как поднять локально (для следующей сессии / другого агента)
+```powershell
+# 1) Docker Desktop запущен, затем Postgres:
+docker start sweettime-pg     # контейнера нет? см. раздел «Среда» выше
+# 2) миграции + API (из папки backend/):
+cd C:\Users\user\flutter_project\sweettime\sweettime\backend
+py -m alembic -c api/alembic.ini upgrade head
+py -m uvicorn api.main:app --port 8010
+```
+Порты: **8010 — боевой API (`backend/api`)**, 8000 — старый demo (`backend/app_demo`), 3020 — админка.
 
 ## S2 — авторизация (следующий)
 JWT: стафф (email+пароль) и клиент (OTP-mock по телефону), access/refresh, зависимость
