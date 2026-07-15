@@ -24,6 +24,11 @@ import type {
   LocalizedText,
   NewsStory,
   NewsVisual,
+  ContentMedia,
+  ContentMediaType,
+  ContentStory,
+  StoryCollection,
+  NewsPost,
   Order,
   PaymentMethod,
   OrderStatus,
@@ -56,6 +61,10 @@ export function describeApiError(error: unknown): string {
     }
     if (error.status === 401) return "Сессия истекла — войдите заново.";
     if (error.status === 403) return "Недостаточно прав";
+    if (error.status === 409) return error.message || "Конфликт данных. Обновите страницу и повторите.";
+    if (error.status === 413) return "Файл слишком большой.";
+    if (error.status === 415) return "Формат файла не поддерживается.";
+    if (error.status === 422) return error.message || "Проверьте заполненные поля.";
     return error.message;
   }
   return error instanceof Error ? error.message : "Неизвестная ошибка";
@@ -100,6 +109,18 @@ async function toApiError(response: Response): Promise<ApiError> {
   try {
     const body = (await response.json()) as { detail?: unknown };
     if (typeof body.detail === "string") detail = body.detail;
+    if (Array.isArray(body.detail)) {
+      const messages = body.detail
+        .map((item) => {
+          if (typeof item === "string") return item;
+          if (typeof item === "object" && item !== null && "msg" in item) {
+            return String((item as { msg: unknown }).msg);
+          }
+          return "";
+        })
+        .filter(Boolean);
+      if (messages.length) detail = messages.join("; ");
+    }
   } catch {
     // тело не JSON — оставляем HTTP-код
   }
@@ -188,7 +209,9 @@ async function authorizedFetch(
 
   const send = () => {
     const headers = new Headers(init.headers);
-    if (init.body !== undefined && !headers.has("Content-Type")) {
+    const isFormData =
+      typeof FormData !== "undefined" && init.body instanceof FormData;
+    if (init.body !== undefined && !isFormData && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
     }
     const token = readStoredSession()?.accessToken;
@@ -647,6 +670,387 @@ export async function apiDeleteNews(
   newsId: string
 ): Promise<void> {
   await requestVoid(`/api/companies/${companyId}/news/${newsId}`);
+}
+
+// ---------------------------------------------------------------------------
+// V2 content management (owner / manager only)
+// ---------------------------------------------------------------------------
+
+export type ContentStoryWrite = Omit<
+  ContentStory,
+  "id" | "companyId" | "media"
+>;
+export type StoryCollectionWrite = Omit<
+  StoryCollection,
+  | "id"
+  | "companyId"
+  | "coverImageUrl"
+  | "coverThumbnailUrl"
+  | "storyCount"
+>;
+export type NewsPostWrite = Omit<NewsPost, "id" | "companyId" | "media">;
+
+interface ApiContentMedia {
+  type?: ContentMediaType | null;
+  url?: string | null;
+  thumbnailUrl?: string | null;
+}
+
+interface ApiContentStory {
+  id: string | number;
+  collectionId?: string | number | null;
+  title?: ApiLocalized | null;
+  body?: ApiLocalized | null;
+  badge?: ApiLocalized | null;
+  accentColor?: string;
+  visual?: NewsVisual;
+  isPublished?: boolean;
+  showOnHome?: boolean;
+  isPinned?: boolean;
+  sortOrder?: number;
+  publishedAt?: string;
+  expiresAt?: string | null;
+  media?: ApiContentMedia | null;
+  mediaType?: ContentMediaType | null;
+  mediaUrl?: string | null;
+  imageUrl?: string | null;
+  thumbnailUrl?: string | null;
+  ctaLabel?: ApiLocalized | null;
+  ctaRoute?: string | null;
+}
+
+interface ApiStoryCollection {
+  id: string | number;
+  name?: ApiLocalized | null;
+  description?: ApiLocalized | null;
+  coverImageUrl?: string | null;
+  coverThumbnailUrl?: string | null;
+  cover?: ApiContentMedia | null;
+  accentColor?: string;
+  visual?: NewsVisual;
+  sortOrder?: number;
+  isPublished?: boolean;
+  storyCount?: number;
+}
+
+interface ApiNewsPost {
+  id: string | number;
+  title?: ApiLocalized | null;
+  summary?: ApiLocalized | null;
+  body?: ApiLocalized | null;
+  isPublished?: boolean;
+  publishedAt?: string;
+  media?: ApiContentMedia | null;
+  mediaType?: ContentMediaType | null;
+  mediaUrl?: string | null;
+  thumbnailUrl?: string | null;
+}
+
+const emptyLocalizedText = (): LocalizedText => ({ ru: "", ky: "", en: "" });
+
+function mapLocalizedOrEmpty(value?: ApiLocalized | null): LocalizedText {
+  return value ? mapLocalized(value) : emptyLocalizedText();
+}
+
+function serializeLocalizedComplete(value: LocalizedText): Record<string, string> {
+  return {
+    ru: value.ru.trim(),
+    ky: (value.ky ?? "").trim(),
+    en: (value.en ?? "").trim()
+  };
+}
+
+function mapContentMedia(
+  media?: ApiContentMedia | null,
+  fallbackType?: ContentMediaType | null,
+  fallbackUrl?: string | null,
+  fallbackThumbnail?: string | null
+): ContentMedia {
+  const url = media?.url ?? fallbackUrl ?? null;
+  const type = media?.type ?? fallbackType ?? (url ? "image" : "none");
+  return {
+    type,
+    url,
+    thumbnailUrl: media?.thumbnailUrl ?? fallbackThumbnail ?? null
+  };
+}
+
+function contentBase(companyId: string): string {
+  return `/api/companies/${encodeURIComponent(companyId)}/admin/content`;
+}
+
+function mapContentStory(companyId: string, value: ApiContentStory): ContentStory {
+  return {
+    id: String(value.id),
+    companyId,
+    collectionId:
+      value.collectionId === undefined || value.collectionId === null
+        ? null
+        : String(value.collectionId),
+    title: mapLocalizedOrEmpty(value.title),
+    body: mapLocalizedOrEmpty(value.body),
+    badge: mapLocalizedOrEmpty(value.badge),
+    accentColor: value.accentColor ?? "#FF5C9A",
+    visual: value.visual ?? "sparkle",
+    isPublished: value.isPublished ?? false,
+    showOnHome: value.showOnHome ?? false,
+    isPinned: value.isPinned ?? false,
+    sortOrder: value.sortOrder ?? 0,
+    publishedAt: value.publishedAt ?? new Date(0).toISOString(),
+    expiresAt: value.expiresAt ?? null,
+    media: mapContentMedia(
+      value.media,
+      value.mediaType,
+      value.mediaUrl ?? value.imageUrl,
+      value.thumbnailUrl
+    ),
+    ctaLabel: value.ctaLabel ? mapLocalized(value.ctaLabel) : null,
+    ctaRoute: value.ctaRoute ?? null
+  };
+}
+
+function serializeContentStory(value: ContentStoryWrite): Record<string, unknown> {
+  return {
+    collectionId: value.collectionId,
+    title: serializeLocalizedComplete(value.title),
+    body: serializeLocalizedComplete(value.body),
+    badge: serializeLocalizedComplete(value.badge),
+    accentColor: value.accentColor,
+    visual: value.visual,
+    isPublished: value.isPublished,
+    showOnHome: value.showOnHome,
+    isPinned: value.isPinned,
+    sortOrder: value.sortOrder,
+    publishedAt: value.publishedAt,
+    expiresAt: value.expiresAt,
+    ctaLabel: value.ctaLabel
+      ? serializeLocalizedComplete(value.ctaLabel)
+      : null,
+    ctaRoute: value.ctaRoute
+  };
+}
+
+function mapStoryCollection(
+  companyId: string,
+  value: ApiStoryCollection
+): StoryCollection {
+  return {
+    id: String(value.id),
+    companyId,
+    name: mapLocalizedOrEmpty(value.name),
+    description: mapLocalizedOrEmpty(value.description),
+    coverImageUrl: value.cover?.url ?? value.coverImageUrl ?? null,
+    coverThumbnailUrl:
+      value.cover?.thumbnailUrl ?? value.coverThumbnailUrl ?? null,
+    accentColor: value.accentColor ?? "#FF5C9A",
+    visual: value.visual ?? "sparkle",
+    sortOrder: value.sortOrder ?? 0,
+    isPublished: value.isPublished ?? false,
+    storyCount: value.storyCount ?? 0
+  };
+}
+
+function serializeStoryCollection(
+  value: StoryCollectionWrite
+): Record<string, unknown> {
+  return {
+    name: serializeLocalizedComplete(value.name),
+    description: serializeLocalizedComplete(value.description),
+    accentColor: value.accentColor,
+    visual: value.visual,
+    sortOrder: value.sortOrder,
+    isPublished: value.isPublished
+  };
+}
+
+function mapNewsPost(companyId: string, value: ApiNewsPost): NewsPost {
+  return {
+    id: String(value.id),
+    companyId,
+    title: mapLocalizedOrEmpty(value.title),
+    summary: mapLocalizedOrEmpty(value.summary),
+    body: mapLocalizedOrEmpty(value.body),
+    isPublished: value.isPublished ?? false,
+    publishedAt: value.publishedAt ?? new Date(0).toISOString(),
+    media: mapContentMedia(
+      value.media,
+      value.mediaType,
+      value.mediaUrl,
+      value.thumbnailUrl
+    )
+  };
+}
+
+function serializeNewsPost(value: NewsPostWrite): Record<string, unknown> {
+  return {
+    title: serializeLocalizedComplete(value.title),
+    summary: serializeLocalizedComplete(value.summary),
+    body: serializeLocalizedComplete(value.body),
+    isPublished: value.isPublished,
+    publishedAt: value.publishedAt
+  };
+}
+
+export async function apiFetchContentStories(companyId: string): Promise<ContentStory[]> {
+  const values = await request<ApiContentStory[]>(`${contentBase(companyId)}/stories`);
+  return values.map((value) => mapContentStory(companyId, value));
+}
+
+export async function apiCreateContentStory(
+  companyId: string,
+  value: ContentStoryWrite
+): Promise<ContentStory> {
+  const created = await request<ApiContentStory>(`${contentBase(companyId)}/stories`, {
+    method: "POST",
+    body: JSON.stringify(serializeContentStory(value))
+  });
+  return mapContentStory(companyId, created);
+}
+
+export async function apiPatchContentStory(
+  companyId: string,
+  storyId: string,
+  value: ContentStoryWrite
+): Promise<ContentStory> {
+  const updated = await request<ApiContentStory>(
+    `${contentBase(companyId)}/stories/${encodeURIComponent(storyId)}`,
+    { method: "PATCH", body: JSON.stringify(serializeContentStory(value)) }
+  );
+  return mapContentStory(companyId, updated);
+}
+
+export async function apiDeleteContentStory(companyId: string, storyId: string): Promise<void> {
+  await requestVoid(`${contentBase(companyId)}/stories/${encodeURIComponent(storyId)}`);
+}
+
+export async function apiUploadStoryMedia(
+  companyId: string,
+  storyId: string,
+  file: File
+): Promise<ContentStory> {
+  const form = new FormData();
+  form.set("file", file, file.name);
+  const value = await request<ApiContentStory>(
+    `${contentBase(companyId)}/stories/${encodeURIComponent(storyId)}/media`,
+    { method: "PUT", body: form }
+  );
+  return mapContentStory(companyId, value);
+}
+
+export async function apiDeleteStoryMedia(companyId: string, storyId: string): Promise<ContentStory> {
+  const value = await request<ApiContentStory>(
+    `${contentBase(companyId)}/stories/${encodeURIComponent(storyId)}/media`,
+    { method: "DELETE" }
+  );
+  return mapContentStory(companyId, value);
+}
+
+export async function apiFetchStoryCollections(companyId: string): Promise<StoryCollection[]> {
+  const values = await request<ApiStoryCollection[]>(`${contentBase(companyId)}/story-collections`);
+  return values.map((value) => mapStoryCollection(companyId, value));
+}
+
+export async function apiCreateStoryCollection(
+  companyId: string,
+  value: StoryCollectionWrite
+): Promise<StoryCollection> {
+  const created = await request<ApiStoryCollection>(`${contentBase(companyId)}/story-collections`, {
+    method: "POST",
+    body: JSON.stringify(serializeStoryCollection(value))
+  });
+  return mapStoryCollection(companyId, created);
+}
+
+export async function apiPatchStoryCollection(
+  companyId: string,
+  collectionId: string,
+  value: StoryCollectionWrite
+): Promise<StoryCollection> {
+  const updated = await request<ApiStoryCollection>(
+    `${contentBase(companyId)}/story-collections/${encodeURIComponent(collectionId)}`,
+    { method: "PATCH", body: JSON.stringify(serializeStoryCollection(value)) }
+  );
+  return mapStoryCollection(companyId, updated);
+}
+
+export async function apiDeleteStoryCollection(companyId: string, collectionId: string): Promise<void> {
+  await requestVoid(`${contentBase(companyId)}/story-collections/${encodeURIComponent(collectionId)}`);
+}
+
+export async function apiUploadCollectionCover(
+  companyId: string,
+  collectionId: string,
+  file: File
+): Promise<StoryCollection> {
+  const form = new FormData();
+  form.set("file", file, file.name);
+  const value = await request<ApiStoryCollection>(
+    `${contentBase(companyId)}/story-collections/${encodeURIComponent(collectionId)}/cover`,
+    { method: "PUT", body: form }
+  );
+  return mapStoryCollection(companyId, value);
+}
+
+export async function apiDeleteCollectionCover(
+  companyId: string,
+  collectionId: string
+): Promise<StoryCollection> {
+  const value = await request<ApiStoryCollection>(
+    `${contentBase(companyId)}/story-collections/${encodeURIComponent(collectionId)}/cover`,
+    { method: "DELETE" }
+  );
+  return mapStoryCollection(companyId, value);
+}
+
+export async function apiFetchNewsPosts(companyId: string): Promise<NewsPost[]> {
+  const values = await request<ApiNewsPost[]>(`${contentBase(companyId)}/news-posts`);
+  return values.map((value) => mapNewsPost(companyId, value));
+}
+
+export async function apiCreateNewsPost(companyId: string, value: NewsPostWrite): Promise<NewsPost> {
+  const created = await request<ApiNewsPost>(`${contentBase(companyId)}/news-posts`, {
+    method: "POST",
+    body: JSON.stringify(serializeNewsPost(value))
+  });
+  return mapNewsPost(companyId, created);
+}
+
+export async function apiPatchNewsPost(
+  companyId: string,
+  postId: string,
+  value: NewsPostWrite
+): Promise<NewsPost> {
+  const updated = await request<ApiNewsPost>(
+    `${contentBase(companyId)}/news-posts/${encodeURIComponent(postId)}`,
+    { method: "PATCH", body: JSON.stringify(serializeNewsPost(value)) }
+  );
+  return mapNewsPost(companyId, updated);
+}
+
+export async function apiDeleteNewsPost(companyId: string, postId: string): Promise<void> {
+  await requestVoid(`${contentBase(companyId)}/news-posts/${encodeURIComponent(postId)}`);
+}
+
+export async function apiUploadNewsPostMedia(
+  companyId: string,
+  postId: string,
+  file: File
+): Promise<NewsPost> {
+  const form = new FormData();
+  form.set("file", file, file.name);
+  const value = await request<ApiNewsPost>(
+    `${contentBase(companyId)}/news-posts/${encodeURIComponent(postId)}/media`,
+    { method: "PUT", body: form }
+  );
+  return mapNewsPost(companyId, value);
+}
+
+export async function apiDeleteNewsPostMedia(companyId: string, postId: string): Promise<NewsPost> {
+  const value = await request<ApiNewsPost>(
+    `${contentBase(companyId)}/news-posts/${encodeURIComponent(postId)}/media`,
+    { method: "DELETE" }
+  );
+  return mapNewsPost(companyId, value);
 }
 
 // ---------------------------------------------------------------------------

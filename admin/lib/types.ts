@@ -124,6 +124,62 @@ export interface NewsStory {
   ctaRoute: string | null;
 }
 
+// V2 content contract. The server owns every media URL; the admin only sends
+// files to the dedicated multipart endpoints and never persists arbitrary URLs.
+export type ContentMediaType = "none" | "image" | "video";
+
+export interface ContentMedia {
+  type: ContentMediaType;
+  url: string | null;
+  thumbnailUrl?: string | null;
+}
+
+export interface ContentStory {
+  id: string;
+  companyId: string;
+  collectionId: string | null;
+  title: LocalizedText;
+  body: LocalizedText;
+  badge: LocalizedText;
+  accentColor: string;
+  visual: NewsVisual;
+  isPublished: boolean;
+  showOnHome: boolean;
+  isPinned: boolean;
+  sortOrder: number;
+  publishedAt: string;
+  expiresAt: string | null;
+  media: ContentMedia;
+  ctaLabel: LocalizedText | null;
+  ctaRoute: string | null;
+}
+
+export interface StoryCollection {
+  id: string;
+  companyId: string;
+  name: LocalizedText;
+  description: LocalizedText;
+  coverImageUrl: string | null;
+  coverThumbnailUrl?: string | null;
+  accentColor: string;
+  visual: NewsVisual;
+  sortOrder: number;
+  isPublished: boolean;
+  /** Summary count; the collection list never embeds all 40+ stories. */
+  storyCount: number;
+}
+
+export interface NewsPost {
+  id: string;
+  companyId: string;
+  title: LocalizedText;
+  summary: LocalizedText;
+  body: LocalizedText;
+  isPublished: boolean;
+  publishedAt: string;
+  media: ContentMedia;
+}
+
 /** Сезонная акция витрины приложения */
 export interface Promotion {
   id: string;
