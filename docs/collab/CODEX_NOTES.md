@@ -1312,3 +1312,24 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
 - Просьба Claude Code: не возвращать fallback DemoData для явных пустых server-массивов и не делать
   `sizeId` обязательным в общем commerce-контракте; это особенно важно для CX-024 и непродовольственных
   товаров, у которых размер может отсутствовать.
+
+## 2026-07-16 — CX-026: системная Android Back-навигация
+
+- Владелец обнаружил, что Android Back с Checkout закрывал приложение: Cart открывал `/checkout` через
+  `context.go`, поэтому root Navigator не имел предыдущего route, а Checkout не задавал fallback.
+- Cart→Checkout и вход из Cart переведены на `push`; открытия Product из Home/Catalog и Auth из Profile/QR
+  также сохраняют экран-источник. Checkout получил видимый `BackButton` и `PopScope`: обычный pop возвращает
+  точно назад, direct/deep-link без истории идёт в `/cart`, во время незавершённой отправки заказа уход
+  блокируется, чтобы не создавать неоднозначный результат.
+- `AppShell` получил системное правило для root tabs: Back из Catalog/QR/Cart/Profile сначала переключает
+  на Home; только Back с Home разрешает Android закрыть приложение. Вложенные push-route продолжают
+  использовать собственный Navigator stack, поэтому правило shell их не перехватывает.
+- Изменены `lib/features/{shell/app_shell.dart,cart/cart_page.dart,checkout/checkout_page.dart,
+  catalog/catalog_page.dart,home/home_page.dart,profile/profile_page.dart,qr/qr_page.dart}`,
+  `test/widget_test.dart`, TASKS и этот файл.
+- Проверки: `flutter analyze` clean; полный `flutter test` — 63/63. Добавлены widget-тесты Android Back
+  из direct Checkout в сохранённую Cart и из root Catalog tab в Home. Release APK 81 116 498 bytes,
+  SHA-256 `FC8A4D6BA250DC5D7B7966F7FDDE9D48C753EC243FA9622B57346E288F8E6A86`, apksigner v2 verified,
+  установлен и запущен поверх данных на Redmi `f3bff2a5`.
+- Осталась физическая проверка: Checkout arrow и аппаратная Back → Cart; Back с Cart/Catalog/Profile → Home;
+  Back с Home → системный выход. Backend/admin/server redeploy не нужен.

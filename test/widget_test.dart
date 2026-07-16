@@ -1344,6 +1344,49 @@ void main() {
     expect(find.textContaining('Пожелания бариста'), findsNothing);
   });
 
+  testWidgets('Android Back from checkout returns to the preserved cart', (
+    WidgetTester tester,
+  ) async {
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+    )..seedDemo(auth: true, cart: true);
+    await tester.pumpWidget(_testAppWithController(controller));
+    await tester.pump(const Duration(milliseconds: 900));
+
+    // A direct route has no Navigator history; Checkout must still fall back
+    // to Cart instead of allowing Android to close the application.
+    appRouter.go('/checkout');
+    await tester.pumpAndSettle();
+    expect(find.text('Оформление'), findsOneWidget);
+    expect(find.byType(BackButton), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Итого'), findsOneWidget);
+    expect(controller.state.cart, isNotEmpty);
+  });
+
+  testWidgets('Android Back from a root tab returns to Home first', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(_testApp());
+    await tester.pump(const Duration(milliseconds: 900));
+    await _openNavigationTab(tester, 'Каталог');
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      1,
+    );
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      0,
+    );
+  });
+
   testWidgets('Google sign-in collects an unverified contact before checkout', (
     WidgetTester tester,
   ) async {

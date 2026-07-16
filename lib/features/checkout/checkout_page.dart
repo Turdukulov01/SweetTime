@@ -43,6 +43,15 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     super.dispose();
   }
 
+  void _leaveCheckout() {
+    if (_submitting) return;
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/cart');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(appStateProvider);
@@ -56,225 +65,236 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         unavailable.isEmpty &&
         (!needsTable || _tableController.text.trim().isNotEmpty);
 
-    return Scaffold(
-      appBar: AppBar(title: Text(strings.checkoutTitle)),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        children: [
-          _CardSection(
-            icon: Icons.storefront_outlined,
-            title: strings.branch,
-            child: Column(
-              children: [
-                for (final branch in state.branches)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: SelectableTile(
-                      selected: branch.id == state.selectedBranch.id,
-                      onTap: () => ref
-                          .read(appStateProvider.notifier)
-                          .selectBranch(branch),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            strings.branchName(branch),
-                            style: theme.textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${strings.branchAddress(branch)} · ${branch.hours}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                if (unavailable.isNotEmpty)
-                  _UnavailableWarning(items: unavailable),
-              ],
-            ),
-          ),
-          _CardSection(
-            icon: Icons.schedule_outlined,
-            title: strings.fulfillmentMethod,
-            child: Column(
-              children: [
-                for (final type in OrderType.values)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: SelectableTile(
-                      selected: _type == type,
-                      onTap: () => setState(() => _type = type),
-                      child: Row(
-                        children: [
-                          Icon(type.icon, color: theme.colorScheme.primary),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  strings.orderTypeLabel(type),
-                                  style: theme.textTheme.titleSmall,
-                                ),
-                                Text(
-                                  strings.orderTypeHint(type),
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                if (_type == OrderType.scheduled) ...[
-                  const SizedBox(height: 4),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.access_time),
-                    title: Text(strings.prepareBy),
-                    trailing: TextButton(
-                      onPressed: () async {
-                        final picked = await showTimePicker(
-                          context: context,
-                          initialTime: _time,
-                        );
-                        if (picked != null) setState(() => _time = picked);
-                      },
-                      child: Text(_time.format(context)),
-                    ),
-                  ),
-                ],
-                if (_type == OrderType.qrCafe) ...[
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _tableController,
-                    keyboardType: TextInputType.number,
-                    onChanged: (_) => setState(() {}),
-                    decoration: InputDecoration(
-                      labelText: strings.tableNumber,
-                      hintText: strings.tableNumberExample,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    strings.tableQrAutofillDemo,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          _CardSection(
-            icon: Icons.credit_card_outlined,
-            title: strings.payment,
-            child: Column(
-              children: [
-                for (final method in PaymentMethod.values)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: SelectableTile(
-                      selected: _payment == method,
-                      onTap: () => setState(() => _payment = method),
-                      child: Row(
-                        children: [
-                          Icon(method.icon, color: theme.colorScheme.primary),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  strings.paymentMethodLabel(method),
-                                  style: theme.textTheme.titleSmall,
-                                ),
-                                Text(
-                                  strings.paymentMethodHint(method),
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                if (_payment == PaymentMethod.qrDemo)
-                  Container(
-                    margin: const EdgeInsets.only(top: 8),
-                    padding: const EdgeInsets.all(20),
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.secondaryContainer,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Column(
-                      children: [
-                        Icon(
-                          Icons.qr_code_2,
-                          size: 96,
-                          color: theme.colorScheme.onSurface,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          strings.paymentQrDemoNotice,
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          _CardSection(
-            icon: Icons.chat_bubble_outline,
-            title: strings.comment,
-            child: TextField(
-              controller: _commentController,
-              maxLines: 3,
-              decoration: InputDecoration(hintText: strings.baristaCommentHint),
-            ),
-          ),
-        ],
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return PopScope<void>(
+      canPop: !_submitting && context.canPop(),
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _leaveCheckout();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: BackButton(onPressed: _submitting ? null : _leaveCheckout),
+          title: Text(strings.checkoutTitle),
+        ),
+        body: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          children: [
+            _CardSection(
+              icon: Icons.storefront_outlined,
+              title: strings.branch,
+              child: Column(
                 children: [
-                  Text(strings.amountDue, style: theme.textTheme.titleMedium),
-                  Text(
-                    formatSom(state.total, strings.language),
-                    style: theme.textTheme.titleLarge,
-                  ),
+                  for (final branch in state.branches)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: SelectableTile(
+                        selected: branch.id == state.selectedBranch.id,
+                        onTap: () => ref
+                            .read(appStateProvider.notifier)
+                            .selectBranch(branch),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              strings.branchName(branch),
+                              style: theme.textTheme.titleSmall,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${strings.branchAddress(branch)} · ${branch.hours}',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (unavailable.isNotEmpty)
+                    _UnavailableWarning(items: unavailable),
                 ],
               ),
-              const SizedBox(height: 8),
-              FilledButton(
-                onPressed: canPlace ? () => _placeOrder(state) : null,
-                child: _submitting
-                    ? const SizedBox.square(
-                        dimension: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(strings.payAndPlaceOrder),
+            ),
+            _CardSection(
+              icon: Icons.schedule_outlined,
+              title: strings.fulfillmentMethod,
+              child: Column(
+                children: [
+                  for (final type in OrderType.values)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: SelectableTile(
+                        selected: _type == type,
+                        onTap: () => setState(() => _type = type),
+                        child: Row(
+                          children: [
+                            Icon(type.icon, color: theme.colorScheme.primary),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    strings.orderTypeLabel(type),
+                                    style: theme.textTheme.titleSmall,
+                                  ),
+                                  Text(
+                                    strings.orderTypeHint(type),
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (_type == OrderType.scheduled) ...[
+                    const SizedBox(height: 4),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.access_time),
+                      title: Text(strings.prepareBy),
+                      trailing: TextButton(
+                        onPressed: () async {
+                          final picked = await showTimePicker(
+                            context: context,
+                            initialTime: _time,
+                          );
+                          if (picked != null) setState(() => _time = picked);
+                        },
+                        child: Text(_time.format(context)),
+                      ),
+                    ),
+                  ],
+                  if (_type == OrderType.qrCafe) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _tableController,
+                      keyboardType: TextInputType.number,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        labelText: strings.tableNumber,
+                        hintText: strings.tableNumberExample,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      strings.tableQrAutofillDemo,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ],
               ),
-            ],
+            ),
+            _CardSection(
+              icon: Icons.credit_card_outlined,
+              title: strings.payment,
+              child: Column(
+                children: [
+                  for (final method in PaymentMethod.values)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: SelectableTile(
+                        selected: _payment == method,
+                        onTap: () => setState(() => _payment = method),
+                        child: Row(
+                          children: [
+                            Icon(method.icon, color: theme.colorScheme.primary),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    strings.paymentMethodLabel(method),
+                                    style: theme.textTheme.titleSmall,
+                                  ),
+                                  Text(
+                                    strings.paymentMethodHint(method),
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (_payment == PaymentMethod.qrDemo)
+                    Container(
+                      margin: const EdgeInsets.only(top: 8),
+                      padding: const EdgeInsets.all(20),
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.secondaryContainer,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.qr_code_2,
+                            size: 96,
+                            color: theme.colorScheme.onSurface,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            strings.paymentQrDemoNotice,
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            _CardSection(
+              icon: Icons.chat_bubble_outline,
+              title: strings.comment,
+              child: TextField(
+                controller: _commentController,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  hintText: strings.baristaCommentHint,
+                ),
+              ),
+            ),
+          ],
+        ),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(strings.amountDue, style: theme.textTheme.titleMedium),
+                    Text(
+                      formatSom(state.total, strings.language),
+                      style: theme.textTheme.titleLarge,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                FilledButton(
+                  onPressed: canPlace ? () => _placeOrder(state) : null,
+                  child: _submitting
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(strings.payAndPlaceOrder),
+                ),
+              ],
+            ),
           ),
         ),
       ),

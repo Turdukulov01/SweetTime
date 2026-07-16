@@ -372,6 +372,11 @@ below remains authoritative; this section records the current execution order.
   with DemoData sizes, then sent a forbidden `sizeId`; production correctly rejected the order with 400.
   No-size products now use nullable `sizeId` in cart persistence/history/order DTOs, stale local drafts are
   normalized, and business-validation failures no longer claim that the internet is unavailable.
+- [x] **[fixed and installed 2026-07-16]** Android Back follows in-app history on nested routes.
+  Checkout has an explicit Back action and always falls back to the preserved Cart when opened without
+  Navigator history; product/auth entry points push onto the source stack. Back from Catalog/QR/Cart/Profile
+  root tabs returns to Home first, while Back from Home may exit normally. Order submission blocks accidental
+  navigation until its result is known.
 - [ ] Add end-to-end contract tests for Flutter -> API -> admin order processing and status refresh.
 - [ ] **White-label platform hardening.** Keep one tenant-aware backend and one configurable admin
   runtime for all companies; map approved custom domains to `company_id` and require Host, URL scope

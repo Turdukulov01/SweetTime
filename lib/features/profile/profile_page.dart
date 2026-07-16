@@ -40,7 +40,7 @@ class ProfilePage extends ConsumerWidget {
           title: strings.guestProfileTitle,
           message: strings.profileGuestMessage,
           action: FilledButton(
-            onPressed: () => context.go('/auth'),
+            onPressed: () => context.push('/auth'),
             child: Text(strings.login),
           ),
         ),

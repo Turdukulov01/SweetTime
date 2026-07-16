@@ -122,10 +122,10 @@ class CartPage extends ConsumerWidget {
                 controller.requestAuthentication(
                   AuthReturnDestination.checkout,
                 );
-                context.go(AuthReturnDestination.checkout.authLocation);
+                context.push(AuthReturnDestination.checkout.authLocation);
                 return;
               }
-              context.go(AuthReturnDestination.checkout.location);
+              context.push(AuthReturnDestination.checkout.location);
             },
             child: Text(
               strings.checkoutWithTotal(

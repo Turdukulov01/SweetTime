@@ -32,7 +32,7 @@ class QrPage extends ConsumerWidget {
           title: strings.qrGuestTitle,
           message: strings.qrGuestMessage,
           action: FilledButton(
-            onPressed: () => context.go('/auth'),
+            onPressed: () => context.push('/auth'),
             child: Text(strings.login),
           ),
         ),

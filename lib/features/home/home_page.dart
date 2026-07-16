@@ -571,7 +571,7 @@ class _ProductGrid extends StatelessWidget {
             return ProductCard(
               key: ValueKey(product.id),
               product: product,
-              onTap: () => context.go('/product/${product.id}'),
+              onTap: () => context.push('/product/${product.id}'),
               onAdd: () async {
                 final added = await controller.quickAdd(product);
                 if (!context.mounted || !added) return;
