@@ -423,6 +423,7 @@ class ApiClient {
   final String companyId;
 
   static const Duration _timeout = Duration(seconds: 2);
+  static const Duration _orderTimeout = Duration(seconds: 10);
   static const Duration _googleAuthTimeout = Duration(seconds: 15);
   static const Duration _uploadTimeout = Duration(seconds: 30);
 
@@ -1098,27 +1099,26 @@ class ApiClient {
     'Authorization': 'Bearer $accessToken',
   };
 
-  /// `POST /orders` — заказ из приложения. Требует токен клиента: имя заказчика
-  /// сервер берёт из токена, а не из тела. null = офлайн/ошибка:
-  /// вызывающий код оформляет заказ локально, как раньше.
-  Future<CreatedOrder?> createOrder({
+  /// `POST /orders` — заказ из приложения. Успех означает, что PostgreSQL уже
+  /// подтвердил commit. 401/403 разрешают один refresh токена на уровне state;
+  /// остальные ошибки не должны превращаться в локальный «принятый» заказ.
+  Future<ApiResult<CreatedOrder>> createOrder(
+    String accessToken, {
+    required String clientRequestId,
     required String branchId,
     required String type, // pickup | scheduled | qr
     required String readyTime,
     required List<Map<String, Object?>> items,
     required String paymentMethod,
     required int pointsUsed,
-    String? accessToken,
   }) async {
     try {
       final response = await http
           .post(
             _uri('/orders'),
-            headers: {
-              ..._jsonHeader,
-              if (accessToken != null) ..._bearer(accessToken),
-            },
+            headers: {..._jsonHeader, ..._bearer(accessToken)},
             body: jsonEncode({
+              'clientRequestId': clientRequestId,
               'branchId': branchId,
               'type': type,
               'readyTime': readyTime,
@@ -1127,18 +1127,27 @@ class ApiClient {
               'pointsUsed': pointsUsed,
             }),
           )
-          .timeout(_timeout);
-      if (response.statusCode < 200 || response.statusCode >= 300) return null;
+          .timeout(_orderTimeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<CreatedOrder>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<CreatedOrder>.unavailable();
+      }
       final json =
           jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
       final number = json['number'];
-      if (number == null) return null;
-      return CreatedOrder(
-        number: number.toString(),
-        pointsEarned: (json['pointsEarned'] as num?)?.toInt() ?? 0,
+      if (number == null) {
+        return const ApiResult<CreatedOrder>.unavailable();
+      }
+      return ApiResult<CreatedOrder>.ok(
+        CreatedOrder(
+          number: number.toString(),
+          pointsEarned: (json['pointsEarned'] as num?)?.toInt() ?? 0,
+        ),
       );
     } catch (_) {
-      return null;
+      return const ApiResult<CreatedOrder>.unavailable();
     }
   }
 

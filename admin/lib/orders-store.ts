@@ -3,8 +3,8 @@
 // Очередь заказов компании.
 //
 // Источник — ТОЛЬКО боевой API: GET /api/companies/{cid}/orders требует
-// Bearer-токен стаффа (его подставляет lib/api). Инициализация + поллинг раз в
-// 5 секунд. setStatus шлёт PATCH .../orders/{id}/status; при ошибке (409 —
+// Bearer-токен стаффа (его подставляет lib/api). Инициализация + последовательный
+// поллинг раз в 3 секунды. setStatus шлёт PATCH .../orders/{id}/status; при ошибке (409 —
 // недопустимый переход, 403 — недостаточно прав, сеть) статус откатывается и
 // показывается тост. Мок-подмены нет: если API недоступен — пустая очередь и
 // честное сообщение об ошибке.
@@ -31,7 +31,8 @@ import {
 } from "@/lib/api";
 import type { Order, OrderStatus } from "@/lib/types";
 
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 3000;
+const HIDDEN_POLL_INTERVAL_MS = 15000;
 
 interface OrdersContextValue {
   orders: Order[];
@@ -66,14 +67,35 @@ export function OrdersProvider({
     errorTimerRef.current = setTimeout(() => setErrorMessage(null), 4000);
   }, []);
 
-  // Инициализация из API + поллинг каждые 5 секунд
+  // Инициализация + последовательный polling: следующий GET начинается только
+  // после завершения предыдущего. Focus/online/visible запускают сверку сразу.
   useEffect(() => {
     let cancelled = false;
     let loadedOnce = false;
+    let inFlight = false;
+    let rerunRequested = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     setLoading(true);
     setLoadFailed(false);
 
+    const schedule = (delay?: number) => {
+      if (cancelled) return;
+      if (timer) clearTimeout(timer);
+      const interval =
+        delay ??
+        (document.visibilityState === "visible"
+          ? POLL_INTERVAL_MS
+          : HIDDEN_POLL_INTERVAL_MS);
+      timer = setTimeout(() => void load(), interval);
+    };
+
     const load = async () => {
+      if (cancelled) return;
+      if (inFlight) {
+        rerunRequested = true;
+        return;
+      }
+      inFlight = true;
       try {
         const fresh = await apiFetchOrders(companyId);
         if (cancelled) return;
@@ -86,20 +108,46 @@ export function OrdersProvider({
         if (!loadedOnce) {
           setLoadFailed(true);
           setErrorMessage(describeApiError(error));
+        } else {
+          showError(
+            `Не удалось обновить очередь. Показываем последние данные: ${describeApiError(error)}`
+          );
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        inFlight = false;
+        if (!cancelled) {
+          setLoading(false);
+          if (rerunRequested) {
+            rerunRequested = false;
+            schedule(0);
+          } else {
+            schedule();
+          }
+        }
       }
     };
 
+    const refreshNow = () => {
+      if (timer) clearTimeout(timer);
+      void load();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") refreshNow();
+    };
+
     void load();
-    const timer = setInterval(() => void load(), POLL_INTERVAL_MS);
+    window.addEventListener("focus", refreshNow);
+    window.addEventListener("online", refreshNow);
+    document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("focus", refreshNow);
+      window.removeEventListener("online", refreshNow);
+      document.removeEventListener("visibilitychange", handleVisibility);
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
     };
-  }, [companyId]);
+  }, [companyId, showError]);
 
   const setStatus = useCallback(
     (orderId: string, status: OrderStatus) => {

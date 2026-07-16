@@ -266,6 +266,7 @@ class OrderOut(BaseModel):
     pointsUsed: int
     pointsEarned: int
     createdAt: str
+    clientRequestId: str | None = None
 
 
 class OrderCreate(BaseModel):
@@ -276,6 +277,14 @@ class OrderCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # Optional only for the already-installed pre-idempotency APK. New clients
+    # always send it; after the pilot rollout this compatibility can be removed.
+    clientRequestId: str | None = Field(
+        default=None,
+        min_length=16,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
     branchId: str
     type: OrderType
     readyTime: str | None = None

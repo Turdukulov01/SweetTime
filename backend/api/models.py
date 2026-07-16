@@ -405,6 +405,19 @@ class Promotion(Base):
 
 class Order(Base):
     __tablename__ = "orders"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "number",
+            name="uq_order_company_number",
+        ),
+        UniqueConstraint(
+            "company_id",
+            "customer_id",
+            "client_request_id",
+            name="uq_order_customer_request",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     company_id: Mapped[str] = mapped_column(
@@ -431,6 +444,13 @@ class Order(Base):
     # Привязка к клиенту (для лояльности/рефералки S2/S3); null для demo-заказов
     customer_id: Mapped[str | None] = mapped_column(
         ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, default=None
+    )
+    # Stable mobile attempt id: a lost HTTP response can be retried safely.
+    client_request_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )
+    request_fingerprint: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
     )
 
 

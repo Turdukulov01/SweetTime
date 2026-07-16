@@ -1,12 +1,16 @@
 # Заметки Codex
 
-Обновлено: 2026-07-15. Владелец файла — Codex; Claude Code читает, но не редактирует.
+Обновлено: 2026-07-16. Владелец файла — Codex; Claude Code читает, но не редактирует.
 
 Правила обмена: `docs/collab/README.md`. Канонический backlog и статус приёмки:
 `docs/TASKS.md`.
 
 ## Текущий статус и активные зоны
 
+- По свежему дефекту оформления заказов реализован CX-022: Flutter больше не подтверждает заказ
+  локально до commit API; backend получил идемпотентность и безопасную нумерацию; admin сам
+  сверяет очередь раз в три секунды. Локальные тесты и production-сборки зелёные. Нужны rollout
+  миграции `a842d9c13f70`, новая APK и физический E2E.
 - Stories/collections/news feed V2 полностью реализованы локально в `backend/api`, `admin`, `lib` и
   `deploy/production`; все автоматические и disposable PostgreSQL+HTTP проверки зелёные. Текущая задача —
   production rollout и физическая Android-приёмка, см. CX-019 в конце файла и `docs/TASKS.md`.
@@ -1168,3 +1172,43 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
 - Осталось: выкатить backend/admin на production (миграция БД не нужна), затем проверить `/ready`=200,
   legacy `/api/companies/sweettime/news`=200, вход owner и отсутствие блокирующего экрана. До rollout
   текущий сервер продолжает работать на прежнем коде и может воспроизвести именно этот 500.
+
+## 2026-07-16 — CX-022: серверно подтверждённый заказ и автоматическая очередь admin
+
+- Аудит подтвердил первопричину: `checkout_page.dart` сначала вызывал локальный `checkout()`, который
+  очищал корзину, начислял локальные баллы и показывал фиктивный успех. Затем POST выполнялся только
+  при устаревающем `apiConnected`, имел двухсекундный timeout и превращал любой отказ в `null`.
+  Поэтому пользователь видел принятый заказ, которого не существовало в PostgreSQL и admin.
+- Flutter переведён на server-first. Новый `clientRequestId` повторно используется при ручном retry
+  одного checkout; запрос получает десять секунд и проходит через общий refresh-token путь. Корзина,
+  бонусный переключатель и локальные данные меняются только после успешного ответа API; при ошибке
+  показывается честное сообщение, а корзина остаётся. Локальный метод фиктивного checkout удалён.
+- Backend хранит `client_request_id` и SHA-256 fingerprint тела, блокирует Company/Customer на время
+  принятия решения, безопасно выдаёт номер заказа и защищён уникальными ограничениями
+  `(company_id, number)` и `(company_id, customer_id, client_request_id)`. Повтор того же запроса
+  возвращает исходный заказ, повтор ID с другим телом даёт 409. Внутренний UUID отделён от номера,
+  новый заказ создаётся со статусом `new`. Миграция — `a842d9c13f70`.
+- Admin заменил пересекающийся пятисекундный interval на последовательную сверку: 3 секунды для
+  видимой вкладки, 15 секунд в фоне, немедленно после focus/online/visibility. После первой успешной
+  загрузки сбой не очищает очередь: остаются последние данные и показывается предупреждение.
+- Изменены `backend/api/{main.py,models.py,schemas.py,serializers.py}`, миграция и tests;
+  `lib/core/api_client.dart`, `lib/shared/app_state.dart`, checkout/localization/widget tests;
+  `admin/lib/orders-store.ts`, `docs/TASKS.md` и этот файл.
+- Проверки: backend `56 passed`; Flutter analyze clean и `60 passed`; admin typecheck и `6 passed`;
+  compileall/diff-check clean. Миграция от пустого PostgreSQL прошла до `a842d9c13f70` и создала оба
+  ограничения. Изолированные production Docker images backend/admin успешно собраны. Подписанная
+  production APK собрана и проверена apksigner: `build/app/outputs/flutter-apk/app-release.apk` (SHA-256
+  `cf7a315b908b5373a393ad6bbdfc679693daef899450a4fd91f8a8299196365f`).
+- Осталось: перед миграцией production проверить отсутствие старых дублей номера, сделать backup,
+  выкатить backend/admin, выполнить Alembic, установить новую release APK и подтвердить реальный
+  Flutter→API→PostgreSQL→admin заказ за 0–3 секунды. Старый установленный APK всё ещё содержит старую
+  локальную логику, поэтому один серверный rollout не завершает исправление.
+- Риски/следующие задачи: текущие demo payment methods не являются реальной оплатой, а backend пока
+  только рассчитывает `pointsUsed/pointsEarned`, не проводит полноценный неизменяемый loyalty ledger.
+  До банка нужны отдельные Order/PaymentAttempt/PaymentEvent/OutboxEvent, подписанные идемпотентные
+  webhooks и worker. PostgreSQL остаётся источником истины; Redis Pub/Sub нельзя использовать как
+  единственное долговечное хранилище. Для субсекундного admin UX позже добавить authenticated SSE,
+  сохранив периодическую GET-сверку как восстановление после разрыва.
+- Просьба Claude Code: не возвращать local-first `checkout()` и не считать `apiConnected` разрешением
+  принять заказ. При будущей оплате расширять схему отдельными payment/outbox сущностями, не смешивать
+  банковский статус с lifecycle приготовления заказа.

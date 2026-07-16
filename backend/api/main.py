@@ -23,6 +23,8 @@ company_id всегда берётся из токена и сверяется �
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from hashlib import sha256
+import json
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Response
@@ -492,6 +494,16 @@ def _next_order_number(db: Session, company: Company) -> tuple[str, int]:
     return f"{company.order_prefix}-{seq}", seq
 
 
+def _order_request_fingerprint(body: schemas.OrderCreate) -> str:
+    canonical = json.dumps(
+        body.model_dump(mode="json"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _display_text(value: dict | str) -> str:
     if isinstance(value, str):
         return value
@@ -601,32 +613,70 @@ def create_order(
     customer: Customer = Depends(get_current_customer),
     db: Session = Depends(get_db),
 ) -> schemas.OrderOut:
+    # Serialize numbering and idempotency decisions per company. PostgreSQL
+    # keeps the lock until commit; no external broker is needed for this.
+    locked_company = db.scalar(
+        select(Company).where(Company.id == company.id).with_for_update()
+    )
+    locked_customer = db.scalar(
+        select(Customer)
+        .where(
+            Customer.id == customer.id,
+            Customer.company_id == company.id,
+        )
+        .with_for_update()
+    )
+    if locked_company is None or locked_customer is None:
+        raise HTTPException(status_code=401, detail="Customer not found")
+
+    request_fingerprint = _order_request_fingerprint(body)
+    existing = (
+        db.scalar(
+            select(Order).where(
+                Order.company_id == locked_company.id,
+                Order.customer_id == locked_customer.id,
+                Order.client_request_id == body.clientRequestId,
+            )
+        )
+        if body.clientRequestId is not None
+        else None
+    )
+    if existing is not None:
+        if existing.request_fingerprint != request_fingerprint:
+            raise HTTPException(
+                status_code=409,
+                detail="clientRequestId was already used for another order",
+            )
+        return _order_out(existing)
+
     branch = db.get(Branch, body.branchId)
-    if branch is None or branch.company_id != company.id:
+    if branch is None or branch.company_id != locked_company.id:
         raise HTTPException(status_code=404, detail="Branch not found")
 
-    stored_items, subtotal = _build_order_items_v2(body, company, branch, db)
+    stored_items, subtotal = _build_order_items_v2(
+        body, locked_company, branch, db
+    )
     max_points = min(
-        customer.points,
-        int(subtotal * company.loyalty["maxSpendShare"]),
+        locked_customer.points,
+        int(subtotal * locked_company.loyalty["maxSpendShare"]),
     )
     if body.pointsUsed > max_points:
         raise HTTPException(status_code=400, detail="Too many points used")
     payable_total = subtotal - body.pointsUsed
 
-    number, seq = _next_order_number(db, company)
+    number, _ = _next_order_number(db, locked_company)
     now = datetime.now(timezone.utc)
     order = Order(
-        id=f"o-{company.order_prefix.lower()}-{seq}",
-        company_id=company.id,
+        id=f"o-{uuid4().hex}",
+        company_id=locked_company.id,
         number=number,
         # Личность заказчика — из токена, не из тела запроса.
-        customer_name=customer.name,
-        customer_id=customer.id,
+        customer_name=locked_customer.name,
+        customer_id=locked_customer.id,
         branch_id=body.branchId,
         type=body.type,
-        # Заказ уже оплачен демо-оплатой — сразу preparing
-        status="preparing",
+        # Payment is still demo-only; staff must explicitly accept the order.
+        status="new",
         ready_time=body.readyTime,
         items_version=2,
         items=stored_items,
@@ -634,8 +684,10 @@ def create_order(
         payment_method=body.paymentMethod,
         points_used=body.pointsUsed,
         # Серверный расчёт: earnRate компании (5% SweetTime, 3% CoffeeGo)
-        points_earned=round(payable_total * company.loyalty["earnRate"]),
+        points_earned=round(payable_total * locked_company.loyalty["earnRate"]),
         created_at=now.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        client_request_id=body.clientRequestId,
+        request_fingerprint=request_fingerprint,
     )
     db.add(order)
     db.commit()

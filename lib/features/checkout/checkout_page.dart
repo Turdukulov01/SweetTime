@@ -1,8 +1,9 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/api_client.dart';
 import '../../core/format.dart';
 import '../../core/localization/app_localizations.dart';
 import '../../shared/app_models.dart';
@@ -22,6 +23,18 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
   TimeOfDay _time = const TimeOfDay(hour: 11, minute: 0);
   final _tableController = TextEditingController();
   final _commentController = TextEditingController();
+  late final String _clientRequestId = _newClientRequestId();
+  bool _submitting = false;
+
+  static String _newClientRequestId() {
+    final random = Random.secure();
+    final time = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
+    final entropy = List.generate(
+      4,
+      (_) => random.nextInt(0x100000000).toRadixString(16).padLeft(8, '0'),
+    ).join();
+    return 'mobile-$time-$entropy';
+  }
 
   @override
   void dispose() {
@@ -38,6 +51,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     final unavailable = state.unavailableForSelectedBranch();
     final needsTable = _type == OrderType.qrCafe;
     final canPlace =
+        !_submitting &&
         state.cart.isNotEmpty &&
         unavailable.isEmpty &&
         (!needsTable || _tableController.text.trim().isNotEmpty);
@@ -253,7 +267,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               const SizedBox(height: 8),
               FilledButton(
                 onPressed: canPlace ? () => _placeOrder(state) : null,
-                child: Text(strings.payAndPlaceOrder),
+                child: _submitting
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(strings.payAndPlaceOrder),
               ),
             ],
           ),
@@ -268,6 +287,16 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       _requestAuthentication(controller);
       return;
     }
+    if (!state.catalogAuthoritative) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context).orderCatalogUnavailable),
+        ),
+      );
+      return;
+    }
+    if (_submitting) return;
+    setState(() => _submitting = true);
 
     final strings = AppLocalizations.of(context);
     final readyTime = switch (_type) {
@@ -290,45 +319,53 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
     final cartItems = state.cart;
     final branch = state.selectedBranch;
     final pointsUsed = state.bonusApplied;
+    final total = state.total;
 
-    // Локальное оформление — как раньше: заказ и баллы живут и без сервера.
-    final order = controller.checkout(
+    // Только подтверждённый сервером заказ считается принятым. При ошибке
+    // корзина остаётся на устройстве, а тот же request id безопасно повторяется.
+    final result = await controller.submitOrder(
+      clientRequestId: _clientRequestId,
       type: _type,
-      readyTime: readyTime,
+      readyTime: apiReadyTime,
+      items: cartItems,
+      branch: branch,
+      pointsUsed: pointsUsed,
       paymentMethod: _payment,
     );
-    if (order == null) {
-      if (!mounted) return;
-      final currentState = ref.read(appStateProvider);
-      if (!currentState.accountReady) {
-        _requestAuthentication(controller);
-      } else {
-        context.go('/cart');
-      }
-      return;
-    }
-
-    // При живом API дублируем заказ на сервер; ошибка сети ничего не ломает.
-    CreatedOrder? created;
-    if (state.apiConnected) {
-      created = await controller.submitOrder(
-        type: _type,
-        readyTime: apiReadyTime,
-        items: cartItems,
-        branch: branch,
-        pointsUsed: pointsUsed,
-        paymentMethod: _payment,
-      );
-    }
 
     if (!mounted) return;
+    setState(() => _submitting = false);
+    if (!result.isOk) {
+      if (result.isRejected) {
+        controller.logout();
+        _requestAuthentication(controller);
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(strings.orderSubmissionUnavailable)),
+      );
+      return;
+    }
+    final created = result.value!;
+    final order = CustomerOrder(
+      id: created.number,
+      items: cartItems,
+      branch: branch,
+      type: _type,
+      status: OrderStatus.created,
+      paymentMethod: _payment,
+      readyTime: readyTime,
+      total: total,
+      pointsUsed: pointsUsed,
+      pointsEarned: created.pointsEarned,
+    );
     showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (context) => _SuccessDialog(
         order: order,
-        serverNumber: created?.number,
-        serverPointsEarned: created?.pointsEarned,
+        serverNumber: created.number,
+        serverPointsEarned: created.pointsEarned,
         inviterRewarded: inviterRewarded,
       ),
     );

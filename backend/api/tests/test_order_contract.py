@@ -45,6 +45,7 @@ def test_legacy_order_item_remains_readable_without_invented_identity() -> None:
 def test_order_create_v2_accepts_only_stable_selection() -> None:
     order = schemas.OrderCreate.model_validate(
         {
+            "clientRequestId": "order-request-0001",
             "branchId": "b1",
             "type": "pickup",
             "readyTime": "asap",
@@ -90,6 +91,7 @@ def test_order_create_v2_rejects_client_owned_display_and_price_fields(
     with pytest.raises(ValidationError):
         schemas.OrderCreate.model_validate(
             {
+                "clientRequestId": "order-request-0001",
                 "branchId": "b1",
                 "type": "pickup",
                 "items": [item],

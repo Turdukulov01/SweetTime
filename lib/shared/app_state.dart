@@ -632,6 +632,20 @@ class AppStateController extends StateNotifier<AppState> {
     );
   }
 
+  Future<void> _loadCustomerProfile() async {
+    final epoch = _accountEpoch;
+    final customerId = state.customerId;
+    if (state.isGuest || customerId == null) return;
+    final result = await _withCustomerToken(_api.fetchCustomerMe);
+    if (!result.isOk) return;
+    if (epoch != _accountEpoch ||
+        state.isGuest ||
+        state.customerId != customerId) {
+      return;
+    }
+    _applyCustomerProfile(result.value!);
+  }
+
   Future<void> _loadCustomerFavorites() async {
     final epoch = _accountEpoch;
     final customerId = state.customerId;
@@ -801,13 +815,11 @@ class AppStateController extends StateNotifier<AppState> {
     }
   }
 
-  /// POST заказа на сервер (если API доступен). null — офлайн/ошибка сети:
-  /// заказ при этом уже оформлен локально, поведение прежнее.
-  ///
-  /// Сервер принимает заказ только по токену клиента (401 без него) и берёт имя
-  /// заказчика из токена. Без токена (демо-вход офлайн) запрос ожидаемо не
-  /// пройдёт — заказ останется локальным, как и раньше.
-  Future<CreatedOrder?> submitOrder({
+  /// Серверное оформление заказа. Корзина очищается только после подтверждения
+  /// commit; 401 один раз проходит через refresh-token. Любая ошибка оставляет
+  /// корзину и локальные баллы без изменений.
+  Future<ApiResult<CreatedOrder>> submitOrder({
+    required String clientRequestId,
     required OrderType type,
     required String readyTime,
     required List<CartItem> items,
@@ -815,44 +827,48 @@ class AppStateController extends StateNotifier<AppState> {
     required int pointsUsed,
     PaymentMethod paymentMethod = PaymentMethod.mock,
   }) async {
-    if (state.isGuest || items.isEmpty) return null;
-    String? accessToken;
-    try {
-      accessToken = await _authStore.readAccessToken();
-    } catch (_) {
-      accessToken = null;
+    if (state.isGuest || items.isEmpty || !state.catalogAuthoritative) {
+      return const ApiResult<CreatedOrder>.unavailable();
     }
-    final created = await _api.createOrder(
-      accessToken: accessToken,
-      branchId: branch.id,
-      type: switch (type) {
-        OrderType.pickup => 'pickup',
-        OrderType.scheduled => 'scheduled',
-        OrderType.qrCafe => 'qr',
-      },
-      readyTime: readyTime,
-      items: [
-        for (final item in items)
-          {
-            'productId': item.product.id,
-            'sizeId': item.sizeId,
-            'toppingIds': item.toppingIds,
-            'sugarPercent': item.sugarPercent,
-            'ice': item.ice.name,
-            'quantity': item.quantity,
-          },
-      ],
-      paymentMethod: switch (paymentMethod) {
-        PaymentMethod.mock => 'mock',
-        PaymentMethod.cash => 'cash',
-        PaymentMethod.qrDemo => 'qr',
-      },
-      pointsUsed: pointsUsed,
+    final result = await _withCustomerToken(
+      (accessToken) => _api.createOrder(
+        accessToken,
+        clientRequestId: clientRequestId,
+        branchId: branch.id,
+        type: switch (type) {
+          OrderType.pickup => 'pickup',
+          OrderType.scheduled => 'scheduled',
+          OrderType.qrCafe => 'qr',
+        },
+        readyTime: readyTime,
+        items: [
+          for (final item in items)
+            {
+              'productId': item.product.id,
+              'sizeId': item.sizeId,
+              'toppingIds': item.toppingIds,
+              'sugarPercent': item.sugarPercent,
+              'ice': item.ice.name,
+              'quantity': item.quantity,
+            },
+        ],
+        paymentMethod: switch (paymentMethod) {
+          PaymentMethod.mock => 'mock',
+          PaymentMethod.cash => 'cash',
+          PaymentMethod.qrDemo => 'qr',
+        },
+        pointsUsed: pointsUsed,
+      ),
     );
-    if (created != null && accessToken != null) {
+
+    if (result.isOk) {
+      state = state.copyWith(cart: const [], useBonus: false);
+      _cartRevision++;
+      await _queueCartPersist();
       await _loadCustomerOrders();
+      await _loadCustomerProfile();
     }
-    return created;
+    return result;
   }
 
   void toggleTheme() {
@@ -1268,60 +1284,6 @@ class AppStateController extends StateNotifier<AppState> {
 
   void setUseBonus(bool value) {
     state = state.copyWith(useBonus: value);
-  }
-
-  CustomerOrder? checkout({
-    required OrderType type,
-    required OrderReadyTime readyTime,
-    required PaymentMethod paymentMethod,
-  }) {
-    if (state.isGuest || state.cart.isEmpty) return null;
-
-    final pointsUsed = state.bonusApplied;
-    final earned = state.pointsEarned;
-    final order = CustomerOrder(
-      id: 'SW-${1049 + state.orders.length + 1}',
-      items: state.cart,
-      branch: state.selectedBranch,
-      type: type,
-      status: OrderStatus.preparing,
-      paymentMethod: paymentMethod,
-      readyTime: readyTime,
-      total: state.total,
-      pointsUsed: pointsUsed,
-      pointsEarned: earned,
-    );
-    state = state.copyWith(
-      cart: const [],
-      useBonus: false,
-      orders: [OrderHistoryEntry.fromLocal(order), ...state.orders],
-      points: state.points - pointsUsed + earned,
-      pointEvents: [
-        PointEvent(
-          title: LocalizedText(
-            ru: 'Начисление за ${order.id}',
-            ky: '${order.id} үчүн упай кошулду',
-            en: 'Points earned for ${order.id}',
-          ),
-          amount: earned,
-          date: const LocalizedText(ru: 'Сегодня', ky: 'Бүгүн', en: 'Today'),
-        ),
-        if (pointsUsed > 0)
-          PointEvent(
-            title: LocalizedText(
-              ru: 'Списание за ${order.id}',
-              ky: '${order.id} үчүн упай алынды',
-              en: 'Points redeemed for ${order.id}',
-            ),
-            amount: -pointsUsed,
-            date: const LocalizedText(ru: 'Сегодня', ky: 'Бүгүн', en: 'Today'),
-          ),
-        ...state.pointEvents,
-      ],
-    );
-    _cartRevision++;
-    unawaited(_queueCartPersist());
-    return order;
   }
 
   Future<RepeatOrderResult> repeatOrder(OrderHistoryEntry order) async {

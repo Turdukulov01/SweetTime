@@ -26,4 +26,5 @@ def order_out(o: Order) -> schemas.OrderOut:
         pointsUsed=o.points_used,
         pointsEarned=o.points_earned,
         createdAt=o.created_at,
+        clientRequestId=o.client_request_id,
     )

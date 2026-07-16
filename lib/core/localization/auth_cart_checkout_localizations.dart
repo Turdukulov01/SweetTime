@@ -195,6 +195,16 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
     'Төлөп, заказ берүү',
     'Pay and place order',
   );
+  String get orderCatalogUnavailable => _pick(
+    'Не удалось проверить актуальный каталог. Обновите данные и повторите — корзина сохранена.',
+    'Учурдагы каталогду текшерүү мүмкүн болгон жок. Маалыматты жаңыртып, кайра аракет кылыңыз — себет сакталды.',
+    'Could not verify the current catalog. Refresh and try again — your cart is saved.',
+  );
+  String get orderSubmissionUnavailable => _pick(
+    'Заказ не отправлен. Корзина сохранена — проверьте интернет и повторите попытку.',
+    'Заказ жөнөтүлгөн жок. Себет сакталды — интернетти текшерип, кайра аракет кылыңыз.',
+    'The order was not sent. Your cart is saved — check your connection and try again.',
+  );
 
   String readyAt(String time) =>
       _pick('к $time', '$time убактысына', 'by $time');

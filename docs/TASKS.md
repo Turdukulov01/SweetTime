@@ -1,6 +1,6 @@
 # SweetTime Status Backlog
 
-Updated: 2026-07-15. Work is sequential unless the owner explicitly approves a skip.
+Updated: 2026-07-16. Work is sequential unless the owner explicitly approves a skip.
 
 ## Status Rules
 
@@ -59,6 +59,19 @@ below remains authoritative; this section records the current execution order.
   passed Redmi release smoke for QR preview initialization, torch, tab leave/re-entry, and launching the
   external profile camera without an ML Kit crash. An iOS OAuth client and URL scheme remain future iOS-release work. SMS
   verification remains a later task.
+- [ ] **Reliable mobile order submission + automatic admin queue.** **[implemented locally
+  2026-07-16; production rollout and physical end-to-end acceptance pending]** Flutter no longer
+  creates a local successful order before the API responds: checkout is server-first, refreshes an
+  expired access token once, preserves the cart and points selection on every failed/ambiguous
+  request, and clears them only after PostgreSQL confirms the order. Every new APK request has a
+  stable high-entropy `clientRequestId`; backend request fingerprinting, per-company row locking and
+  unique database constraints make retries and concurrent numbering safe. New orders start in
+  `new`, not the false `preparing` state. Admin performs non-overlapping visible-tab polling every
+  three seconds and immediately reconciles on focus, reconnect and tab restore, so a committed
+  order appears without a manual page refresh. PostgreSQL migration `a842d9c13f70`, backend 56/56,
+  Flutter 60/60, admin 6/6, static analysis and isolated production images pass locally. Remaining:
+  deploy backend/admin with the migration, install the new APK and prove one real
+  Flutter→API→PostgreSQL→admin order plus a safe retry on the production pilot.
 - [ ] **S6 — Ubuntu deployment artifacts.** **[partial—verified in production; next: admin content acceptance]** `backend/api/Dockerfile`
   and `deploy/production/` contain PostgreSQL, Redis, backend, nginx, media volume and an environment
   example. PostgreSQL/backend/nginx now have ordered healthchecks; `/ready` probes the real database.
@@ -347,8 +360,19 @@ below remains authoritative; this section records the current execution order.
   and by pull-to-refresh on Home/Catalog. Concurrent refreshes are coalesced; an empty server news/promotion
   list is authoritative and no longer resurrects DemoData. Flutter analyze and all 53 tests pass; the release
   APK is installed on the target Redmi for the reversible admin→mobile check.
-- [ ] Store tokens securely, handle expiry/revocation, prevent duplicate checkout/payment submissions, and make network errors conform to the state matrix.
+- [ ] Store tokens securely and complete expiry/revocation. **[partial—verified locally
+  2026-07-16]** Duplicate order submission and ambiguous network failure are now handled by
+  server-first checkout plus `clientRequestId` idempotency; payment submission remains a separate
+  future provider integration.
 - [ ] Add end-to-end contract tests for Flutter -> API -> admin order processing and status refresh.
+- [ ] **Payment provider and reliable event delivery design.** Before connecting a bank/PSP, add
+  separate `Order`, `PaymentAttempt`, `PaymentEvent` and transactional `OutboxEvent` records;
+  persist provider IDs and idempotency keys, verify signed webhooks, tolerate duplicates and
+  out-of-order events, and let a worker retry notifications/receipts. PostgreSQL remains the source
+  of truth. A broker may dispatch outbox work, but Redis Pub/Sub alone must never be treated as a
+  durable order or payment queue. Select Kyrgyz QR/acquiring and international card providers only
+  after merchant eligibility, API/sandbox access, fiscal receipt responsibilities, settlement,
+  refunds, chargebacks, commissions and contracts are confirmed.
 - [ ] **Task 9 — Brand And Content Replacement.** **[blocked—owner input]** Replace app name/logo/colors/menu/photos/modifiers/branches/maps/promotion copy and seed data only with approved owner assets.
 - [ ] Validate content rights, Russian/Kyrgyz copy, allergens, prices, hours, roles, and branch availability with the owner.
 - [ ] Configure deployment, TLS, environment separation, backups, monitoring, recovery notes, and a staff pilot runbook.

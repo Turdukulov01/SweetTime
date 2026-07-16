@@ -204,6 +204,7 @@ void main() {
       cartStore: _MemoryCartStore(),
       api: api,
     );
+    await controller.bootstrap();
     controller.login('+996700123456');
     final product = DemoData.products.first;
     final item = CartItem(
@@ -219,6 +220,7 @@ void main() {
     for (final language in [AppLanguage.ru, AppLanguage.en]) {
       controller.setLanguage(language);
       await controller.submitOrder(
+        clientRequestId: 'stable-order-request',
         type: OrderType.pickup,
         readyTime: 'asap',
         items: [item],
@@ -246,6 +248,72 @@ void main() {
     expect(encodedItem, isNot(contains('productName')));
     expect(encodedItem, isNot(contains('total')));
   });
+
+  test(
+    'failed server order keeps cart and never invents local history',
+    () async {
+      final api = _CapturingOrderApiClient(
+        orderResult: const ApiResult<CreatedOrder>.unavailable(),
+      );
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(accessToken: 'good'),
+        cartStore: _MemoryCartStore(),
+        api: api,
+      );
+      await controller.bootstrap();
+      controller.login('+996700123456');
+      await controller.quickAdd(controller.state.products.first);
+      final cart = controller.state.cart;
+
+      final result = await controller.submitOrder(
+        clientRequestId: 'failed-order-request',
+        type: OrderType.pickup,
+        readyTime: 'asap',
+        items: cart,
+        branch: controller.state.selectedBranch,
+        pointsUsed: 0,
+      );
+
+      expect(result.isOk, isFalse);
+      expect(controller.state.cart, cart);
+      expect(controller.state.orders, isEmpty);
+    },
+  );
+
+  test(
+    'expired access token refreshes before the committed order clears cart',
+    () async {
+      final api = _CapturingOrderApiClient(rejectToken: 'expired');
+      final authStore = _MemoryAuthStore(
+        accessToken: 'expired',
+        refreshToken: 'fresh',
+      );
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: authStore,
+        cartStore: _MemoryCartStore(),
+        api: api,
+      );
+      await controller.bootstrap();
+      controller.login('+996700123456');
+      await controller.quickAdd(controller.state.products.first);
+
+      final result = await controller.submitOrder(
+        clientRequestId: 'refresh-order-request',
+        type: OrderType.pickup,
+        readyTime: 'asap',
+        items: controller.state.cart,
+        branch: controller.state.selectedBranch,
+        pointsUsed: 0,
+      );
+
+      expect(result.isOk, isTrue);
+      expect(api.accessTokens, ['expired', 'good']);
+      expect(authStore.accessToken, 'good');
+      expect(controller.state.cart, isEmpty);
+    },
+  );
 
   test(
     'customer order parser accepts V2 and preserves localized snapshots',
@@ -796,6 +864,7 @@ void main() {
       )..seedDemo(cart: true);
 
       final created = await controller.submitOrder(
+        clientRequestId: 'guest-order-request',
         type: OrderType.pickup,
         readyTime: 'as soon as possible',
         items: controller.state.cart,
@@ -803,14 +872,7 @@ void main() {
         pointsUsed: 0,
       );
 
-      final order = controller.checkout(
-        type: OrderType.pickup,
-        readyTime: const OrderReadyTime(kind: OrderReadyTimeKind.asap),
-        paymentMethod: PaymentMethod.mock,
-      );
-
-      expect(created, isNull);
-      expect(order, isNull);
+      expect(created.isOk, isFalse);
       expect(controller.state.isGuest, isTrue);
       expect(controller.state.cart, isNotEmpty);
       expect(controller.state.orders, isEmpty);
@@ -1752,19 +1814,46 @@ class _OfflineApiClient extends ApiClient {
 }
 
 class _CapturingOrderApiClient extends _OfflineApiClient {
+  _CapturingOrderApiClient({
+    this.orderResult = const ApiResult<CreatedOrder>.ok(
+      CreatedOrder(number: 'SW-test', pointsEarned: 0),
+    ),
+    this.rejectToken,
+  });
+
   final List<Map<String, Object?>> requests = [];
+  final List<String> accessTokens = [];
+  final ApiResult<CreatedOrder> orderResult;
+  final String? rejectToken;
 
   @override
-  Future<CreatedOrder?> createOrder({
+  Future<CompanyConfig?> fetchConfig() async => const CompanyConfig(
+    appName: 'SweetTime',
+    accentColor: null,
+    earnRate: 0.05,
+    maxSpendShare: 0.3,
+  );
+
+  @override
+  Future<List<Product>?> fetchProducts() async => DemoData.products;
+
+  @override
+  Future<List<Branch>?> fetchBranches() async => DemoData.branches;
+
+  @override
+  Future<ApiResult<CreatedOrder>> createOrder(
+    String accessToken, {
+    required String clientRequestId,
     required String branchId,
     required String type,
     required String readyTime,
     required List<Map<String, Object?>> items,
     required String paymentMethod,
     required int pointsUsed,
-    String? accessToken,
   }) async {
+    accessTokens.add(accessToken);
     requests.add({
+      'clientRequestId': clientRequestId,
       'branchId': branchId,
       'type': type,
       'readyTime': readyTime,
@@ -1772,8 +1861,19 @@ class _CapturingOrderApiClient extends _OfflineApiClient {
       'paymentMethod': paymentMethod,
       'pointsUsed': pointsUsed,
     });
-    return const CreatedOrder(number: 'SW-test', pointsEarned: 0);
+    if (accessToken == rejectToken) {
+      return const ApiResult<CreatedOrder>.rejected();
+    }
+    return orderResult;
   }
+
+  @override
+  Future<ApiResult<TokenPair>> refreshTokens(String refreshToken) async =>
+      refreshToken == 'fresh'
+      ? const ApiResult<TokenPair>.ok(
+          TokenPair(accessToken: 'good', refreshToken: 'fresh-next'),
+        )
+      : const ApiResult<TokenPair>.rejected();
 }
 
 /// Сервер с одним известным клиентом: access-токен `good`, refresh `fresh`.
