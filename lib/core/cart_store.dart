@@ -18,12 +18,12 @@ class CartDraftItem {
 
   final String productId;
   final int quantity;
-  final String sizeId;
+  final String? sizeId;
   final int sugarPercent;
   final String ice;
   final List<String> toppingIds;
 
-  Map<String, Object> toJson() => {
+  Map<String, Object?> toJson() => {
     'productId': productId,
     'quantity': quantity,
     'sizeId': sizeId,
@@ -43,8 +43,7 @@ class CartDraftItem {
     if (productId is! String ||
         productId.isEmpty ||
         quantity is! num ||
-        sizeId is! String ||
-        sizeId.isEmpty ||
+        (sizeId != null && (sizeId is! String || sizeId.isEmpty)) ||
         sugarPercent is! num ||
         ice is! String ||
         toppingIds is! List<dynamic> ||
@@ -54,7 +53,7 @@ class CartDraftItem {
     return CartDraftItem(
       productId: productId,
       quantity: quantity.toInt(),
-      sizeId: sizeId,
+      sizeId: sizeId is String ? sizeId : null,
       sugarPercent: sugarPercent.toInt(),
       ice: ice,
       toppingIds: List<String>.unmodifiable(toppingIds.cast<String>()),

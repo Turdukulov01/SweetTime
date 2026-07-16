@@ -423,10 +423,12 @@ class AppStateController extends StateNotifier<AppState> {
           .where((candidate) => candidate.id == stored.productId)
           .firstOrNull;
       if (product == null) continue;
-      final size = product.sizes
-          .where((candidate) => candidate.id == stored.sizeId)
-          .firstOrNull;
-      if (size == null) continue;
+      final size = product.sizes.isEmpty
+          ? null
+          : product.sizes
+                .where((candidate) => candidate.id == stored.sizeId)
+                .firstOrNull;
+      if (product.sizes.isNotEmpty && size == null) continue;
       final ice = IceLevel.values
           .where((candidate) => candidate.name == stored.ice)
           .firstOrNull;
@@ -442,12 +444,13 @@ class AppStateController extends StateNotifier<AppState> {
         toppingIds.add(topping.id);
         toppingPrice += topping.priceDelta;
       }
-      final unitPrice = product.basePrice + size.priceDelta + toppingPrice;
+      final unitPrice =
+          product.basePrice + (size?.priceDelta ?? 0) + toppingPrice;
       restored.add(
         CartItem(
           product: product,
           quantity: stored.quantity,
-          sizeId: size.id,
+          sizeId: size?.id,
           sugarPercent: stored.sugarPercent,
           ice: ice,
           toppingIds: List.unmodifiable(toppingIds),
@@ -585,6 +588,7 @@ class AppStateController extends StateNotifier<AppState> {
           await _loadCustomerRecurring();
         case ApiAuthStatus.rejected:
           await _authStore.clear();
+        case ApiAuthStatus.invalid:
         case ApiAuthStatus.unavailable:
           break; // офлайн: состояние не меняем
       }
@@ -1193,21 +1197,23 @@ class AppStateController extends StateNotifier<AppState> {
   }
 
   Future<bool> quickAdd(Product product) async {
-    if (!product.availableIn(state.selectedBranch) || product.sizes.isEmpty) {
+    if (!product.availableIn(state.selectedBranch)) {
       return false;
     }
 
-    final size = product.sizes.firstWhere(
-      (option) => option.id == 'm',
-      orElse: () => product.sizes.first,
-    );
+    final size = product.sizes.isEmpty
+        ? null
+        : product.sizes.firstWhere(
+            (option) => option.id == 'm',
+            orElse: () => product.sizes.first,
+          );
     final topping = product.toppings
         .where((option) => option.id == 'tapioca')
         .firstOrNull;
 
     return addConfigured(
       product,
-      sizeId: size.id,
+      sizeId: size?.id,
       sugarPercent: 50,
       ice: IceLevel.regular,
       toppingIds: topping == null ? const [] : [topping.id],
@@ -1216,7 +1222,7 @@ class AppStateController extends StateNotifier<AppState> {
 
   Future<bool> addConfigured(
     Product product, {
-    required String sizeId,
+    required String? sizeId,
     required int sugarPercent,
     required IceLevel ice,
     required List<String> toppingIds,
@@ -1230,10 +1236,15 @@ class AppStateController extends StateNotifier<AppState> {
         toppingIds.length != toppingIds.toSet().length) {
       return false;
     }
-    final size = currentProduct.sizes
-        .where((candidate) => candidate.id == sizeId)
-        .firstOrNull;
-    if (size == null) return false;
+    final size = currentProduct.sizes.isEmpty
+        ? null
+        : currentProduct.sizes
+              .where((candidate) => candidate.id == sizeId)
+              .firstOrNull;
+    if ((currentProduct.sizes.isEmpty && sizeId != null) ||
+        (currentProduct.sizes.isNotEmpty && size == null)) {
+      return false;
+    }
     var toppingPrice = 0;
     for (final toppingId in toppingIds) {
       final topping = currentProduct.toppings
@@ -1245,11 +1256,11 @@ class AppStateController extends StateNotifier<AppState> {
     final item = CartItem(
       product: currentProduct,
       quantity: 1,
-      sizeId: size.id,
+      sizeId: size?.id,
       sugarPercent: sugarPercent,
       ice: ice,
       toppingIds: List.unmodifiable(toppingIds),
-      total: currentProduct.basePrice + size.priceDelta + toppingPrice,
+      total: currentProduct.basePrice + (size?.priceDelta ?? 0) + toppingPrice,
     );
     state = state.copyWith(cart: [...state.cart, item]);
     _cartRevision++;
@@ -1300,7 +1311,6 @@ class AppStateController extends StateNotifier<AppState> {
       final sugarPercent = item.sugarPercent;
       final ice = item.ice;
       if (productId == null ||
-          sizeId == null ||
           toppingIds == null ||
           sugarPercent == null ||
           ice == null) {
@@ -1312,10 +1322,14 @@ class AppStateController extends StateNotifier<AppState> {
       if (product == null || !product.availableIn(state.selectedBranch)) {
         return RepeatOrderResult.unavailableSelection;
       }
-      final size = product.sizes
-          .where((candidate) => candidate.id == sizeId)
-          .firstOrNull;
-      if (size == null || toppingIds.length != toppingIds.toSet().length) {
+      final size = product.sizes.isEmpty
+          ? null
+          : product.sizes
+                .where((candidate) => candidate.id == sizeId)
+                .firstOrNull;
+      if ((product.sizes.isEmpty && sizeId != null) ||
+          (product.sizes.isNotEmpty && size == null) ||
+          toppingIds.length != toppingIds.toSet().length) {
         return RepeatOrderResult.unavailableSelection;
       }
 
@@ -1327,12 +1341,13 @@ class AppStateController extends StateNotifier<AppState> {
         if (topping == null) return RepeatOrderResult.unavailableSelection;
         toppingPrice += topping.priceDelta;
       }
-      final unitPrice = product.basePrice + size.priceDelta + toppingPrice;
+      final unitPrice =
+          product.basePrice + (size?.priceDelta ?? 0) + toppingPrice;
       repeatedItems.add(
         CartItem(
           product: product,
           quantity: item.quantity,
-          sizeId: size.id,
+          sizeId: size?.id,
           sugarPercent: sugarPercent,
           ice: ice,
           toppingIds: List.unmodifiable(toppingIds),

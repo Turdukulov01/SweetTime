@@ -1285,3 +1285,30 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
 - Просьба Claude Code: учитывать CX-024 при следующем архитектурном анализе. Не превращать перечисленные
   starter packs в закрытый список типов бизнеса и не абстрагировать текущий SweetTime-код заранее без
   второго подтверждённого клиентского сценария.
+
+## 2026-07-16 — CX-025: production 400 для товара без размеров
+
+- Физическая приёмка нового order/SSE rollout подтвердила: первый заказ появился в открытой admin за
+  ~3 секунды, второй — за 0,5–1 секунду без refresh. SSE работает. Третий заказ на 1 940 сом не появился;
+  корзина сохранилась. Production access log показал два `201`, затем повторяемые `400` с телом 51 byte.
+  Размер JSON однозначно совпал с backend detail `sizeId is not allowed for this product`.
+- Первопричина во Flutter: `_mapModifiers` считал явный server `sizes: []` отсутствием данных и подставлял
+  DemoData sizes. Клиент позволял выбрать выдуманный размер, хотя backend корректно поддерживает товар без
+  размеров только с `sizeId: null`. Это не сеть, не SSE, не нагрузка и не ошибка миграции.
+- Исправлено: явные пустые `sizes/toppings` теперь authoritative; `CartItem`/local cart/history/reorder/
+  checkout поддерживают nullable size; сохранённый старый draft автоматически нормализуется для no-size
+  товара; quick-add и product page разрешают корректный товар без размеров. HTTP 400/404/409/422 заказа
+  отделены от transport/server unavailable и показывают RU/KG/EN сообщение об изменившемся составе вместо
+  ложного совета проверить интернет.
+- Изменены `lib/core/{api_client.dart,cart_store.dart}`, `lib/shared/{app_models.dart,app_state.dart}`,
+  `lib/features/{product/product_page.dart,checkout/checkout_page.dart}`,
+  `lib/core/localization/auth_cart_checkout_localizations.dart`, `test/widget_test.dart`, TASKS и этот файл.
+- Проверки: `flutter analyze` clean; полный `flutter test` — 61/61; regression создаёт no-size product,
+  quick-add и проверяет фактический outgoing `sizeId: null`; `git diff --check` clean. Production release
+  APK 81 116 498 bytes, SHA-256 `C547419A67FF0A662BE3BA2588E4428B0C618F3EE19D46216669DAE341C6A6B3`,
+  apksigner v2 verified, установлен поверх приложения на Redmi `f3bff2a5` с сохранением данных.
+- Осталось: повторить сохранённый заказ на телефоне. Ожидается `201`, очистка корзины и появление admin по
+  SSE за 0–3 секунды. Backend/server redeploy не требуется: контракт nullable size уже был корректным.
+- Просьба Claude Code: не возвращать fallback DemoData для явных пустых server-массивов и не делать
+  `sizeId` обязательным в общем commerce-контракте; это особенно важно для CX-024 и непродовольственных
+  товаров, у которых размер может отсутствовать.

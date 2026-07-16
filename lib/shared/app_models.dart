@@ -343,14 +343,18 @@ class CartItem {
 
   final Product product;
   final int quantity;
-  final String sizeId;
+  final String? sizeId;
   final int sugarPercent;
   final IceLevel ice;
   final List<String> toppingIds;
   final int total;
 
-  ModifierOption get sizeOption =>
-      product.sizes.firstWhere((option) => option.id == sizeId);
+  ModifierOption? get sizeOption {
+    for (final option in product.sizes) {
+      if (option.id == sizeId) return option;
+    }
+    return null;
+  }
 
   List<ModifierOption> get toppingOptions => product.toppings
       .where((option) => toppingIds.contains(option.id))
@@ -462,7 +466,7 @@ class OrderHistoryItem {
 
   factory OrderHistoryItem.fromCartItem(CartItem item) => OrderHistoryItem(
     productName: item.product.name,
-    sizeName: item.sizeOption.name,
+    sizeName: item.sizeOption?.name,
     quantity: item.quantity,
     total: item.total,
     productId: item.product.id,

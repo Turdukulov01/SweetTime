@@ -367,6 +367,11 @@ below remains authoritative; this section records the current execution order.
   2026-07-16]** Duplicate order submission and ambiguous network failure are now handled by
   server-first checkout plus `clientRequestId` idempotency; payment submission remains a separate
   future provider integration.
+- [x] **[fixed and installed 2026-07-16]** Preserve authoritative empty product modifier lists and
+  support products without sizes end-to-end. Flutter previously replaced an explicit server `sizes: []`
+  with DemoData sizes, then sent a forbidden `sizeId`; production correctly rejected the order with 400.
+  No-size products now use nullable `sizeId` in cart persistence/history/order DTOs, stale local drafts are
+  normalized, and business-validation failures no longer claim that the internet is unavailable.
 - [ ] Add end-to-end contract tests for Flutter -> API -> admin order processing and status refresh.
 - [ ] **White-label platform hardening.** Keep one tenant-aware backend and one configurable admin
   runtime for all companies; map approved custom domains to `company_id` and require Host, URL scope

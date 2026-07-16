@@ -341,6 +341,12 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         _requestAuthentication(controller);
         return;
       }
+      if (result.isInvalid) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(strings.orderSubmissionInvalidSelection)),
+        );
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(strings.orderSubmissionUnavailable)),
       );

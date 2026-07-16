@@ -46,12 +46,13 @@ class CreatedOrder {
 /// Отказ сервера и недоступность сети — принципиально разные случаи:
 /// на [rejected] показываем ошибку и чистим токены, на [unavailable]
 /// приложение остаётся в офлайн-режиме и НЕ разлогинивает пользователя.
-enum ApiAuthStatus { ok, rejected, unavailable }
+enum ApiAuthStatus { ok, rejected, invalid, unavailable }
 
 /// Результат auth-запроса: статус + payload только при [ApiAuthStatus.ok].
 class ApiResult<T> {
   const ApiResult.ok(T this.value) : status = ApiAuthStatus.ok;
   const ApiResult.rejected() : status = ApiAuthStatus.rejected, value = null;
+  const ApiResult.invalid() : status = ApiAuthStatus.invalid, value = null;
   const ApiResult.unavailable()
     : status = ApiAuthStatus.unavailable,
       value = null;
@@ -61,6 +62,7 @@ class ApiResult<T> {
 
   bool get isOk => status == ApiAuthStatus.ok;
   bool get isRejected => status == ApiAuthStatus.rejected;
+  bool get isInvalid => status == ApiAuthStatus.invalid;
 }
 
 /// Профиль клиента с сервера (`auth/customer/me`). Источник правды по личным
@@ -1131,6 +1133,12 @@ class ApiClient {
       if (response.statusCode == 401 || response.statusCode == 403) {
         return const ApiResult<CreatedOrder>.rejected();
       }
+      if (response.statusCode == 400 ||
+          response.statusCode == 404 ||
+          response.statusCode == 409 ||
+          response.statusCode == 422) {
+        return const ApiResult<CreatedOrder>.invalid();
+      }
       if (response.statusCode < 200 || response.statusCode >= 300) {
         return const ApiResult<CreatedOrder>.unavailable();
       }
@@ -1240,7 +1248,10 @@ class ApiClient {
         ),
       );
     }
-    return options.isEmpty ? (fallback ?? const []) : options;
+    // An explicit empty server list is authoritative. Falling back to DemoData
+    // here invented sizes/toppings that the backend did not allow, so Flutter
+    // could build a cart which POST /orders had to reject.
+    return List.unmodifiable(options);
   }
 
   static Branch _mapBranch(Map<String, dynamic> json) {

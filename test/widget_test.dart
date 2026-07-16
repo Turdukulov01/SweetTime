@@ -249,6 +249,51 @@ void main() {
     expect(encodedItem, isNot(contains('total')));
   });
 
+  test('a product without sizes is submitted with a null sizeId', () async {
+    final original = DemoData.products.first;
+    final product = Product(
+      id: original.id,
+      category: original.category,
+      name: original.name,
+      description: original.description,
+      basePrice: original.basePrice,
+      accentColor: original.accentColor,
+      rating: original.rating,
+      reviewsCount: original.reviewsCount,
+      sizes: const [],
+      toppings: const [],
+      availableBranchIds: original.availableBranchIds,
+      assetImage: original.assetImage,
+      isNew: original.isNew,
+      isBestSeller: original.isBestSeller,
+    );
+    final api = _CapturingOrderApiClient(products: [product]);
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(accessToken: 'good'),
+      cartStore: _MemoryCartStore(),
+      api: api,
+    );
+    await controller.bootstrap();
+    controller.login('+996700123456');
+
+    expect(await controller.quickAdd(controller.state.products.single), isTrue);
+    expect(controller.state.cart.single.sizeId, isNull);
+
+    final result = await controller.submitOrder(
+      clientRequestId: 'no-size-order-request',
+      type: OrderType.pickup,
+      readyTime: 'asap',
+      items: controller.state.cart,
+      branch: controller.state.selectedBranch,
+      pointsUsed: 0,
+    );
+
+    expect(result.isOk, isTrue);
+    final encodedItem = (api.requests.single['items']! as List).single as Map;
+    expect(encodedItem['sizeId'], isNull);
+  });
+
   test(
     'failed server order keeps cart and never invents local history',
     () async {
@@ -1819,12 +1864,14 @@ class _CapturingOrderApiClient extends _OfflineApiClient {
       CreatedOrder(number: 'SW-test', pointsEarned: 0),
     ),
     this.rejectToken,
+    this.products = DemoData.products,
   });
 
   final List<Map<String, Object?>> requests = [];
   final List<String> accessTokens = [];
   final ApiResult<CreatedOrder> orderResult;
   final String? rejectToken;
+  final List<Product> products;
 
   @override
   Future<CompanyConfig?> fetchConfig() async => const CompanyConfig(
@@ -1835,7 +1882,7 @@ class _CapturingOrderApiClient extends _OfflineApiClient {
   );
 
   @override
-  Future<List<Product>?> fetchProducts() async => DemoData.products;
+  Future<List<Product>?> fetchProducts() async => products;
 
   @override
   Future<List<Branch>?> fetchBranches() async => DemoData.branches;

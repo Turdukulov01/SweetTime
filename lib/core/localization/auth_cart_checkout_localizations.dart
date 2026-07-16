@@ -206,6 +206,12 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
     'The order was not sent. Your cart is saved — check your connection and try again.',
   );
 
+  String get orderSubmissionInvalidSelection => _pick(
+    'Состав заказа изменился. Корзина сохранена — обновите каталог или выберите товар заново.',
+    'Буйрутманын курамы өзгөрдү. Себет сакталды — каталогду жаңыртыңыз же товарды кайра тандаңыз.',
+    'The order options changed. Your cart is saved — refresh the catalog or select the item again.',
+  );
+
   String readyAt(String time) =>
       _pick('к $time', '$time убактысына', 'by $time');
   String tableReadyTime(String number) =>
@@ -397,7 +403,7 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
   };
 
   String cartModifiers(CartItem item) {
-    final size = _modifierName(item.product.sizes, item.sizeId);
+    final size = item.sizeOption?.name.resolve(language);
     final toppings = [
       for (final id in item.toppingIds)
         _modifierName(item.product.toppings, id),
@@ -407,7 +413,7 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
       'кант ${item.sugarPercent}%',
       'sugar ${item.sugarPercent}%',
     );
-    return [size, sugar, cartIceLevelLabel(item.ice), ...toppings].join(' • ');
+    return [?size, sugar, cartIceLevelLabel(item.ice), ...toppings].join(' • ');
   }
 
   String productName(Product value) => value.name.resolve(language);

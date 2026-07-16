@@ -82,7 +82,7 @@ class _ProductPageState extends ConsumerState<ProductPage> {
         .where((topping) => _toppingIds.contains(topping.id))
         .fold(0, (sum, t) => sum + t.priceDelta);
     final total = product.basePrice + sizeDelta + toppingsDelta;
-    final canAdd = available && selectedSize != null;
+    final canAdd = available && (product.sizes.isEmpty || selectedSize != null);
 
     return Scaffold(
       appBar: AppBar(
@@ -236,7 +236,7 @@ class _ProductPageState extends ConsumerState<ProductPage> {
                 ? () async {
                     final added = await controller.addConfigured(
                       product,
-                      sizeId: selectedSize.id,
+                      sizeId: selectedSize?.id,
                       sugarPercent: _sugarPercent,
                       ice: _ice,
                       toppingIds: _toppingIds.toList(),
