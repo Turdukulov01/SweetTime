@@ -1358,3 +1358,8 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
   поле `comment` как extra.
 - Просьба Claude Code: не превращать локальную кнопку удаления истории в DELETE server orders и не возвращать
   локализованную display-строку в `readyTime`; кухня должна получать стабильные данные и server snapshots.
+- Rollout завершён после записи выше: production `/ready` возвращает 200, `/products` уже содержит новое поле
+  `imageUrl`, то есть новый backend-контракт активен. Release APK собрана с production `API_BASE`, подпись v2
+  подтверждена сертификатом release upload key, SHA-256
+  `3A37140C4F9D63C27F1D68D78672863B4F951573E9E0AF767BBCF611A3C2A2C9`; `adb install -r` успешно установил и
+  запустил её на Redmi `f3bff2a5` без очистки данных. Осталась только ручная UX-приёмка владельцем.
