@@ -66,10 +66,13 @@ below remains authoritative; this section records the current execution order.
   request, and clears them only after PostgreSQL confirms the order. Every new APK request has a
   stable high-entropy `clientRequestId`; backend request fingerprinting, per-company row locking and
   unique database constraints make retries and concurrent numbering safe. New orders start in
-  `new`, not the false `preparing` state. Admin performs non-overlapping visible-tab polling every
-  three seconds and immediately reconciles on focus, reconnect and tab restore, so a committed
-  order appears without a manual page refresh. PostgreSQL migration `a842d9c13f70`, backend 56/56,
-  Flutter 60/60, admin 6/6, static analysis and isolated production images pass locally. Remaining:
+  `new`, not the false `preparing` state. Admin now opens an authenticated header-based SSE stream:
+  committed create/status mutations wake a tenant-scoped GET reconciliation almost immediately,
+  while non-overlapping 15-second polling, reconnect/focus and a replay-window reconciliation remain
+  recovery paths. JWT is never placed in the event URL, an SSE connection does not retain a database
+  session, and PostgreSQL remains authoritative. Migration `a842d9c13f70`, backend 61/61, Flutter
+  60/60, admin 8/8, a real PostgreSQL+HTTP SSE smoke, static analysis, nginx syntax and isolated
+  production images pass locally. Remaining:
   deploy backend/admin with the migration, install the new APK and prove one real
   Flutter→API→PostgreSQL→admin order plus a safe retry on the production pilot.
 - [ ] **S6 — Ubuntu deployment artifacts.** **[partial—verified in production; next: admin content acceptance]** `backend/api/Dockerfile`
@@ -365,6 +368,15 @@ below remains authoritative; this section records the current execution order.
   server-first checkout plus `clientRequestId` idempotency; payment submission remains a separate
   future provider integration.
 - [ ] Add end-to-end contract tests for Flutter -> API -> admin order processing and status refresh.
+- [ ] **White-label platform hardening.** Keep one tenant-aware backend and one configurable admin
+  runtime for all companies; map approved custom domains to `company_id` and require Host, URL scope
+  and JWT `cid` to agree. Do not create one copied backend/admin and one port pair per company.
+  Add server-owned `businessType`, `enabledModules`, navigation/layout preset and design-token
+  configuration. Build branded Flutter flavors (package/bundle id, icon, splash, OAuth/Firebase
+  presenter and tenant bootstrap) from one shared codebase, with vertical modules/templates for
+  bubble tea, coffee shop and restaurant rather than source forks. Before multiple backend replicas,
+  fan out ephemeral SSE wake-ups through Redis Pub/Sub or PostgreSQL NOTIFY; durable payment/receipt
+  jobs still require a transactional outbox plus a durable queue/stream.
 - [ ] **Payment provider and reliable event delivery design.** Before connecting a bank/PSP, add
   separate `Order`, `PaymentAttempt`, `PaymentEvent` and transactional `OutboxEvent` records;
   persist provider IDs and idempotency keys, verify signed webhooks, tolerate duplicates and

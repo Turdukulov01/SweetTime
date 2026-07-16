@@ -8,6 +8,7 @@ from api import schemas
 from api.database import Base
 from api.main import create_order
 from api.models import Branch, Company, Customer, Order, Product
+from api.order_events import OrderEventHub
 
 
 def _database():
@@ -95,8 +96,10 @@ def _request(request_id: str, quantity: int = 1) -> schemas.OrderCreate:
     )
 
 
-def test_same_client_request_returns_the_committed_order_once() -> None:
+def test_same_client_request_returns_the_committed_order_once(monkeypatch) -> None:
     engine, factory = _database()
+    hub = OrderEventHub()
+    monkeypatch.setattr("api.main.order_event_hub", hub)
     try:
         with factory() as db:
             company, customer = _seed(db)
@@ -108,6 +111,10 @@ def test_same_client_request_returns_the_committed_order_once() -> None:
             assert first.status == "new"
             assert first.clientRequestId == "mobile-request-0001"
             assert db.scalar(select(func.count()).select_from(Order)) == 1
+            events = hub.wait_after("sweettime", 0, timeout=0).events
+            assert len(events) == 1
+            assert events[0].event == "order.created"
+            assert events[0].data["orderId"] == first.id
     finally:
         engine.dispose()
 

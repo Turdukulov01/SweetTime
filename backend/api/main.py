@@ -27,8 +27,10 @@ from hashlib import sha256
 import json
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Response
+import anyio
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -41,6 +43,7 @@ from .content import router as content_router
 from .config import settings
 from .database import engine, get_db
 from .deps import (
+    authorize_order_event_stream,
     get_company,
     get_company_branch,
     get_company_news,
@@ -52,6 +55,7 @@ from .deps import (
     require_role,
 )
 from .models import Branch, Company, Customer, News, Order, Product, Promotion
+from .order_events import encode_sse, event_payload, order_event_hub
 from .seed import seed_if_empty
 from .serializers import order_out as _order_out
 
@@ -601,6 +605,69 @@ def list_orders(
     return [_order_out(o) for o in orders]
 
 
+@app.get(
+    "/api/companies/{companyId}/orders/events",
+    response_class=StreamingResponse,
+    tags=["orders"],
+)
+async def stream_order_events(
+    request: Request,
+    company_id: str = Depends(authorize_order_event_stream),
+    last_event_id: str | None = Header(default=None),
+) -> StreamingResponse:
+    try:
+        cursor = max(0, int(last_event_id or "0"))
+    except ValueError:
+        cursor = 0
+
+    async def generate():
+        nonlocal cursor
+        latest = order_event_hub.latest_id(company_id)
+        if last_event_id is None:
+            cursor = latest
+        yield encode_sse(
+            event="reconcile",
+            event_id=cursor,
+            retry_ms=1500,
+            data={"reason": "connected"},
+        )
+        while not await request.is_disconnected():
+            batch = await anyio.to_thread.run_sync(
+                lambda: order_event_hub.wait_after(
+                    company_id, cursor, timeout=15.0
+                ),
+                abandon_on_cancel=True,
+            )
+            if batch.reset_required:
+                cursor = order_event_hub.latest_id(company_id)
+                yield encode_sse(
+                    event="reconcile",
+                    event_id=cursor,
+                    data={"reason": "replay-window-missed"},
+                )
+                continue
+            if not batch.events:
+                yield ": keepalive\n\n"
+                continue
+            for notice in batch.events:
+                cursor = notice.id
+                yield encode_sse(
+                    event=notice.event,
+                    event_id=notice.id,
+                    data=notice.data,
+                )
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 @app.post(
     "/api/companies/{companyId}/orders",
     response_model=schemas.OrderOut,
@@ -691,6 +758,11 @@ def create_order(
     )
     db.add(order)
     db.commit()
+    order_event_hub.publish(
+        locked_company.id,
+        "order.created",
+        event_payload(order.id, order.number, order.status),
+    )
     return _order_out(order)
 
 
@@ -716,6 +788,11 @@ def patch_order_status(
     order.status = body.status
     db.add(order)
     db.commit()
+    order_event_hub.publish(
+        order.company_id,
+        "order.updated",
+        event_payload(order.id, order.number, order.status),
+    )
     return _order_out(order)
 
 

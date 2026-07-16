@@ -22,6 +22,7 @@ import {
   READ_RETRY_DELAYS_MS,
   shouldRetryRead
 } from "@/lib/api-retry";
+import { drainSseFrames } from "@/lib/sse";
 import type {
   AdminUser,
   Branch,
@@ -590,6 +591,67 @@ export async function apiFetchOrders(companyId: string): Promise<Order[]> {
     `/api/companies/${companyId}/orders`
   );
   return orders.map((o) => mapOrder(companyId, o));
+}
+
+export type OrderStreamEventType =
+  | "reconcile"
+  | "order.created"
+  | "order.updated";
+
+export interface OrderStreamNotice {
+  type: OrderStreamEventType;
+  id?: string;
+}
+
+/**
+ * Authenticated SSE over fetch. Native EventSource cannot attach a Bearer
+ * header and would force the JWT into the URL, so the admin reads the response
+ * stream directly. Events are wake-ups only; GET /orders remains authoritative.
+ */
+export async function apiWatchOrderEvents(
+  companyId: string,
+  options: {
+    signal: AbortSignal;
+    lastEventId?: string;
+    onNotice: (notice: OrderStreamNotice) => void;
+  }
+): Promise<void> {
+  const headers = new Headers({ Accept: "text/event-stream" });
+  if (options.lastEventId) {
+    headers.set("Last-Event-ID", options.lastEventId);
+  }
+  const response = await authorizedFetch(
+    `/api/companies/${companyId}/orders/events`,
+    { method: "GET", headers, signal: options.signal }
+  );
+  if (!response.ok) throw await toApiError(response);
+  if (!response.body) {
+    throw new ApiError(0, "Браузер не поддерживает поток событий заказов");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (!options.signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true });
+      const drained = drainSseFrames(buffer);
+      buffer = drained.rest;
+      for (const frame of drained.frames) {
+        if (
+          frame.event === "reconcile" ||
+          frame.event === "order.created" ||
+          frame.event === "order.updated"
+        ) {
+          options.onNotice({ type: frame.event, id: frame.id });
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export async function apiPatchOrderStatus(

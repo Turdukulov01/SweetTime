@@ -9,8 +9,8 @@
 
 - По свежему дефекту оформления заказов реализован CX-022: Flutter больше не подтверждает заказ
   локально до commit API; backend получил идемпотентность и безопасную нумерацию; admin сам
-  сверяет очередь раз в три секунды. Локальные тесты и production-сборки зелёные. Нужны rollout
-  миграции `a842d9c13f70`, новая APK и физический E2E.
+  получает tenant-scoped SSE wake-up и сверяет PostgreSQL, polling остаётся fallback. Локальные
+  тесты и production-сборки зелёные. Нужны rollout миграции `a842d9c13f70`, новая APK и физический E2E.
 - Stories/collections/news feed V2 полностью реализованы локально в `backend/api`, `admin`, `lib` и
   `deploy/production`; все автоматические и disposable PostgreSQL+HTTP проверки зелёные. Текущая задача —
   production rollout и физическая Android-приёмка, см. CX-019 в конце файла и `docs/TASKS.md`.
@@ -1212,3 +1212,41 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
 - Просьба Claude Code: не возвращать local-first `checkout()` и не считать `apiConnected` разрешением
   принять заказ. При будущей оплате расширять схему отдельными payment/outbox сущностями, не смешивать
   банковский статус с lifecycle приготовления заказа.
+
+## 2026-07-16 — CX-023: защищённый SSE и white-label направление
+
+- Добавлен `GET /api/companies/{companyId}/orders/events` (`text/event-stream`). Авторизация идёт
+  только Bearer-заголовком через streaming fetch; JWT не попадает в query string/access-log. Перед
+  началом потока tenant и staff проверяются в короткой самостоятельной DB-сессии, которая закрывается
+  до StreamingResponse и не занимает pool всё время соединения. Cross-tenant token получает 403.
+- `OrderEventHub` хранит небольшой tenant-scoped replay window только для wake-up событий. После
+  commit создания публикуется `order.created`, после commit статуса — `order.updated`; повтор
+  идемпотентного POST событие повторно не публикует. Подключение и переполнение окна отправляют
+  `reconcile`, keepalive идёт каждые 15 секунд. Событие не является источником данных: admin всегда
+  перечитывает `GET /orders`, поэтому рестарт/потеря SSE безвредны.
+- Admin использует `fetch` + ReadableStream, потому что native EventSource не умеет Bearer header.
+  Поток включён только для видимой online-вкладки, автоматически переподключается 1/2/5/10 секунд,
+  сохраняет Last-Event-ID и немедленно будит coalesced GET. Резервная сверка теперь 15 секунд в
+  активной и 60 секунд в фоновой вкладке; focus/online/visibility также сверяют немедленно.
+- Container nginx получил отдельный exact-pattern SSE location с HTTP/1.1, buffering/cache/gzip off,
+  75-second read timeout; backend выдаёт `X-Accel-Buffering: no`, поэтому и внешний host nginx не
+  должен буферизовать поток.
+- Изменены `backend/api/{order_events.py,deps.py,main.py,tests/test_order_events.py,
+  tests/test_order_submission.py}`, `admin/lib/{api.ts,orders-store.ts,sse.ts,sse.test.mjs}`,
+  `deploy/production/nginx.conf`, TASKS и этот файл. Проверки: backend `61 passed`, admin typecheck
+  + `8 passed`, compileall/diff-check, nginx `-t`, backend/admin production Docker builds. Реальный
+  disposable PostgreSQL+Uvicorn+curl smoke получил `reconcile`, затем `order.updated` сразу после
+  PATCH с правильными order/tenant данными.
+- Масштабирование: текущий hub корректен для одного backend-процесса, а 15-секундная сверка закрывает
+  пропуск даже после рестарта. Перед вторым replica/worker добавить Redis Pub/Sub или PostgreSQL
+  NOTIFY только как fan-out wake-up; order truth остаётся PostgreSQL. Для платежей Pub/Sub недостаточен:
+  нужен transactional outbox + Redis Streams/RabbitMQ и идемпотентный worker.
+- Архитектурное решение предложено в TASKS: разные домены должны указывать на один backend/admin,
+  Host→company mapping дополняет существующие URL companyId и JWT cid. Не копировать сервисы/порты.
+  Flutter — один core с build flavors и серверными capabilities/layout presets; bubble tea/coffee/
+  restaurant оформляются вертикальными модулями, а не отдельными исходниками. Admin показывает
+  разделы по enabledModules и общим правам. Реализация hardening — отдельный следующий этап после
+  production-приёмки текущего заказа/SSE.
+- Просьба Claude Code: не заменять header-auth stream на EventSource с токеном в URL и не передавать
+  полные order payload через ephemeral hub. При работе над white-label не создавать копии admin/backend
+  на компанию; tenant scope должен подтверждаться сервером, а не только UI/theme.

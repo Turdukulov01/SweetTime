@@ -3,8 +3,8 @@
 // Очередь заказов компании.
 //
 // Источник — ТОЛЬКО боевой API: GET /api/companies/{cid}/orders требует
-// Bearer-токен стаффа (его подставляет lib/api). Инициализация + последовательный
-// поллинг раз в 3 секунды. setStatus шлёт PATCH .../orders/{id}/status; при ошибке (409 —
+// Bearer-токен стаффа (его подставляет lib/api). SSE почти мгновенно будит GET-сверку,
+// последовательный polling остаётся резервным. setStatus шлёт PATCH .../orders/{id}/status; при ошибке (409 —
 // недопустимый переход, 403 — недостаточно прав, сеть) статус откатывается и
 // показывается тост. Мок-подмены нет: если API недоступен — пустая очередь и
 // честное сообщение об ошибке.
@@ -27,12 +27,14 @@ import {
   ApiError,
   apiFetchOrders,
   apiPatchOrderStatus,
+  apiWatchOrderEvents,
   describeApiError
 } from "@/lib/api";
 import type { Order, OrderStatus } from "@/lib/types";
 
-const POLL_INTERVAL_MS = 3000;
-const HIDDEN_POLL_INTERVAL_MS = 15000;
+const POLL_INTERVAL_MS = 15000;
+const HIDDEN_POLL_INTERVAL_MS = 60000;
+const STREAM_RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000] as const;
 
 interface OrdersContextValue {
   orders: Order[];
@@ -60,6 +62,7 @@ export function OrdersProvider({
   const [loadFailed, setLoadFailed] = useState(false);
 
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshOrdersRef = useRef<() => void>(() => undefined);
 
   const showError = useCallback((message: string) => {
     setErrorMessage(message);
@@ -131,6 +134,7 @@ export function OrdersProvider({
       if (timer) clearTimeout(timer);
       void load();
     };
+    refreshOrdersRef.current = refreshNow;
     const handleVisibility = () => {
       if (document.visibilityState === "visible") refreshNow();
     };
@@ -145,9 +149,109 @@ export function OrdersProvider({
       window.removeEventListener("focus", refreshNow);
       window.removeEventListener("online", refreshNow);
       document.removeEventListener("visibilitychange", handleVisibility);
+      if (refreshOrdersRef.current === refreshNow) {
+        refreshOrdersRef.current = () => undefined;
+      }
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
     };
   }, [companyId, showError]);
+
+  // Быстрый канал: SSE несёт только tenant-scoped wake-up. После каждого
+  // сигнала перечитываем PostgreSQL через обычный GET; polling выше страхует
+  // рестарт, потерянное событие и долгий сетевой разрыв.
+  useEffect(() => {
+    let cancelled = false;
+    let stream: AbortController | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectAttempt = 0;
+    let lastEventId: string | undefined;
+
+    const clearReconnect = () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    };
+
+    const stop = () => {
+      clearReconnect();
+      const active = stream;
+      stream = null;
+      active?.abort();
+    };
+
+    const scheduleReconnect = () => {
+      if (
+        cancelled ||
+        document.visibilityState !== "visible" ||
+        !navigator.onLine
+      ) {
+        return;
+      }
+      const index = Math.min(
+        reconnectAttempt,
+        STREAM_RECONNECT_DELAYS_MS.length - 1
+      );
+      reconnectAttempt += 1;
+      reconnectTimer = setTimeout(connect, STREAM_RECONNECT_DELAYS_MS[index]);
+    };
+
+    const connect = () => {
+      if (
+        cancelled ||
+        stream !== null ||
+        document.visibilityState !== "visible" ||
+        !navigator.onLine
+      ) {
+        return;
+      }
+      clearReconnect();
+      const controller = new AbortController();
+      stream = controller;
+      void apiWatchOrderEvents(companyId, {
+        signal: controller.signal,
+        lastEventId,
+        onNotice: (notice) => {
+          if (notice.id) lastEventId = notice.id;
+          reconnectAttempt = 0;
+          refreshOrdersRef.current();
+        }
+      })
+        .catch(() => {
+          // GET reconciliation owns user-visible availability errors.
+        })
+        .finally(() => {
+          if (stream !== controller) return;
+          stream = null;
+          if (!controller.signal.aborted) scheduleReconnect();
+        });
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        refreshOrdersRef.current();
+        connect();
+      } else {
+        stop();
+      }
+    };
+    const handleOnline = () => {
+      reconnectAttempt = 0;
+      refreshOrdersRef.current();
+      connect();
+    };
+    const handleOffline = () => stop();
+
+    connect();
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      cancelled = true;
+      stop();
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [companyId]);
 
   const setStatus = useCallback(
     (orderId: string, status: OrderStatus) => {

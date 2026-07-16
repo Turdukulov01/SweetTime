@@ -15,7 +15,7 @@ from fastapi import Depends, HTTPException, Path, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from .database import get_db
+from .database import SessionLocal, get_db
 from .models import (
     AdminUser,
     Branch,
@@ -155,6 +155,36 @@ def get_current_staff(
     if staff is None or staff.company_id != company.id:
         raise _unauthorized("Unknown staff user")
     return staff
+
+
+def authorize_order_event_stream(
+    companyId: str = Path(...),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> str:
+    """Authenticate SSE without holding a pooled DB session for its lifetime.
+
+    Yield dependencies are cleaned up only after a streaming response closes.
+    This dependency therefore opens and closes its own short session before the
+    stream starts and returns only the validated tenant id.
+    """
+
+    payload = _access_payload(credentials)
+    if payload.get("typ") != "staff":
+        raise _unauthorized("Staff token required")
+    if payload.get("cid") != companyId:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Token was issued for another company",
+        )
+
+    with SessionLocal() as db:
+        company = db.get(Company, companyId)
+        if company is None:
+            raise HTTPException(status_code=404, detail="Company not found")
+        staff = db.get(AdminUser, payload["sub"])
+        if staff is None or staff.company_id != companyId:
+            raise _unauthorized("Unknown staff user")
+    return companyId
 
 
 def get_current_customer(
