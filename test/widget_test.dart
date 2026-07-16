@@ -426,6 +426,8 @@ void main() {
         controller.state.promoCode,
         DemoData.promotions.first.code.toUpperCase(),
       );
+      expect(controller.applyPromoCode('missing'), isFalse);
+      expect(controller.state.promoCode, isNull);
 
       controller.setUseBonus(true);
       controller.setBonusPointsToUse(10);
@@ -461,6 +463,16 @@ void main() {
       expect(controller.state.newsStories.single.id, api.news!.single.id);
       expect(controller.state.promotions.single.id, api.promotions!.single.id);
       expect(api.newsCalls, 2);
+
+      final activeCode = api.promotions!.single.code;
+      expect(controller.applyPromoCode(activeCode), isTrue);
+      api.promotions = null;
+      expect(await controller.validatePromoCode(activeCode), isFalse);
+      expect(controller.state.promoCode, isNull);
+      expect(controller.applyPromoCode(activeCode), isTrue);
+      api.promotions = const [];
+      expect(await controller.validatePromoCode(activeCode), isFalse);
+      expect(controller.state.promoCode, isNull);
     },
   );
 

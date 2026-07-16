@@ -36,9 +36,19 @@ class _CartPageState extends ConsumerState<CartPage> {
     super.dispose();
   }
 
-  void _applyPromo(AppStateController controller) {
+  bool _applyPromo(AppStateController controller) {
     final valid = controller.applyPromoCode(_promoController.text);
     setState(() => _promoInvalid = !valid);
+    return valid;
+  }
+
+  Future<bool> _validatePromoBeforeCheckout(
+    AppStateController controller,
+  ) async {
+    final valid = await controller.validatePromoCode(_promoController.text);
+    if (!mounted) return false;
+    setState(() => _promoInvalid = !valid);
+    return valid;
   }
 
   void _applyPoints(AppStateController controller) {
@@ -93,14 +103,7 @@ class _CartPageState extends ConsumerState<CartPage> {
                   TextField(
                     controller: _promoController,
                     textCapitalization: TextCapitalization.characters,
-                    onChanged: (_) {
-                      if (_promoInvalid) setState(() => _promoInvalid = false);
-                      if (state.promoCode != null &&
-                          _promoController.text.trim().toUpperCase() !=
-                              state.promoCode) {
-                        controller.applyPromoCode('');
-                      }
-                    },
+                    onChanged: (_) => _applyPromo(controller),
                     onSubmitted: (_) => _applyPromo(controller),
                     decoration: InputDecoration(
                       hintText: strings.promoCode,
@@ -211,8 +214,14 @@ class _CartPageState extends ConsumerState<CartPage> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
           child: FilledButton(
-            onPressed: () {
-              if (!state.accountReady) {
+            key: const ValueKey('cart-checkout-button'),
+            onPressed: () async {
+              // A non-empty promo is checked against the latest active
+              // promotions before navigation. Empty input remains optional.
+              if (!await _validatePromoBeforeCheckout(controller)) return;
+              if (!context.mounted) return;
+              final currentState = ref.read(appStateProvider);
+              if (!currentState.accountReady) {
                 controller.requestAuthentication(
                   AuthReturnDestination.checkout,
                 );

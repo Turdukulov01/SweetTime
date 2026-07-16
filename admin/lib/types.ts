@@ -68,6 +68,8 @@ export interface Branch {
 export interface ModifierOption {
   id: string;
   label: string;
+  /** Полный перевод из справочника; ручной вариант может иметь только label. */
+  localizedName?: LocalizedText;
   /** Приплата к базовой цене, сом (целое число, может быть 0) */
   priceDelta: number;
 }
@@ -104,6 +106,14 @@ export interface Product {
 export interface Category {
   id: string;
   name: { ru: string; ky: string; en: string };
+  sortOrder: number;
+  active: boolean;
+}
+
+export interface ToppingCatalogItem {
+  id: string;
+  name: LocalizedText;
+  price: number;
   sortOrder: number;
   active: boolean;
 }

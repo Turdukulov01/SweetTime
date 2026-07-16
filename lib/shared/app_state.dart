@@ -583,6 +583,14 @@ class AppStateController extends StateNotifier<AppState> {
         }
       }
 
+      final nextPromotions = promotions ?? state.promotions;
+      final appliedPromo = state.promoCode;
+      final promoStillActive =
+          appliedPromo == null ||
+          nextPromotions.any(
+            (promotion) => promotion.code.trim().toUpperCase() == appliedPromo,
+          );
+
       state = state.copyWith(
         apiConnected: true,
         catalogAuthoritative: catalogAuthoritative,
@@ -604,7 +612,8 @@ class AppStateController extends StateNotifier<AppState> {
             (legacyNews != null ? const [] : state.storyCollections),
         newsPosts:
             newsPosts ?? (legacyNews != null ? const [] : state.newsPosts),
-        promotions: promotions ?? state.promotions,
+        promotions: nextPromotions,
+        clearPromoCode: !promoStillActive,
       );
       return true;
     } catch (_) {
@@ -1487,9 +1496,29 @@ class AppStateController extends StateNotifier<AppState> {
     final exists = state.promotions.any(
       (promotion) => promotion.code.trim().toUpperCase() == normalized,
     );
-    if (!exists) return false;
+    if (!exists) {
+      state = state.copyWith(clearPromoCode: true);
+      return false;
+    }
     state = state.copyWith(promoCode: normalized);
     return true;
+  }
+
+  /// Rechecks a promo against the server's current active list before the
+  /// customer can continue to checkout. A non-empty code cannot pass when
+  /// that verification is unavailable; the backend also performs the final
+  /// validation when the order is sent.
+  Future<bool> validatePromoCode(String value) async {
+    final normalized = value.trim().toUpperCase();
+    if (normalized.isEmpty) return applyPromoCode('');
+
+    final promotions = await _api.fetchPromotions();
+    if (promotions == null) {
+      state = state.copyWith(clearPromoCode: true);
+      return false;
+    }
+    state = state.copyWith(promotions: List.unmodifiable(promotions));
+    return applyPromoCode(normalized);
   }
 
   Future<void> hideOrdersOnDevice(Iterable<String> orderIds) async {

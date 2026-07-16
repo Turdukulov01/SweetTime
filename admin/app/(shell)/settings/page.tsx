@@ -1,8 +1,7 @@
 "use client";
 
-// Настройки приложения (только owner): брендинг с живым превью телефона
-// и правила лояльности/рефералки. Брендинг применяется мгновенно —
-// updateCompany меняет company-store, откуда shell берёт --accent.
+// Настройки приложения (только owner): локальный черновик даёт живое превью,
+// но общий store, телефон и API меняются только после явного «Сохранить».
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
@@ -264,17 +263,27 @@ function SettingsContent() {
   const { company, products, news, promotions, updateCompany } =
     useCompanyStore();
 
-  // Черновик hex-поля (акцент применяется только при валидном значении)
+  const [brandingDraft, setBrandingDraft] = useState({
+    appName: company.appName,
+    accentColor: company.accentColor
+  });
   const [hexDraft, setHexDraft] = useState(company.accentColor);
   useEffect(() => {
+    setBrandingDraft({
+      appName: company.appName,
+      accentColor: company.accentColor
+    });
     setHexDraft(company.accentColor);
-  }, [company.accentColor]);
+  }, [company.appName, company.accentColor]);
 
   function applyHex(raw: string) {
     setHexDraft(raw);
     const match = HEX_RE.exec(raw.trim());
     if (match) {
-      updateCompany({ accentColor: `#${match[1].toUpperCase()}` });
+      setBrandingDraft((current) => ({
+        ...current,
+        accentColor: `#${match[1].toUpperCase()}`
+      }));
     }
   }
 
@@ -287,6 +296,8 @@ function SettingsContent() {
     inviter: String(company.referral.inviterBonus)
   });
   const [toastVisible, setToastVisible] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
@@ -296,27 +307,39 @@ function SettingsContent() {
     []
   );
 
-  function saveLoyalty(event: FormEvent<HTMLFormElement>) {
+  async function saveSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const clampPct = (v: string) =>
       Math.min(100, Math.max(0, Math.round(Number(v)) || 0));
     const clampNum = (v: string) => Math.max(0, Math.round(Number(v)) || 0);
 
-    updateCompany({
-      loyalty: {
-        earnRate: clampPct(loyaltyDraft.earn) / 100,
-        maxSpendShare: clampPct(loyaltyDraft.spend) / 100,
-        expiryMonths: clampNum(loyaltyDraft.expiry)
-      },
-      referral: {
-        invitedBonus: clampNum(loyaltyDraft.invited),
-        inviterBonus: clampNum(loyaltyDraft.inviter)
-      }
-    });
-    setToastVisible(true);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToastVisible(false), 2500);
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await updateCompany({
+        appName: brandingDraft.appName.trim() || company.appName,
+        accentColor: brandingDraft.accentColor,
+        loyalty: {
+          earnRate: clampPct(loyaltyDraft.earn) / 100,
+          maxSpendShare: clampPct(loyaltyDraft.spend) / 100,
+          expiryMonths: clampNum(loyaltyDraft.expiry)
+        },
+        referral: {
+          invitedBonus: clampNum(loyaltyDraft.invited),
+          inviterBonus: clampNum(loyaltyDraft.inviter)
+        }
+      });
+      setToastVisible(true);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToastVisible(false), 2500);
+    } catch {
+      setSaveError("Не удалось сохранить настройки. Изменения остались в черновике.");
+    } finally {
+      setSaving(false);
+    }
   }
+
+  const previewCompany: Company = { ...company, ...brandingDraft };
 
   const numberField = (
     label: string,
@@ -353,7 +376,7 @@ function SettingsContent() {
       <section className="surface mt-6 px-6 py-6">
         <h2 className="text-base">Брендинг</h2>
         <p className="mt-1 text-sm text-coffee-500">
-          Изменения сразу видны в превью и применяются к админке
+          Изменения видны только в превью до нажатия «Сохранить»
         </p>
 
         <div className="mt-5 flex flex-col gap-8 lg:flex-row">
@@ -361,17 +384,22 @@ function SettingsContent() {
             <div className="flex items-center gap-3">
               <span
                 className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-lg font-bold text-white"
-                style={{ backgroundColor: company.accentColor }}
+                style={{ backgroundColor: brandingDraft.accentColor }}
               >
-                {(company.appName.trim() || "П").charAt(0).toUpperCase()}
+                {(brandingDraft.appName.trim() || "П").charAt(0).toUpperCase()}
               </span>
               <label className="flex-1">
                 <span className="mb-1.5 block text-sm font-medium text-coffee-700">
                   Название приложения
                 </span>
                 <input
-                  value={company.appName}
-                  onChange={(e) => updateCompany({ appName: e.target.value })}
+                  value={brandingDraft.appName}
+                  onChange={(e) =>
+                    setBrandingDraft({
+                      ...brandingDraft,
+                      appName: e.target.value
+                    })
+                  }
                   placeholder="SweetTime"
                   className="input"
                 />
@@ -387,16 +415,19 @@ function SettingsContent() {
                   <button
                     key={color}
                     type="button"
-                    onClick={() => updateCompany({ accentColor: color })}
+                    onClick={() => {
+                      setBrandingDraft({ ...brandingDraft, accentColor: color });
+                      setHexDraft(color);
+                    }}
                     title={color}
                     style={{ backgroundColor: color }}
                     className={cn(
                       "focus-ring flex h-10 w-10 items-center justify-center rounded-full transition",
-                      company.accentColor.toUpperCase() === color &&
+                      brandingDraft.accentColor.toUpperCase() === color &&
                         "ring-2 ring-coffee-900 ring-offset-2 dark:ring-cream-50 dark:ring-offset-[#231d21]"
                     )}
                   >
-                    {company.accentColor.toUpperCase() === color && (
+                    {brandingDraft.accentColor.toUpperCase() === color && (
                       <Check className="h-4 w-4 text-white" />
                     )}
                   </button>
@@ -409,7 +440,7 @@ function SettingsContent() {
                 <div className="flex items-center gap-2">
                   <span
                     className="h-9 w-9 shrink-0 rounded-full border border-coffee-900/10"
-                    style={{ backgroundColor: company.accentColor }}
+                    style={{ backgroundColor: brandingDraft.accentColor }}
                     aria-hidden="true"
                   />
                   <input
@@ -429,7 +460,7 @@ function SettingsContent() {
           </div>
 
           <PhonePreview
-            company={company}
+            company={previewCompany}
             products={products}
             news={news}
             promotions={promotions}
@@ -445,7 +476,7 @@ function SettingsContent() {
           приложению
         </p>
 
-        <form onSubmit={saveLoyalty} className="mt-5 max-w-2xl">
+        <form onSubmit={saveSettings} className="mt-5 max-w-2xl">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {numberField("Кешбэк баллами", "earn", "% от заказа")}
             {numberField("Лимит списания", "spend", "% заказа")}
@@ -455,10 +486,17 @@ function SettingsContent() {
           </div>
           <button
             type="submit"
-            className="focus-ring mt-6 flex h-11 items-center rounded-full bg-accent px-6 text-sm font-semibold text-white transition hover:opacity-90"
+            disabled={saving || !HEX_RE.test(hexDraft.trim())}
+            style={{ backgroundColor: brandingDraft.accentColor }}
+            className="focus-ring mt-6 flex h-11 items-center rounded-full px-6 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Сохранить
+            {saving ? "Сохраняем…" : "Сохранить все настройки"}
           </button>
+          {saveError && (
+            <p role="alert" className="mt-3 text-sm text-red-600">
+              {saveError}
+            </p>
+          )}
         </form>
       </section>
 

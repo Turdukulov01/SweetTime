@@ -10,8 +10,17 @@ from starlette.datastructures import Headers
 
 from api import schemas
 from api.database import Base
-from api.main import create_category, delete_category, delete_product_image, put_product_image
-from api.models import Category, Company, MediaFile, Product
+from api.main import (
+    create_category,
+    create_topping_catalog_item,
+    delete_category,
+    delete_product_image,
+    delete_topping_catalog_item,
+    list_topping_catalog_items,
+    patch_topping_catalog_item,
+    put_product_image,
+)
+from api.models import Category, Company, MediaFile, Product, ToppingCatalogItem
 from api.storage import storage_service
 
 
@@ -115,5 +124,105 @@ def test_product_image_replaces_color_placeholder_and_can_be_deleted(
             cleared = delete_product_image(product, db)
             assert cleared.imageUrl is None
             assert db.scalars(select(MediaFile)).all() == []
+    finally:
+        engine.dispose()
+
+
+def test_reusable_topping_catalog_crud_is_ordered_and_tenant_scoped() -> None:
+    engine, factory = _database()
+    try:
+        with factory() as db:
+            company, product = _seed(db)
+            other = Company(
+                id="other",
+                name="Other",
+                app_name="Other",
+                accent_color="#000000",
+                currency="сом",
+                loyalty={"earnRate": 0.0, "maxSpendShare": 0.0},
+                referral={},
+                order_prefix="OT",
+                order_start=1,
+            )
+            db.add(other)
+            db.commit()
+
+            later = create_topping_catalog_item(
+                schemas.ToppingCatalogItemCreate(
+                    name=schemas.CategoryName(
+                        ru="Тапиока", ky="Тапиока", en="Tapioca"
+                    ),
+                    price=40,
+                    sortOrder=20,
+                ),
+                company,
+                db,
+            )
+            first = create_topping_catalog_item(
+                schemas.ToppingCatalogItemCreate(
+                    name=schemas.CategoryName(
+                        ru="Пенка", ky="Көбүк", en="Foam"
+                    ),
+                    price=50,
+                    sortOrder=10,
+                ),
+                company,
+                db,
+            )
+            create_topping_catalog_item(
+                schemas.ToppingCatalogItemCreate(
+                    name=schemas.CategoryName(
+                        ru="Чужой", ky="Башка", en="Other"
+                    ),
+                    price=99,
+                ),
+                other,
+                db,
+            )
+
+            listed = list_topping_catalog_items(company, db)
+            assert [item.id for item in listed] == [first.id, later.id]
+            assert listed[0].name.en == "Foam"
+
+            updated = patch_topping_catalog_item(
+                first.id,
+                schemas.ToppingCatalogItemPatch(price=55, active=False),
+                company,
+                db,
+            )
+            assert updated.price == 55
+            assert updated.active is False
+
+            # Product definitions remain snapshots: catalog edits/deletes do
+            # not silently change products or historical order pricing.
+            product.toppings = [
+                {
+                    "id": first.id,
+                    "name": first.name.model_dump(),
+                    "priceDelta": 50,
+                }
+            ]
+            db.add(product)
+            db.commit()
+            delete_topping_catalog_item(first.id, company, db)
+            db.refresh(product)
+            assert product.toppings[0]["priceDelta"] == 50
+
+            with pytest.raises(HTTPException) as caught:
+                patch_topping_catalog_item(
+                    later.id,
+                    schemas.ToppingCatalogItemPatch(price=1),
+                    other,
+                    db,
+                )
+            assert caught.value.status_code == 404
+            assert (
+                db.scalar(
+                    select(ToppingCatalogItem).where(
+                        ToppingCatalogItem.company_id == other.id
+                    )
+                )
+                is not None
+            )
     finally:
         engine.dispose()

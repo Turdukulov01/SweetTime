@@ -41,6 +41,7 @@ import type {
   OrderType,
   Product,
   Category,
+  ToppingCatalogItem,
   Promotion,
   Role
 } from "@/lib/types";
@@ -420,11 +421,13 @@ function mapProduct(companyId: string, p: ApiProduct): Product {
     sizes: (p.sizes ?? []).map((s) => ({
       id: String(s.id),
       label: typeof s.name === "string" ? s.name : s.name.ru,
+      localizedName: typeof s.name === "string" ? undefined : mapLocalized(s.name),
       priceDelta: s.priceDelta
     })),
     toppings: (p.toppings ?? []).map((t) => ({
       id: String(t.id),
       label: typeof t.name === "string" ? t.name : t.name.ru,
+      localizedName: typeof t.name === "string" ? undefined : mapLocalized(t.name),
       priceDelta: t.priceDelta
     })),
     availableBranchIds: p.availableBranchIds ?? [],
@@ -467,13 +470,13 @@ function serializeProductPatch(
   if (patch.sizes !== undefined)
     body.sizes = patch.sizes.map((s) => ({
       id: s.id,
-      name: s.label,
+      name: s.localizedName ? serializeLocalized(s.localizedName) : s.label,
       priceDelta: s.priceDelta
     }));
   if (patch.toppings !== undefined)
     body.toppings = patch.toppings.map((t) => ({
       id: t.id,
-      name: t.label,
+      name: t.localizedName ? serializeLocalized(t.localizedName) : t.label,
       priceDelta: t.priceDelta
     }));
   return body;
@@ -556,6 +559,24 @@ export async function apiDeleteProductImage(
 
 export async function apiFetchCategories(companyId: string): Promise<Category[]> {
   return request<Category[]>(`/api/companies/${companyId}/categories`);
+}
+
+export async function apiFetchToppings(
+  companyId: string
+): Promise<ToppingCatalogItem[]> {
+  return request<ToppingCatalogItem[]>(`/api/companies/${companyId}/toppings`);
+}
+
+export async function apiCreateTopping(
+  companyId: string,
+  name: LocalizedText,
+  price: number,
+  sortOrder: number
+): Promise<ToppingCatalogItem> {
+  return request<ToppingCatalogItem>(`/api/companies/${companyId}/toppings`, {
+    method: "POST",
+    body: JSON.stringify({ name, price, sortOrder, active: true })
+  });
 }
 
 export async function apiCreateCategory(

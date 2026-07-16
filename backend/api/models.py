@@ -299,6 +299,29 @@ class Category(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class ToppingCatalogItem(Base):
+    """Reusable tenant-owned topping definition copied into product snapshots."""
+
+    __tablename__ = "topping_catalog_items"
+    __table_args__ = (
+        Index(
+            "ix_topping_catalog_company_sort",
+            "company_id",
+            "sort_order",
+            "id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[dict] = mapped_column(JSON)
+    price: Mapped[int] = mapped_column(Integer)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class Product(Base):
     __tablename__ = "products"
 

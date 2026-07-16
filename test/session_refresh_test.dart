@@ -142,6 +142,30 @@ void main() {
       );
     },
   );
+
+  testWidgets('visible order history polls and keeps pull refresh available', (
+    tester,
+  ) async {
+    final oldOrder = _order('SW-old');
+    final newOrder = _order('SW-new');
+    final auth = _MemoryAuthStore(
+      accessToken: 'good',
+      refreshToken: 'refresh-1',
+    );
+    final api = _SessionApi()
+      ..ordersResult = ApiResult<List<OrderHistoryEntry>>.ok([oldOrder]);
+    final controller = _controller(api, auth);
+    await controller.bootstrap();
+    await _pump(tester, controller);
+    expect(find.byType(RefreshIndicator), findsOneWidget);
+
+    api.ordersResult = ApiResult<List<OrderHistoryEntry>>.ok([newOrder]);
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('order-SW-old')), findsNothing);
+    expect(find.byKey(const ValueKey('order-SW-new')), findsOneWidget);
+  });
 }
 
 AppStateController _controller(

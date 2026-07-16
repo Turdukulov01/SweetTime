@@ -65,9 +65,14 @@ interface CompanyStoreValue extends CompanyState {
   /** Текст последней ошибки действия (для тоста), null — нет */
   errorMessage: string | null;
   /** Брендинг, лояльность, рефералка — частичное обновление компании */
-  updateCompany: (patch: Partial<Omit<Company, "id">>) => void;
-  addProduct: (product: Product) => void;
-  updateProduct: (productId: string, patch: Partial<Omit<Product, "id">>) => void;
+  updateCompany: (
+    patch: Partial<Omit<Company, "id">>
+  ) => Promise<Company>;
+  addProduct: (product: Product) => Promise<Product>;
+  updateProduct: (
+    productId: string,
+    patch: Partial<Omit<Product, "id">>
+  ) => Promise<Product>;
   addBranch: (branch: Branch) => void;
   updateBranch: (branchId: string, patch: Partial<Omit<Branch, "id">>) => void;
   addNews: (news: NewsStory) => void;
@@ -132,8 +137,6 @@ export function CompanyStoreProvider({
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Дебаунс PATCH /config: брендинг правится посимвольно
-  const configPatchRef = useRef<Partial<Omit<Company, "id">>>({});
-  const configTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showError = useCallback((error: unknown) => {
     setErrorMessage(describeApiError(error));
@@ -187,7 +190,6 @@ export function CompanyStoreProvider({
 
   useEffect(
     () => () => {
-      if (configTimerRef.current) clearTimeout(configTimerRef.current);
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
     },
     []
@@ -198,25 +200,15 @@ export function CompanyStoreProvider({
   }, []);
 
   const updateCompany = useCallback(
-    (patch: Partial<Omit<Company, "id">>) => {
-      setState((prev) =>
-        prev ? { ...prev, company: { ...prev.company, ...patch } } : prev
-      );
-
-      // копим патч и шлём одним PATCH после паузы ввода
-      configPatchRef.current = { ...configPatchRef.current, ...patch };
-      if (configTimerRef.current) clearTimeout(configTimerRef.current);
-      configTimerRef.current = setTimeout(() => {
-        const merged = configPatchRef.current;
-        configPatchRef.current = {};
-        apiPatchConfig(companyId, merged)
-          .then(applyCompany)
-          .catch((error: unknown) => {
-            showError(error);
-            // Сервер не принял правку — возвращаем серверную истину в UI
-            apiFetchConfig(companyId).then(applyCompany).catch(() => undefined);
-          });
-      }, 400);
+    async (patch: Partial<Omit<Company, "id">>): Promise<Company> => {
+      try {
+        const saved = await apiPatchConfig(companyId, patch);
+        applyCompany(saved);
+        return saved;
+      } catch (error: unknown) {
+        showError(error);
+        throw error;
+      }
     },
     [companyId, applyCompany, showError]
   );
@@ -224,44 +216,46 @@ export function CompanyStoreProvider({
   // ----- Товары -----
 
   const addProduct = useCallback(
-    (product: Product) => {
+    async (product: Product): Promise<Product> => {
       setState((prev) =>
         prev ? { ...prev, products: [...prev.products, product] } : prev
       );
 
       const { id: tempId, companyId: _cid, ...payload } = product;
-      apiCreateProduct(companyId, payload)
-        .then((created) => {
-          // заменяем временный товар серверным (с настоящим id)
-          setState((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  products: prev.products.map((p) =>
-                    p.id === tempId ? created : p
-                  )
-                }
-              : prev
-          );
-        })
-        .catch((error: unknown) => {
-          // Создание не подтвердилось сервером — убираем временную карточку
-          setState((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  products: prev.products.filter((p) => p.id !== tempId)
-                }
-              : prev
-          );
-          showError(error);
-        });
+      try {
+        const created = await apiCreateProduct(companyId, payload);
+        setState((prev) =>
+          prev
+            ? {
+                ...prev,
+                products: prev.products.map((p) =>
+                  p.id === tempId ? created : p
+                )
+              }
+            : prev
+        );
+        return created;
+      } catch (error: unknown) {
+        setState((prev) =>
+          prev
+            ? {
+                ...prev,
+                products: prev.products.filter((p) => p.id !== tempId)
+              }
+            : prev
+        );
+        showError(error);
+        throw error;
+      }
     },
     [companyId, showError]
   );
 
   const updateProduct = useCallback(
-    (productId: string, patch: Partial<Omit<Product, "id">>) => {
+    async (
+      productId: string,
+      patch: Partial<Omit<Product, "id">>
+    ): Promise<Product> => {
       let previous: Product | undefined;
       setState((prev) => {
         if (!prev) return prev;
@@ -274,33 +268,33 @@ export function CompanyStoreProvider({
         };
       });
 
-      apiPatchProduct(companyId, productId, patch)
-        .then((updated) => {
-          setState((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  products: prev.products.map((p) =>
-                    p.id === productId ? updated : p
-                  )
-                }
-              : prev
-          );
-        })
-        .catch((error: unknown) => {
-          // Откат: сервер не сохранил — UI не должен показывать «сохранено»
-          setState((prev) =>
-            prev && previous
-              ? {
-                  ...prev,
-                  products: prev.products.map((p) =>
-                    p.id === productId ? (previous as Product) : p
-                  )
-                }
-              : prev
-          );
-          showError(error);
-        });
+      try {
+        const updated = await apiPatchProduct(companyId, productId, patch);
+        setState((prev) =>
+          prev
+            ? {
+                ...prev,
+                products: prev.products.map((p) =>
+                  p.id === productId ? updated : p
+                )
+              }
+            : prev
+        );
+        return updated;
+      } catch (error: unknown) {
+        setState((prev) =>
+          prev && previous
+            ? {
+                ...prev,
+                products: prev.products.map((p) =>
+                  p.id === productId ? (previous as Product) : p
+                )
+              }
+            : prev
+        );
+        showError(error);
+        throw error;
+      }
     },
     [companyId, showError]
   );

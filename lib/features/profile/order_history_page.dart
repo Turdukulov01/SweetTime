@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -16,10 +18,52 @@ class OrderHistoryPage extends ConsumerStatefulWidget {
   ConsumerState<OrderHistoryPage> createState() => _OrderHistoryPageState();
 }
 
-class _OrderHistoryPageState extends ConsumerState<OrderHistoryPage> {
+class _OrderHistoryPageState extends ConsumerState<OrderHistoryPage>
+    with WidgetsBindingObserver {
+  static const _pollInterval = Duration(seconds: 10);
+
   final Set<String> _selectedIds = {};
   bool _selectionMode = false;
   bool _refreshFailed = false;
+  Timer? _pollTimer;
+  Future<CustomerHistoryRefreshResult>? _refreshInFlight;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _startPolling();
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _startPolling();
+        unawaited(_refreshHistory(showErrors: false));
+      case AppLifecycleState.detached:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+        _pollTimer?.cancel();
+        _pollTimer = null;
+    }
+  }
+
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(
+      _pollInterval,
+      (_) => unawaited(_refreshHistory(showErrors: false)),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -193,26 +237,35 @@ class _OrderHistoryPageState extends ConsumerState<OrderHistoryPage> {
     });
   }
 
-  Future<void> _refreshHistory() async {
-    final result = await ref
-        .read(appStateProvider.notifier)
-        .refreshCustomerOrders();
+  Future<void> _refreshHistory({bool showErrors = true}) async {
+    final active = _refreshInFlight;
+    late final Future<CustomerHistoryRefreshResult> request;
+    if (active != null) {
+      request = active;
+    } else {
+      request = ref.read(appStateProvider.notifier).refreshCustomerOrders();
+      _refreshInFlight = request;
+    }
+    final result = await request;
+    if (identical(_refreshInFlight, request)) _refreshInFlight = null;
     if (!mounted) return;
     switch (result) {
       case CustomerHistoryRefreshResult.success:
         setState(() => _refreshFailed = false);
       case CustomerHistoryRefreshResult.unavailable:
-        setState(() => _refreshFailed = true);
+        if (showErrors) setState(() => _refreshFailed = true);
       case CustomerHistoryRefreshResult.sessionExpired:
         setState(() => _refreshFailed = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              AppLocalizations.of(context).orderHistorySessionExpired,
+        if (showErrors) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                AppLocalizations.of(context).orderHistorySessionExpired,
+              ),
+              behavior: SnackBarBehavior.floating,
             ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+          );
+        }
     }
   }
 

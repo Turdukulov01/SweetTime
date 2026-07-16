@@ -145,6 +145,32 @@ class CategoryPatch(BaseModel):
     active: bool | None = None
 
 
+class ToppingCatalogItemOut(BaseModel):
+    id: str
+    name: CategoryName
+    price: int
+    sortOrder: int
+    active: bool
+
+
+class ToppingCatalogItemCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: CategoryName
+    price: int = Field(ge=0)
+    sortOrder: int = 0
+    active: bool = True
+
+
+class ToppingCatalogItemPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: CategoryName | None = None
+    price: int | None = Field(default=None, ge=0)
+    sortOrder: int | None = None
+    active: bool | None = None
+
+
 class ProductOut(BaseModel):
     id: str
     name: LocalizedOrText

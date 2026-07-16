@@ -10,11 +10,19 @@ import { Toggle } from "@/components/toggle";
 import { useCompanyStore } from "@/lib/company-store";
 import {
   apiCreateCategory,
+  apiCreateTopping,
   apiDeleteProductImage,
   apiFetchCategories,
+  apiFetchToppings,
   apiPutProductImage
 } from "@/lib/api";
-import type { Category, ModifierOption, Product } from "@/lib/types";
+import type {
+  Category,
+  ModifierOption,
+  Product,
+  ToppingCatalogItem
+} from "@/lib/types";
+import { normalizeProductPricing } from "@/lib/product-pricing";
 import { cn, formatCurrency, pluralRu } from "@/lib/utils";
 
 const PRODUCT_COLORS = [
@@ -55,7 +63,10 @@ function draftFromProduct(product: Product): ProductDraft {
     categoryId: product.categoryId ?? null,
     color: product.color,
     priceText: String(product.price),
-    sizes: product.sizes.map((s) => ({ ...s })),
+    sizes: product.sizes.map((s) => ({
+      ...s,
+      priceDelta: product.price + s.priceDelta
+    })),
     toppings: product.toppings.map((t) => ({ ...t })),
     availableBranchIds: [...product.availableBranchIds],
     active: product.active,
@@ -123,14 +134,12 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 function ModifierEditor({
   title,
   options,
-  basePrice,
-  useFinalPrice = false,
+  showPlus = true,
   onChange
 }: {
   title: string;
   options: ModifierOption[];
-  basePrice?: number;
-  useFinalPrice?: boolean;
+  showPlus?: boolean;
   onChange: (next: ModifierOption[]) => void;
 }) {
   return (
@@ -143,22 +152,22 @@ function ModifierEditor({
               value={option.label}
               onChange={(e) => {
                 const next = [...options];
-                next[index] = { ...option, label: e.target.value };
+                next[index] = {
+                  ...option,
+                  label: e.target.value,
+                  localizedName: undefined
+                };
                 onChange(next);
               }}
               placeholder="Название"
               className="input flex-1"
             />
             <div className="flex items-center gap-1">
-              {!useFinalPrice && <span className="text-xs text-coffee-500">+</span>}
+              {showPlus && <span className="text-xs text-coffee-500">+</span>}
               <input
                 type="number"
                 min={0}
-                value={String(
-                  useFinalPrice
-                    ? (basePrice ?? 0) + option.priceDelta
-                    : option.priceDelta
-                )}
+                value={String(option.priceDelta)}
                 onChange={(e) => {
                   const next = [...options];
                   const entered = Math.max(
@@ -167,9 +176,7 @@ function ModifierEditor({
                   );
                   next[index] = {
                     ...option,
-                    priceDelta: useFinalPrice
-                      ? entered - (basePrice ?? 0)
-                      : entered
+                    priceDelta: entered
                   };
                   onChange(next);
                 }}
@@ -205,13 +212,17 @@ function ModifierEditor({
 function ProductPanel({
   product,
   categories,
+  toppingCatalog,
   onCategoryCreated,
+  onToppingCreated,
   onClose
 }: {
   /** null — режим «новый товар» */
   product: Product | null;
   categories: Category[];
+  toppingCatalog: ToppingCatalogItem[];
   onCategoryCreated: (category: Category) => void;
+  onToppingCreated: (topping: ToppingCatalogItem) => void;
   onClose: () => void;
 }) {
   const { company, branches, addProduct, updateProduct } =
@@ -236,14 +247,40 @@ function ProductPanel({
         }
   );
   const [newCategory, setNewCategory] = useState({ ru: "", ky: "", en: "" });
+  const [newTopping, setNewTopping] = useState({
+    ru: "",
+    ky: "",
+    en: "",
+    price: ""
+  });
   const [showNewCategory, setShowNewCategory] = useState(false);
+  const [showNewTopping, setShowNewTopping] = useState(false);
   const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [toppingError, setToppingError] = useState<string | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  const [selectedImage, setSelectedImage] = useState<{
+    file: File;
+    previewUrl: string;
+  } | null>(null);
+  const [imageRemoved, setImageRemoved] = useState(false);
+  const [persistedProduct, setPersistedProduct] = useState<Product | null>(product);
 
-  const price = Math.max(0, Math.round(Number(draft.priceText)) || 0);
+  useEffect(
+    () => () => {
+      if (selectedImage) URL.revokeObjectURL(selectedImage.previewUrl);
+    },
+    [selectedImage]
+  );
+
+  const normalizedPricing = normalizeProductPricing(
+    draft.priceText,
+    draft.sizes
+  );
+  const price = normalizedPricing.basePrice;
+  const hasPrice = normalizedPricing.hasPrice;
   const canSave =
-    draft.name.trim().length > 0 && price > 0 && draft.categoryId !== null;
+    draft.name.trim().length > 0 && hasPrice && draft.categoryId !== null;
 
   function toggleBranch(branchId: string) {
     setDraft((prev) => ({
@@ -280,66 +317,155 @@ function ProductPanel({
     }
   }
 
-  async function uploadImage(file: File) {
-    if (!product) return;
-    setMediaBusy(true);
+  function chooseImage(file: File) {
+    setSelectedImage({ file, previewUrl: URL.createObjectURL(file) });
+    setImageRemoved(false);
     setMediaError(null);
-    try {
-      const updated = await apiPutProductImage(company.id, product.id, file);
-      setDraft((current) => ({ ...current, imageUrl: updated.imageUrl ?? "" }));
-      updateProduct(product.id, { imageUrl: updated.imageUrl });
-    } catch {
-      setMediaError("Не удалось загрузить фото. Проверьте формат и размер файла.");
-    } finally {
-      setMediaBusy(false);
-    }
   }
 
-  async function removeImage() {
-    if (!product) {
-      setDraft((current) => ({ ...current, imageUrl: "" }));
+  function removeImage() {
+    setSelectedImage(null);
+    setImageRemoved(true);
+    setMediaError(null);
+  }
+
+  function templateSelected(item: ToppingCatalogItem) {
+    const normalized = item.name.ru.trim().toLocaleLowerCase("ru");
+    return draft.toppings.some(
+      (topping) =>
+        topping.id === item.id ||
+        (topping.label.trim().toLocaleLowerCase("ru") === normalized &&
+          topping.priceDelta === item.price)
+    );
+  }
+
+  function toggleTemplate(item: ToppingCatalogItem) {
+    if (templateSelected(item)) {
+      const normalized = item.name.ru.trim().toLocaleLowerCase("ru");
+      setDraft((current) => ({
+        ...current,
+        toppings: current.toppings.filter(
+          (topping) =>
+            !(
+              topping.id === item.id ||
+              (topping.label.trim().toLocaleLowerCase("ru") === normalized &&
+                topping.priceDelta === item.price)
+            )
+        )
+      }));
       return;
     }
-    setMediaBusy(true);
-    setMediaError(null);
+    setDraft((current) => ({
+      ...current,
+      toppings: [
+        ...current.toppings,
+        {
+          id: item.id,
+          label: item.name.ru,
+          localizedName: item.name,
+          priceDelta: item.price
+        }
+      ]
+    }));
+  }
+
+  async function createTopping() {
+    const priceValue = Math.max(0, Math.round(Number(newTopping.price)) || 0);
+    if (
+      !newTopping.ru.trim() ||
+      !newTopping.ky.trim() ||
+      !newTopping.en.trim()
+    ) {
+      setToppingError("Заполните название на RU, KG и EN.");
+      return;
+    }
+    setToppingError(null);
     try {
-      await apiDeleteProductImage(company.id, product.id);
-      setDraft((current) => ({ ...current, imageUrl: "" }));
-      updateProduct(product.id, { imageUrl: null });
+      const created = await apiCreateTopping(
+        company.id,
+        {
+          ru: newTopping.ru.trim(),
+          ky: newTopping.ky.trim(),
+          en: newTopping.en.trim()
+        },
+        priceValue,
+        toppingCatalog.length
+      );
+      onToppingCreated(created);
+      setDraft((current) => ({
+        ...current,
+        toppings: [
+          ...current.toppings,
+          {
+            id: created.id,
+            label: created.name.ru,
+            localizedName: created.name,
+            priceDelta: created.price
+          }
+        ]
+      }));
+      setNewTopping({ ru: "", ky: "", en: "", price: "" });
+      setShowNewTopping(false);
     } catch {
-      setMediaError("Не удалось удалить фото.");
-    } finally {
-      setMediaBusy(false);
+      setToppingError("Не удалось создать топпинг.");
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!canSave) return;
+    setMediaBusy(true);
+    setMediaError(null);
+    const normalizedSizes = normalizedPricing.sizes.filter((size) =>
+      size.label.trim()
+    );
     const payload = {
       name: draft.name.trim(),
       description: draft.description.trim(),
-      imageUrl: draft.imageUrl.trim() || null,
+      imageUrl: persistedProduct?.imageUrl ?? null,
       category: draft.category.trim() || "Прочее",
       categoryId: draft.categoryId,
       color: draft.color,
       price,
-      sizes: draft.sizes.filter((s) => s.label.trim()),
+      sizes: normalizedSizes,
       toppings: draft.toppings.filter((t) => t.label.trim()),
       availableBranchIds: draft.availableBranchIds,
       active: draft.active,
       isBestSeller: draft.isBestSeller,
       isNew: draft.isNew
     };
-    if (product) {
-      updateProduct(product.id, payload);
-    } else {
-      addProduct({
-        id: `${company.id}-p-${uid()}`,
-        companyId: company.id,
-        ...payload
-      });
+    try {
+      let saved = persistedProduct
+        ? await updateProduct(persistedProduct.id, payload)
+        : await addProduct({
+            id: `${company.id}-p-${uid()}`,
+            companyId: company.id,
+            ...payload
+          });
+      setPersistedProduct(saved);
+
+      if (selectedImage) {
+        const withImage = await apiPutProductImage(
+          company.id,
+          saved.id,
+          selectedImage.file
+        );
+        saved = await updateProduct(saved.id, { imageUrl: withImage.imageUrl });
+        setPersistedProduct(saved);
+      } else if (imageRemoved && saved.imageUrl) {
+        await apiDeleteProductImage(company.id, saved.id);
+        saved = await updateProduct(saved.id, { imageUrl: null });
+        setPersistedProduct(saved);
+      }
+      onClose();
+    } catch {
+      setMediaError(
+        persistedProduct
+          ? "Не удалось сохранить товар или фотографию. Повторите попытку."
+          : "Товар мог сохраниться, но фотография не загрузилась. Повторите сохранение."
+      );
+    } finally {
+      setMediaBusy(false);
     }
-    onClose();
   }
 
   return (
@@ -390,53 +516,40 @@ function ProductPanel({
             <p className="mb-1.5 text-sm font-medium text-coffee-700">Фото</p>
             <div className="flex items-start gap-3">
               <ProductImage
-                key={draft.imageUrl}
-                imageUrl={draft.imageUrl || null}
+                key={selectedImage?.previewUrl ?? `${draft.imageUrl}-${imageRemoved}`}
+                imageUrl={
+                  selectedImage?.previewUrl ??
+                  (imageRemoved ? null : draft.imageUrl || null)
+                }
                 color={draft.color}
                 name={draft.name}
                 className="h-24 w-24 rounded-2xl"
               />
               <div className="min-w-0 flex-1">
-                <input
-                  type="url"
-                  value={draft.imageUrl}
-                  onChange={(e) =>
-                    setDraft({ ...draft, imageUrl: e.target.value })
-                  }
-                  placeholder="https://… или /media/…"
-                  aria-label="URL фотографии товара"
-                  className="input"
-                />
+                <label className="focus-ring inline-flex h-9 cursor-pointer items-center rounded-full border border-coffee-900/15 px-3 text-xs font-semibold text-coffee-700">
+                  {selectedImage ? "Выбрать другое фото" : "Открыть проводник"}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    disabled={mediaBusy}
+                    className="sr-only"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) chooseImage(file);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
                 <p className="mt-1.5 text-xs leading-relaxed text-coffee-500">
-                  Укажите HTTPS-адрес или путь /media/ уже загруженного изображения.
+                  JPEG, PNG или WebP. Файл загрузится только после сохранения товара.
                 </p>
-                {product ? (
-                  <label className="focus-ring mt-2 inline-flex h-9 cursor-pointer items-center rounded-full border border-coffee-900/15 px-3 text-xs font-semibold text-coffee-700">
-                    {mediaBusy ? "Загрузка…" : "Выбрать файл"}
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      disabled={mediaBusy}
-                      className="sr-only"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        if (file) void uploadImage(file);
-                        event.currentTarget.value = "";
-                      }}
-                    />
-                  </label>
-                ) : (
-                  <p className="mt-2 text-xs text-coffee-500">
-                    Сначала сохраните товар, затем откройте редактирование и загрузите фото.
-                  </p>
-                )}
                 {mediaError && (
                   <p className="mt-2 text-xs text-red-600">{mediaError}</p>
                 )}
-                {draft.imageUrl && (
+                {(selectedImage || (!imageRemoved && draft.imageUrl)) && (
                   <button
                     type="button"
-                    onClick={() => void removeImage()}
+                    onClick={removeImage}
                     className="focus-ring mt-2 rounded text-xs font-semibold text-red-600 hover:text-red-700 dark:text-red-400"
                   >
                     Убрать фото
@@ -479,17 +592,22 @@ function ProductPanel({
                 </button>
               </>
             </Field>
-            <Field label="Цена, сом">
-              <input
-                type="number"
-                min={0}
-                value={draft.priceText}
-                onChange={(e) =>
-                  setDraft({ ...draft, priceText: e.target.value })
-                }
-                placeholder="350"
-                className="input"
-              />
+            <Field label="Базовая цена, сом (необязательно)">
+              <>
+                <input
+                  type="number"
+                  min={0}
+                  value={draft.priceText}
+                  onChange={(e) =>
+                    setDraft({ ...draft, priceText: e.target.value })
+                  }
+                  placeholder="Рассчитается из размеров"
+                  className="input"
+                />
+                <span className="mt-1 block text-xs text-coffee-500">
+                  Если оставить пустой, возьмём минимальную цену размера.
+                </span>
+              </>
             </Field>
           </div>
 
@@ -548,13 +666,101 @@ function ProductPanel({
           <ModifierEditor
             title="Размеры (итоговая цена)"
             options={draft.sizes}
-            basePrice={price}
-            useFinalPrice
+            showPlus={false}
             onChange={(sizes) => setDraft({ ...draft, sizes })}
           />
 
+          <div className="rounded-2xl border border-coffee-900/10 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-coffee-700">
+                  Готовые топпинги
+                </p>
+                <p className="mt-1 text-xs text-coffee-500">
+                  Создайте один раз и отмечайте нужные для каждого товара.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNewTopping((value) => !value)}
+                className="shrink-0 text-xs font-semibold text-accent"
+              >
+                + Новый
+              </button>
+            </div>
+
+            {toppingCatalog.filter((item) => item.active).length > 0 ? (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {toppingCatalog
+                  .filter((item) => item.active)
+                  .map((item) => (
+                    <label
+                      key={item.id}
+                      className="flex cursor-pointer items-center gap-2 rounded-xl border border-coffee-900/10 px-3 py-2 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={templateSelected(item)}
+                        onChange={() => toggleTemplate(item)}
+                        className="h-4 w-4 accent-[rgb(var(--accent))]"
+                      />
+                      <span className="min-w-0 flex-1 truncate">
+                        {item.name.ru}
+                      </span>
+                      <span className="text-xs text-coffee-500">
+                        +{item.price} сом
+                      </span>
+                    </label>
+                  ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-xs text-coffee-500">
+                Справочник пока пуст.
+              </p>
+            )}
+
+            {showNewTopping && (
+              <div className="mt-3 space-y-2 rounded-xl bg-coffee-900/[0.03] p-3">
+                {(["ru", "ky", "en"] as const).map((language) => (
+                  <input
+                    key={language}
+                    value={newTopping[language]}
+                    onChange={(event) =>
+                      setNewTopping({
+                        ...newTopping,
+                        [language]: event.target.value
+                      })
+                    }
+                    placeholder={`Название ${language.toUpperCase()}`}
+                    className="input"
+                  />
+                ))}
+                <input
+                  type="number"
+                  min={0}
+                  value={newTopping.price}
+                  onChange={(event) =>
+                    setNewTopping({ ...newTopping, price: event.target.value })
+                  }
+                  placeholder="Доплата, сом"
+                  className="input"
+                />
+                <button
+                  type="button"
+                  onClick={() => void createTopping()}
+                  className="h-9 rounded-full bg-accent px-4 text-xs font-semibold text-white"
+                >
+                  Создать и выбрать
+                </button>
+                {toppingError && (
+                  <p className="text-xs text-red-600">{toppingError}</p>
+                )}
+              </div>
+            )}
+          </div>
+
           <ModifierEditor
-            title="Топпинги (приплата)"
+            title="Ручные топпинги (доплата)"
             options={draft.toppings}
             onChange={(toppings) => setDraft({ ...draft, toppings })}
           />
@@ -650,9 +856,11 @@ function MenuContent() {
     { mode: "edit"; productId: string } | { mode: "create" } | null
   >(null);
   const [categoryRecords, setCategoryRecords] = useState<Category[]>([]);
+  const [toppingRecords, setToppingRecords] = useState<ToppingCatalogItem[]>([]);
 
   useEffect(() => {
     void apiFetchCategories(company.id).then(setCategoryRecords);
+    void apiFetchToppings(company.id).then(setToppingRecords);
   }, [company.id]);
 
   const shortBranchName = (name: string) =>
@@ -891,8 +1099,12 @@ function MenuContent() {
           key={panel.mode === "edit" ? panel.productId : "create"}
           product={panelProduct}
           categories={categoryRecords}
+          toppingCatalog={toppingRecords}
           onCategoryCreated={(category) =>
             setCategoryRecords((current) => [...current, category])
+          }
+          onToppingCreated={(topping) =>
+            setToppingRecords((current) => [...current, topping])
           }
           onClose={() => setPanel(null)}
         />

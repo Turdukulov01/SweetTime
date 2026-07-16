@@ -404,6 +404,18 @@ below remains authoritative; this section records the current execution order.
   admin typecheck and 11/11 tests pass; clean PostgreSQL migration and production Docker admin build pass.
   Catalog/admin list prices use the lowest configured final size price, and paid toppings are never
   preselected, so opening a product cannot silently raise its displayed price.
+- [ ] **[implemented locally 2026-07-16; production rollout and phone acceptance pending]
+  Product editor UX, reusable toppings, automatic history refresh and strict promo gate.** Product photos
+  are selected through the system file picker in both create/edit modes and uploaded only after one explicit
+  Save; the raw URL/path field and save-first-media step are removed. Base price is optional when final size
+  prices exist and is derived from their minimum; a product without sizes still requires an explicit price.
+  A tenant-owned localized topping catalog can be created once and selected into any product, while manual
+  custom toppings remain available and product/order snapshots stay immutable. Settings use a local phone
+  preview draft and do not update the admin shell, API or phone before the single Save succeeds. Mobile order
+  history polls every 10 seconds only while visible and still supports pull-to-refresh. A non-empty promo code
+  is revalidated against fresh server content before checkout and blocks navigation when invalid, inactive or
+  unverifiable. Migration head `a62f1c9d4e30`; backend 72/72, Flutter 77/77, admin 14/14/typecheck, production
+  Docker admin build and empty-PostgreSQL migration pass.
 - [ ] **White-label platform hardening.** Keep one tenant-aware backend and one configurable admin
   runtime for all companies; map approved custom domains to `company_id` and require Host, URL scope
   and JWT `cid` to agree. Do not create one copied backend/admin and one port pair per company.

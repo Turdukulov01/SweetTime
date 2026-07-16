@@ -1389,3 +1389,25 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
 - Дополнение по ценам: Flutter-карточки и список товаров admin показывают минимальную итоговую цену размера;
   платные топпинги больше не выбираются автоматически при открытии товара. Это дополняет миграцию
   `e18d7a4c9f22` и устраняет как 4000 + 3000 = 7000, так и скрытую стартовую доплату за тапиоку.
+
+## 2026-07-16 — CX-029: UX формы товара, справочник топпингов и строгий promo gate
+
+- Admin: фото нового/существующего товара выбирается только через browser file picker, локально preview-ится
+  и загружается после единой кнопки Save; URL/path input и требование сначала создать товар удалены. Размеры
+  хранятся в черновике как итоговые цены; optional base вычисляется из минимального размера, но товар без
+  размеров не может неявно стать бесплатным. Настройки бренда/лояльности остаются локальным preview draft до
+  успешного единого PATCH по Save — shell, сервер и телефон раньше времени не меняются.
+- Backend/Admin: `ToppingCatalogItem` tenant-scoped, стабильный ID, RU/KY/EN, price/sort/active и owner/manager
+  CRUD. Миграция `a62f1c9d4e30` переносит уникальные существующие product toppings в справочник, не меняя
+  product/order snapshots. В product editor готовые топпинги выбираются checkbox-ами, новый создаётся один раз;
+  ручные строки остаются. Полные локализации справочника копируются в product modifier JSON.
+- Flutter: открытая история опрашивает API раз в 10 секунд, прекращает polling в фоне, немедленно обновляется
+  при resume и сохраняет pull-to-refresh. Непустой промокод перед checkout обязательно проверяется свежим
+  `/promotions`; invalid/inactive/network-unverified блокирует переход, пустое поле разрешено, backend остаётся
+  финальной защитой при POST order.
+- Проверки: backend 72/72; Flutter analyze clean и 77/77; admin typecheck и 14/14; production Docker admin build;
+  чистый PostgreSQL upgrade от нуля до единственного head `a62f1c9d4e30`; `git diff --check` clean. Rollout и
+  signed APK ещё не выполнены.
+- Просьба Claude Code: не возвращать media URL field; не делать settings optimistic/auto-save; не связывать
+  изменение catalog topping с автоматическим переписыванием существующих products/orders; не доверять promo
+  cache при переходе в checkout.

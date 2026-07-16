@@ -64,6 +64,7 @@ from .models import (
     Order,
     Product,
     Promotion,
+    ToppingCatalogItem,
 )
 from .order_events import encode_sse, event_payload, order_event_hub
 from .seed import seed_if_empty
@@ -152,6 +153,18 @@ def _category_out(category: Category) -> schemas.CategoryOut:
         name=_category_name(category.name),
         sortOrder=category.sort_order,
         active=category.active,
+    )
+
+
+def _topping_catalog_item_out(
+    topping: ToppingCatalogItem,
+) -> schemas.ToppingCatalogItemOut:
+    return schemas.ToppingCatalogItemOut(
+        id=topping.id,
+        name=_category_name(topping.name),
+        price=topping.price,
+        sortOrder=topping.sort_order,
+        active=topping.active,
     )
 
 
@@ -414,6 +427,101 @@ def delete_category(
     if in_use:
         raise HTTPException(status_code=409, detail="Category is used by products")
     db.delete(category)
+    db.commit()
+    return Response(status_code=204)
+
+
+@app.get(
+    "/api/companies/{companyId}/toppings",
+    response_model=list[schemas.ToppingCatalogItemOut],
+    tags=["products"],
+    dependencies=[Depends(require_content_staff)],
+)
+def list_topping_catalog_items(
+    company: Company = Depends(get_company), db: Session = Depends(get_db)
+) -> list[schemas.ToppingCatalogItemOut]:
+    toppings = db.scalars(
+        select(ToppingCatalogItem)
+        .where(ToppingCatalogItem.company_id == company.id)
+        .order_by(ToppingCatalogItem.sort_order, ToppingCatalogItem.id)
+    ).all()
+    return [_topping_catalog_item_out(topping) for topping in toppings]
+
+
+@app.post(
+    "/api/companies/{companyId}/toppings",
+    response_model=schemas.ToppingCatalogItemOut,
+    status_code=201,
+    tags=["products"],
+    dependencies=[Depends(require_content_staff)],
+)
+def create_topping_catalog_item(
+    body: schemas.ToppingCatalogItemCreate,
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> schemas.ToppingCatalogItemOut:
+    topping = ToppingCatalogItem(
+        id=f"topping-{uuid4().hex}",
+        company_id=company.id,
+        name=body.name.model_dump(),
+        price=body.price,
+        sort_order=body.sortOrder,
+        active=body.active,
+    )
+    db.add(topping)
+    db.commit()
+    return _topping_catalog_item_out(topping)
+
+
+def _company_topping_catalog_item_or_404(
+    db: Session, company_id: str, topping_id: str
+) -> ToppingCatalogItem:
+    topping = db.get(ToppingCatalogItem, topping_id)
+    if topping is None or topping.company_id != company_id:
+        raise HTTPException(status_code=404, detail="Topping not found")
+    return topping
+
+
+@app.patch(
+    "/api/companies/{companyId}/toppings/{toppingId}",
+    response_model=schemas.ToppingCatalogItemOut,
+    tags=["products"],
+    dependencies=[Depends(require_content_staff)],
+)
+def patch_topping_catalog_item(
+    toppingId: str,
+    patch: schemas.ToppingCatalogItemPatch,
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> schemas.ToppingCatalogItemOut:
+    topping = _company_topping_catalog_item_or_404(db, company.id, toppingId)
+    data = patch.model_dump(exclude_unset=True)
+    if "name" in data:
+        topping.name = data["name"]
+    if "price" in data:
+        topping.price = data["price"]
+    if "sortOrder" in data:
+        topping.sort_order = data["sortOrder"]
+    if "active" in data:
+        topping.active = data["active"]
+    db.add(topping)
+    db.commit()
+    return _topping_catalog_item_out(topping)
+
+
+@app.delete(
+    "/api/companies/{companyId}/toppings/{toppingId}",
+    status_code=204,
+    tags=["products"],
+    dependencies=[Depends(require_content_staff)],
+)
+def delete_topping_catalog_item(
+    toppingId: str,
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> Response:
+    topping = _company_topping_catalog_item_or_404(db, company.id, toppingId)
+    db.delete(topping)
     db.commit()
     return Response(status_code=204)
 
