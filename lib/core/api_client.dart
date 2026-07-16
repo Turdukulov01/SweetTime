@@ -17,6 +17,17 @@ const String apiBase = String.fromEnvironment(
   defaultValue: 'http://127.0.0.1:8010',
 );
 
+String? _resolvePublicUrl(dynamic raw) {
+  if (raw is! String || raw.trim().isEmpty) return null;
+  final value = raw.trim();
+  final parsed = Uri.tryParse(value);
+  if (parsed != null && parsed.hasScheme) return value;
+  final base = Uri.parse(apiBase.endsWith('/') ? apiBase : '$apiBase/');
+  return base
+      .resolve(value.startsWith('/') ? value.substring(1) : value)
+      .toString();
+}
+
 /// Брендинг и правила компании из `GET /config`. Поля nullable:
 /// отсутствующее значение не затирает локальные дефолты.
 class CompanyConfig {
@@ -177,6 +188,16 @@ OrderHistoryEntry? parseCustomerOrderHistoryEntry(dynamic raw) {
   final createdAt = createdAtRaw is String
       ? DateTime.tryParse(createdAtRaw)
       : null;
+  final customerPhone = _optionalString(raw['customerPhone']);
+  final branchName = _optionalString(raw['branchName']);
+  final branchAddress = _optionalString(raw['branchAddress']);
+  final comment = _optionalString(raw['comment']);
+  if ((raw['customerPhone'] != null && customerPhone == null) ||
+      (raw['branchName'] != null && branchName == null) ||
+      (raw['branchAddress'] != null && branchAddress == null) ||
+      (raw['comment'] != null && comment == null)) {
+    return null;
+  }
   final rawItems = raw['items'];
   if (id == null ||
       number == null ||
@@ -238,12 +259,25 @@ OrderHistoryEntry? parseCustomerOrderHistoryEntry(dynamic raw) {
     pointsUsed: pointsUsed,
     pointsEarned: pointsEarned,
     createdAt: createdAt,
+    customerPhone: customerPhone,
+    branchName: branchName,
+    branchAddress: branchAddress,
+    comment: comment,
   );
+}
+
+String? _optionalString(dynamic raw) {
+  if (raw == null) return null;
+  if (raw is! String) return null;
+  final value = raw.trim();
+  return value.isEmpty ? null : value;
 }
 
 OrderHistoryItem? _parseOrderHistoryItem(dynamic raw, int itemsVersion) {
   if (raw is! Map<String, dynamic>) return null;
   final productName = _localizedSnapshot(raw['productName']);
+  final productDescription = _localizedSnapshot(raw['productDescription']);
+  final imageUrl = _resolvePublicUrl(raw['imageUrl']);
   final quantity = _positiveInt(raw['quantity']);
   final total = _nonNegativeInt(raw['total']);
   final sizeName = _localizedSnapshot(raw['sizeName'] ?? raw['size']);
@@ -252,6 +286,8 @@ OrderHistoryItem? _parseOrderHistoryItem(dynamic raw, int itemsVersion) {
   if (itemsVersion == 1) {
     return OrderHistoryItem(
       productName: productName,
+      productDescription: productDescription,
+      imageUrl: imageUrl,
       sizeName: sizeName,
       quantity: quantity,
       total: total,
@@ -262,12 +298,14 @@ OrderHistoryItem? _parseOrderHistoryItem(dynamic raw, int itemsVersion) {
   final sizeIdRaw = raw['sizeId'];
   final sizeId = sizeIdRaw == null ? null : _requiredString(sizeIdRaw);
   final toppingIds = _stringList(raw['toppingIds']);
+  final toppings = _parseOrderToppings(raw['toppings']);
   final sugarPercent = _wholeInt(raw['sugarPercent']);
   final ice = _iceLevel(raw['ice']);
   final unitPrice = _nonNegativeInt(raw['unitPrice']);
   if (productId == null ||
       (sizeIdRaw != null && sizeId == null) ||
       toppingIds == null ||
+      toppings == null ||
       toppingIds.length != toppingIds.toSet().length ||
       !const [0, 30, 50, 70, 100].contains(sugarPercent) ||
       ice == null ||
@@ -282,10 +320,28 @@ OrderHistoryItem? _parseOrderHistoryItem(dynamic raw, int itemsVersion) {
     productId: productId,
     sizeId: sizeId,
     toppingIds: List.unmodifiable(toppingIds),
+    toppings: List.unmodifiable(toppings),
+    productDescription: productDescription,
+    imageUrl: imageUrl,
     sugarPercent: sugarPercent,
     ice: ice,
     unitPrice: unitPrice,
   );
+}
+
+List<ModifierOption>? _parseOrderToppings(dynamic raw) {
+  if (raw == null) return const [];
+  if (raw is! List<dynamic>) return null;
+  final values = <ModifierOption>[];
+  for (final item in raw) {
+    if (item is! Map<String, dynamic>) return null;
+    final id = _requiredString(item['id']);
+    final name = _localizedSnapshot(item['name']);
+    final priceDelta = _wholeInt(item['priceDelta']);
+    if (id == null || name == null || priceDelta == null) return null;
+    values.add(ModifierOption(id: id, name: name, priceDelta: priceDelta));
+  }
+  return values;
 }
 
 String? _requiredString(dynamic raw) {
@@ -1113,6 +1169,7 @@ class ApiClient {
     required List<Map<String, Object?>> items,
     required String paymentMethod,
     required int pointsUsed,
+    String? comment,
   }) async {
     try {
       final response = await http
@@ -1127,6 +1184,9 @@ class ApiClient {
               'items': items,
               'paymentMethod': paymentMethod,
               'pointsUsed': pointsUsed,
+              'comment': comment?.trim().isEmpty == true
+                  ? null
+                  : comment?.trim(),
             }),
           )
           .timeout(_orderTimeout);
@@ -1200,6 +1260,7 @@ class ApiClient {
           b.toString(),
       ],
       assetImage: demo?.assetImage,
+      imageUrl: _resolvePublicUrl(json['imageUrl']),
       isNew: (json['isNew'] as bool?) ?? false,
       isBestSeller: (json['isBestSeller'] as bool?) ?? false,
     );

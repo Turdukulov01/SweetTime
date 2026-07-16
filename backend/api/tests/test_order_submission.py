@@ -58,11 +58,28 @@ def _seed(db) -> tuple[Company, Customer]:
         company_id=company.id,
         name={"ru": "Чай", "ky": "Чай", "en": "Tea"},
         category="milk-tea",
-        description="",
+        description={"ru": "Описание", "ky": "Сүрөттөмө", "en": "Description"},
+        image_url="https://cdn.example.test/products/tea.webp",
         price=300,
         color="#FF5C9A",
-        sizes=[{"id": "m", "name": "M", "priceDelta": 50}],
-        toppings=[{"id": "tapioca", "name": "Tapioca", "priceDelta": 40}],
+        sizes=[
+            {
+                "id": "m",
+                "name": {"ru": "M", "ky": "M", "en": "M"},
+                "priceDelta": 50,
+            }
+        ],
+        toppings=[
+            {
+                "id": "tapioca",
+                "name": {
+                    "ru": "Тапиока",
+                    "ky": "Тапиока",
+                    "en": "Tapioca",
+                },
+                "priceDelta": 40,
+            }
+        ],
         available_branch_ids=[branch.id],
         active=True,
         is_new=False,
@@ -80,6 +97,7 @@ def _request(request_id: str, quantity: int = 1) -> schemas.OrderCreate:
             "branchId": "b1",
             "type": "pickup",
             "readyTime": "asap",
+            "comment": "  Без трубочки  ",
             "items": [
                 {
                     "productId": "p1",
@@ -110,6 +128,27 @@ def test_same_client_request_returns_the_committed_order_once(monkeypatch) -> No
             assert first.number == replay.number == "SW-1050"
             assert first.status == "new"
             assert first.clientRequestId == "mobile-request-0001"
+            assert first.customerPhone == "+996700123456"
+            assert first.branchName == "Main"
+            assert first.branchAddress == "Address"
+            assert first.comment == "Без трубочки"
+            assert first.items[0].productName.model_dump() == {
+                "ru": "Чай",
+                "ky": "Чай",
+                "en": "Tea",
+            }
+            assert first.items[0].productDescription.model_dump() == {
+                "ru": "Описание",
+                "ky": "Сүрөттөмө",
+                "en": "Description",
+            }
+            assert first.items[0].imageUrl.endswith("tea.webp")
+            assert first.items[0].size.model_dump() == {
+                "ru": "M",
+                "ky": "M",
+                "en": "M",
+            }
+            assert first.items[0].toppings[0].id == "tapioca"
             assert db.scalar(select(func.count()).select_from(Order)) == 1
             events = hub.wait_after("sweettime", 0, timeout=0).events
             assert len(events) == 1

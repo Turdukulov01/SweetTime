@@ -5,8 +5,9 @@
 // Данные — из боевого API (GET /orders требует токен стаффа); если API не
 // ответил, показываем ошибку, а не мок-очередь.
 
-import { useState } from "react";
-import { Ban, ChevronRight, MapPin, TriangleAlert } from "lucide-react";
+import { useCallback, useState } from "react";
+import { Ban, ChevronRight, MapPin, ReceiptText, TriangleAlert } from "lucide-react";
+import { OrderDetailsDrawer } from "@/components/order-details-drawer";
 import { StatusBadge } from "@/components/status-badge";
 import { useCompanyStore } from "@/lib/company-store";
 import { ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from "@/lib/labels";
@@ -29,12 +30,14 @@ function OrderCard({
   order,
   branchName,
   showBranch,
-  currency
+  currency,
+  onDetails
 }: {
   order: Order;
   branchName: string;
   showBranch: boolean;
   currency: string;
+  onDetails: () => void;
 }) {
   const { setStatus } = useOrders();
   const action = NEXT_ACTION[order.status];
@@ -72,14 +75,23 @@ function OrderCard({
             className="flex items-baseline justify-between gap-2 text-sm text-coffee-700"
           >
             <span>
-              {item.quantity} × {item.name}
+              {item.quantity} × {item.name || "Название не передано"}
             </span>
             <span className="whitespace-nowrap text-xs text-coffee-500">
-              {formatCurrency(item.unitPrice * item.quantity, currency)}
+              {formatCurrency(item.lineTotal, currency)}
             </span>
           </li>
         ))}
       </ul>
+
+      <button
+        type="button"
+        onClick={onDetails}
+        className="focus-ring mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-full border border-coffee-900/15 text-sm font-semibold text-coffee-700 transition hover:border-accent hover:text-accent"
+      >
+        <ReceiptText className="h-4 w-4" />
+        Подробнее
+      </button>
 
       {(action || cancellable) && (
         <div className="mt-3 flex items-center gap-2">
@@ -115,6 +127,8 @@ export default function OrdersPage() {
   const { company, branches } = useCompanyStore();
   const { orders, errorMessage, loading, loadFailed } = useOrders();
   const [branchFilter, setBranchFilter] = useState<string>("all");
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const closeDetails = useCallback(() => setSelectedOrderId(null), []);
 
   if (!user) return null;
 
@@ -148,6 +162,9 @@ export default function OrdersPage() {
     effectiveBranch === "all"
       ? orders
       : orders.filter((o) => o.branchId === effectiveBranch);
+  const selectedOrder = selectedOrderId
+    ? orders.find((order) => order.id === selectedOrderId)
+    : undefined;
 
   const byStatus = (status: OrderStatus) =>
     visibleOrders
@@ -255,6 +272,7 @@ export default function OrdersPage() {
                     branchName={branchName(order.branchId)}
                     showBranch={!isBarista && effectiveBranch === "all"}
                     currency={company.currency}
+                    onDetails={() => setSelectedOrderId(order.id)}
                   />
                 ))}
                 {columnOrders.length === 0 && (
@@ -291,6 +309,14 @@ export default function OrdersPage() {
                   {formatCurrency(order.total, company.currency)}
                 </span>
                 <StatusBadge status="cancelled" />
+                <button
+                  type="button"
+                  onClick={() => setSelectedOrderId(order.id)}
+                  className="focus-ring flex h-9 items-center gap-1.5 rounded-full border border-coffee-900/15 px-3 text-xs font-semibold text-coffee-700 transition hover:border-accent hover:text-accent"
+                >
+                  <ReceiptText className="h-3.5 w-3.5" />
+                  Подробнее
+                </button>
               </li>
             ))}
           </ul>
@@ -306,6 +332,15 @@ export default function OrdersPage() {
           <TriangleAlert className="h-4 w-4" />
           {errorMessage}
         </div>
+      )}
+
+      {selectedOrder && (
+        <OrderDetailsDrawer
+          order={selectedOrder}
+          branchName={branchName(selectedOrder.branchId)}
+          currency={company.currency}
+          onClose={closeDetails}
+        />
       )}
     </div>
   );

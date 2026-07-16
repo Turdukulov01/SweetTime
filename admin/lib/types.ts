@@ -221,12 +221,30 @@ export type OrderStatus = "new" | "preparing" | "ready" | "done" | "cancelled";
 
 export type PaymentMethod = "mock" | "cash" | "qr";
 
-export interface OrderItem {
-  /** Название позиции с учётом модификаторов, например "Розовая луна (L, тапиока)" */
+export interface OrderItemTopping {
+  id?: string;
   name: string;
+  priceDelta?: number;
+}
+
+export interface OrderItem {
+  /** Серверный snapshot названия; пустая строка означает, что legacy API его не дал. */
+  name: string;
+  productId?: string;
+  sizeId?: string;
+  toppingIds?: string[];
   quantity: number;
-  /** Итоговая цена за единицу с учётом модификаторов, сом */
-  unitPrice: number;
+  /** Цена единицы приходит с V2 API или выводится только при точном делении total/quantity. */
+  unitPrice?: number;
+  /** Серверная сумма всей строки заказа. */
+  lineTotal: number;
+  imageUrl?: string;
+  description?: string;
+  size?: string;
+  sugarPercent?: number;
+  ice?: string;
+  /** Display snapshots; stable IDs хранятся отдельно и не выдаются как названия. */
+  toppings?: OrderItemTopping[];
 }
 
 export interface Order {
@@ -243,8 +261,19 @@ export interface Order {
   /** ISO-строка времени создания */
   createdAt: string;
   customerName: string;
+  customerPhone?: string;
+  branchName?: string;
+  branchAddress?: string;
+  readyTime?: string;
+  comment?: string;
+  itemsVersion?: 1 | 2;
   /** Может отсутствовать у старого demo API или локальных моков */
   paymentMethod?: PaymentMethod;
+  paymentStatus?: string;
+  subtotal?: number;
+  discount?: number;
+  pointsUsed?: number;
+  pointsEarned?: number;
 }
 
 /** Срез данных одной компании — единственный формат выдачи данных компонентам */

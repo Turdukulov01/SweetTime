@@ -9,6 +9,7 @@ import '../core/api_client.dart';
 import '../core/auth_store.dart';
 import '../core/cart_store.dart';
 import '../core/google_identity.dart';
+import '../core/order_history_store.dart';
 import '../core/theme/app_theme.dart';
 import 'app_models.dart';
 import 'demo_data.dart';
@@ -118,6 +119,7 @@ class AppState {
     required this.cart,
     required this.useBonus,
     required this.orders,
+    required this.hiddenOrderIds,
     required this.pointEvents,
     required this.recurring,
   });
@@ -173,6 +175,11 @@ class AppState {
   final List<CartItem> cart;
   final bool useBonus;
   final List<OrderHistoryEntry> orders;
+  final Set<String> hiddenOrderIds;
+
+  List<OrderHistoryEntry> get visibleOrders => orders
+      .where((order) => !hiddenOrderIds.contains(order.id))
+      .toList(growable: false);
   final List<PointEvent> pointEvents;
   final RecurringOrder? recurring;
 
@@ -234,6 +241,7 @@ class AppState {
     List<CartItem>? cart,
     bool? useBonus,
     List<OrderHistoryEntry>? orders,
+    Set<String>? hiddenOrderIds,
     List<PointEvent>? pointEvents,
     RecurringOrder? recurring,
     bool clearBirthDate = false,
@@ -280,6 +288,7 @@ class AppState {
       cart: cart ?? this.cart,
       useBonus: useBonus ?? this.useBonus,
       orders: orders ?? this.orders,
+      hiddenOrderIds: hiddenOrderIds ?? this.hiddenOrderIds,
       pointEvents: pointEvents ?? this.pointEvents,
       recurring: clearRecurring ? null : (recurring ?? this.recurring),
     );
@@ -291,6 +300,7 @@ class AppStateController extends StateNotifier<AppState> {
     LanguagePreferenceStore? languagePreferences,
     AuthStore? authStore,
     CartStore? cartStore,
+    OrderHistoryVisibilityStore? orderHistoryVisibilityStore,
     ApiClient? api,
     GoogleIdentityProvider? googleIdentity,
   }) : _languagePreferences =
@@ -299,6 +309,11 @@ class AppStateController extends StateNotifier<AppState> {
        _cartStore =
            cartStore ??
            SharedPreferencesCartStore(companyId: api?.companyId ?? 'sweettime'),
+       _orderHistoryVisibilityStore =
+           orderHistoryVisibilityStore ??
+           SharedPreferencesOrderHistoryVisibilityStore(
+             companyId: api?.companyId ?? 'sweettime',
+           ),
        _api = api ?? ApiClient(),
        _googleIdentity = googleIdentity ?? PluginGoogleIdentityProvider(),
        super(
@@ -335,6 +350,7 @@ class AppStateController extends StateNotifier<AppState> {
            cart: const [],
            useBonus: false,
            orders: const [],
+           hiddenOrderIds: const {},
            pointEvents: DemoData.pointEvents,
            recurring: null,
          ),
@@ -344,6 +360,7 @@ class AppStateController extends StateNotifier<AppState> {
   final GoogleIdentityProvider _googleIdentity;
   final LanguagePreferenceStore _languagePreferences;
   final CartStore _cartStore;
+  final OrderHistoryVisibilityStore _orderHistoryVisibilityStore;
 
   /// Токены сессии на устройстве: вход переживает перезапуск приложения.
   final AuthStore _authStore;
@@ -374,6 +391,7 @@ class AppStateController extends StateNotifier<AppState> {
     _bootstrapped = true;
     final cartRevision = _cartRevision;
     final cartDraftFuture = _readCartDraft();
+    final hiddenOrderIdsFuture = _readHiddenOrderIds();
     try {
       final savedLanguage = await _languagePreferences.readLanguageCode();
       final language = AppLanguage.values.where(
@@ -394,7 +412,17 @@ class AppStateController extends StateNotifier<AppState> {
     }
     await refreshCompanyData(force: true);
     await _restoreCart(cartDraftFuture, cartRevision);
+    final hiddenOrderIds = await hiddenOrderIdsFuture;
+    state = state.copyWith(hiddenOrderIds: hiddenOrderIds);
     await _restoreSession();
+  }
+
+  Future<Set<String>> _readHiddenOrderIds() async {
+    try {
+      return await _orderHistoryVisibilityStore.readHiddenOrderIds();
+    } catch (_) {
+      return const {};
+    }
   }
 
   Future<List<CartDraftItem>> _readCartDraft() async {
@@ -829,6 +857,7 @@ class AppStateController extends StateNotifier<AppState> {
     required List<CartItem> items,
     required Branch branch,
     required int pointsUsed,
+    String? comment,
     PaymentMethod paymentMethod = PaymentMethod.mock,
   }) async {
     if (state.isGuest || items.isEmpty || !state.catalogAuthoritative) {
@@ -862,6 +891,7 @@ class AppStateController extends StateNotifier<AppState> {
           PaymentMethod.qrDemo => 'qr',
         },
         pointsUsed: pointsUsed,
+        comment: comment,
       ),
     );
 
@@ -1119,6 +1149,12 @@ class AppStateController extends StateNotifier<AppState> {
     } catch (_) {
       // Server deletion already succeeded; provider sign-out is best effort.
     }
+    try {
+      await _orderHistoryVisibilityStore.clear();
+    } catch (_) {
+      // Account deletion still clears in-memory private state if local storage
+      // is temporarily unavailable.
+    }
     state = state.copyWith(
       isGuest: true,
       clearCustomerId: true,
@@ -1135,6 +1171,7 @@ class AppStateController extends StateNotifier<AppState> {
       cart: const [],
       useBonus: false,
       orders: const [],
+      hiddenOrderIds: const {},
       pointEvents: const [],
       clearRecurring: true,
     );
@@ -1295,6 +1332,23 @@ class AppStateController extends StateNotifier<AppState> {
 
   void setUseBonus(bool value) {
     state = state.copyWith(useBonus: value);
+  }
+
+  Future<void> hideOrdersOnDevice(Iterable<String> orderIds) async {
+    final knownIds = state.orders.map((order) => order.id).toSet();
+    final requested = orderIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty && knownIds.contains(id));
+    final next = {...state.hiddenOrderIds, ...requested};
+    if (next.length == state.hiddenOrderIds.length) return;
+    final snapshot = Set<String>.unmodifiable(next);
+    state = state.copyWith(hiddenOrderIds: snapshot);
+    try {
+      await _orderHistoryVisibilityStore.writeHiddenOrderIds(snapshot);
+    } catch (_) {
+      // The current session remains consistent; persistence can recover on a
+      // later hide operation without ever deleting the server-side order.
+    }
   }
 
   Future<RepeatOrderResult> repeatOrder(OrderHistoryEntry order) async {

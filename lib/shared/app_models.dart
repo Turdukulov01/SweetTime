@@ -294,6 +294,7 @@ class Product {
     required this.toppings,
     required this.availableBranchIds,
     this.assetImage,
+    this.imageUrl,
     this.isNew = false,
     this.isBestSeller = false,
   });
@@ -310,6 +311,7 @@ class Product {
   final List<ModifierOption> toppings;
   final List<String> availableBranchIds;
   final String? assetImage;
+  final String? imageUrl;
   final bool isNew;
   final bool isBestSeller;
 
@@ -444,34 +446,42 @@ class OrderHistoryItem {
     required this.productName,
     required this.quantity,
     required this.total,
+    this.productDescription,
+    this.imageUrl,
     this.sizeName,
     this.productId,
     this.sizeId,
     this.toppingIds,
+    this.toppings,
     this.sugarPercent,
     this.ice,
     this.unitPrice,
   });
 
   final LocalizedText productName;
+  final LocalizedText? productDescription;
+  final String? imageUrl;
   final LocalizedText? sizeName;
   final int quantity;
   final int total;
   final String? productId;
   final String? sizeId;
   final List<String>? toppingIds;
+  final List<ModifierOption>? toppings;
   final int? sugarPercent;
   final IceLevel? ice;
   final int? unitPrice;
 
   factory OrderHistoryItem.fromCartItem(CartItem item) => OrderHistoryItem(
     productName: item.product.name,
+    productDescription: item.product.description,
     sizeName: item.sizeOption?.name,
     quantity: item.quantity,
     total: item.total,
     productId: item.product.id,
     sizeId: item.sizeId,
     toppingIds: List.unmodifiable(item.toppingIds),
+    toppings: List.unmodifiable(item.toppingOptions),
     sugarPercent: item.sugarPercent,
     ice: item.ice,
     unitPrice: (item.total / item.quantity).round(),
@@ -493,6 +503,10 @@ class OrderHistoryEntry {
     required this.pointsUsed,
     required this.pointsEarned,
     this.createdAt,
+    this.customerPhone,
+    this.branchName,
+    this.branchAddress,
+    this.comment,
   });
 
   final String id;
@@ -508,6 +522,10 @@ class OrderHistoryEntry {
   final int pointsUsed;
   final int pointsEarned;
   final DateTime? createdAt;
+  final String? customerPhone;
+  final String? branchName;
+  final String? branchAddress;
+  final String? comment;
 
   bool get supportsExactRepeat => itemsVersion == 2;
 

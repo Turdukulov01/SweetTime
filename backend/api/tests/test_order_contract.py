@@ -49,6 +49,7 @@ def test_order_create_v2_accepts_only_stable_selection() -> None:
             "branchId": "b1",
             "type": "pickup",
             "readyTime": "asap",
+            "comment": "  Less ice near the lid  ",
             "items": [
                 {
                     "productId": "p1",
@@ -66,6 +67,29 @@ def test_order_create_v2_accepts_only_stable_selection() -> None:
 
     assert order.items[0].productId == "p1"
     assert order.items[0].toppingIds == ["tapioca"]
+    assert order.comment == "Less ice near the lid"
+
+
+def test_order_comment_length_is_bounded() -> None:
+    with pytest.raises(ValidationError):
+        schemas.OrderCreate.model_validate(
+            {
+                "clientRequestId": "order-request-0001",
+                "branchId": "b1",
+                "type": "pickup",
+                "items": [
+                    {
+                        "productId": "p1",
+                        "sizeId": None,
+                        "toppingIds": [],
+                        "sugarPercent": 50,
+                        "ice": "regular",
+                        "quantity": 1,
+                    }
+                ],
+                "comment": "x" * 1001,
+            }
+        )
 
 
 @pytest.mark.parametrize(

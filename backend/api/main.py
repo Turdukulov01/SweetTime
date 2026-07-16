@@ -131,6 +131,7 @@ def _product_out(p: Product) -> schemas.ProductOut:
         name=p.name,
         category=p.category,
         description=p.description,
+        imageUrl=p.image_url,
         price=p.price,
         color=p.color,
         sizes=p.sizes,
@@ -309,6 +310,7 @@ def create_product(
         name=_localized_or_text(body.name),
         category=body.category,
         description=_localized_or_text(body.description),
+        image_url=body.imageUrl,
         price=body.price,
         color=body.color,
         sizes=_normalize_modifier_options(body.sizes, "size"),
@@ -339,6 +341,7 @@ def patch_product(
         "name": "name",
         "category": "category",
         "description": "description",
+        "imageUrl": "image_url",
         "price": "price",
         "color": "color",
         "sizes": "sizes",
@@ -573,10 +576,20 @@ def _build_order_items_v2(
         stored_items.append(
             {
                 "productId": product.id,
-                "productName": _display_text(product.name),
+                "productName": product.name,
+                "productDescription": product.description,
+                "imageUrl": product.image_url,
                 "sizeId": requested.sizeId,
-                "size": _display_text(size["name"]) if size is not None else None,
+                "size": size["name"] if size is not None else None,
                 "toppingIds": list(requested.toppingIds),
+                "toppings": [
+                    {
+                        "id": topping["id"],
+                        "name": topping["name"],
+                        "priceDelta": int(topping.get("priceDelta", 0)),
+                    }
+                    for topping in toppings
+                ],
                 "sugarPercent": requested.sugarPercent,
                 "ice": requested.ice,
                 "quantity": requested.quantity,
@@ -739,12 +752,16 @@ def create_order(
         number=number,
         # Личность заказчика — из токена, не из тела запроса.
         customer_name=locked_customer.name,
+        customer_phone=locked_customer.phone,
         customer_id=locked_customer.id,
         branch_id=body.branchId,
+        branch_name=branch.name,
+        branch_address=branch.address,
         type=body.type,
         # Payment is still demo-only; staff must explicitly accept the order.
         status="new",
         ready_time=body.readyTime,
+        comment=body.comment,
         items_version=2,
         items=stored_items,
         total=payable_total,

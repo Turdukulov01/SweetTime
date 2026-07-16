@@ -39,7 +39,23 @@ class ProductCard extends ConsumerWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  if (product.assetImage case final assetImage?)
+                  if (product.imageUrl case final imageUrl?)
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final cacheWidth =
+                            (constraints.biggest.longestSide *
+                                    MediaQuery.devicePixelRatioOf(context))
+                                .ceil();
+                        return Image.network(
+                          imageUrl,
+                          fit: BoxFit.cover,
+                          cacheWidth: cacheWidth,
+                          errorBuilder: (context, error, stackTrace) =>
+                              _ProductFallback(product: product),
+                        );
+                      },
+                    )
+                  else if (product.assetImage case final assetImage?)
                     LayoutBuilder(
                       builder: (context, constraints) {
                         final cacheWidth =
@@ -54,10 +70,7 @@ class ProductCard extends ConsumerWidget {
                       },
                     )
                   else
-                    ColoredBox(
-                      color: product.accentColor.withValues(alpha: 0.14),
-                      child: DrinkArt(product: product),
-                    ),
+                    _ProductFallback(product: product),
                   Positioned(
                     top: 8,
                     left: 8,
@@ -153,6 +166,18 @@ class ProductCard extends ConsumerWidget {
       ),
     );
   }
+}
+
+class _ProductFallback extends StatelessWidget {
+  const _ProductFallback({required this.product});
+
+  final Product product;
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+    color: product.accentColor.withValues(alpha: 0.14),
+    child: DrinkArt(product: product),
+  );
 }
 
 class _Tag extends StatelessWidget {

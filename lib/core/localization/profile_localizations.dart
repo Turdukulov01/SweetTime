@@ -258,6 +258,103 @@ extension ProfileLocalizations on AppLocalizations {
   String get profileOrderHistory =>
       _pick('История заказов', 'Заказдар тарыхы', 'Order history');
 
+  String get profileOpenOrderHistory => _pick(
+    'Открыть историю заказов',
+    'Заказдар тарыхын ачуу',
+    'Open order history',
+  );
+
+  String get profileOrderHistoryEmptyCompact =>
+      _pick('Заказов пока нет', 'Азырынча заказ жок', 'No orders yet');
+
+  String profileOrderHistorySummary(int count, String latestStatus) => _pick(
+    '$count заказов · последний: $latestStatus',
+    '$count заказ · акыркысы: $latestStatus',
+    '$count orders · latest: $latestStatus',
+  );
+
+  String get orderHistoryManage =>
+      _pick('Выбрать заказы', 'Заказдарды тандоо', 'Select orders');
+
+  String get orderHistoryExitSelection =>
+      _pick('Завершить выбор', 'Тандоону бүтүрүү', 'Finish selection');
+
+  String orderHistorySelected(int count) =>
+      _pick('Выбрано: $count', 'Тандалды: $count', '$count selected');
+
+  String get orderHistorySelectAll =>
+      _pick('Выбрать все', 'Баарын тандоо', 'Select all');
+
+  String get orderHistoryClearSelection =>
+      _pick('Снять выбор', 'Тандоону алып салуу', 'Clear selection');
+
+  String get orderHistoryHideSelected => _pick(
+    'Убрать выбранные из истории',
+    'Тандалгандарды тарыхтан алып салуу',
+    'Remove selected from history',
+  );
+
+  String get orderHistoryHideTitle =>
+      _pick('Убрать заказы?', 'Заказдарды алып саласызбы?', 'Remove orders?');
+
+  String orderHistoryHideBody(int count) => _pick(
+    '$count заказов исчезнут только с этого устройства. На сервере и в админке они сохранятся.',
+    '$count заказ ушул түзмөктөн гана жашырылат. Серверде жана админкада алар сакталат.',
+    '$count orders will be hidden only on this device. They remain on the server and in admin.',
+  );
+
+  String get orderHistoryHideConfirm => _pick('Убрать', 'Алып салуу', 'Remove');
+
+  String get orderHistoryHideCancel =>
+      _pick('Отмена', 'Жокко чыгаруу', 'Cancel');
+
+  String orderHistoryHidden(int count) => _pick(
+    '$count заказов убрано с устройства',
+    '$count заказ түзмөктөн алынды',
+    '$count orders removed from this device',
+  );
+
+  String profileOrderItemsCount(int count) =>
+      _pick('$count позиций', '$count позиция', '$count items');
+
+  String get orderDetailsTitle =>
+      _pick('Детали заказа', 'Заказдын чоо-жайы', 'Order details');
+
+  String get orderDetailsDate => _pick('Дата', 'Дата', 'Date');
+  String get orderDetailsBranch => _pick('Филиал', 'Филиал', 'Branch');
+  String get orderDetailsType => _pick('Получение', 'Алуу', 'Fulfillment');
+  String get orderDetailsReadyTime => _pick('Время', 'Убакыт', 'Ready time');
+  String get orderDetailsPayment => _pick('Оплата', 'Төлөм', 'Payment');
+  String get orderDetailsStatus => _pick('Статус', 'Абалы', 'Status');
+  String get orderDetailsCustomerPhone =>
+      _pick('Телефон клиента', 'Кардардын телефону', 'Customer phone');
+  String get orderDetailsItems =>
+      _pick('Состав заказа', 'Заказдын курамы', 'Items');
+  String get orderDetailsTotal => _pick('Итого', 'Жалпы', 'Total');
+  String get orderDetailsPointsUsed =>
+      _pick('Списано баллов', 'Колдонулган упай', 'Points used');
+  String get orderDetailsPointsEarned =>
+      _pick('Начислено баллов', 'Кошулган упай', 'Points earned');
+  String get orderDetailsComment =>
+      _pick('Комментарий', 'Комментарий', 'Comment');
+  String get orderDetailsDateUnavailable =>
+      _pick('Дата не сохранена', 'Дата сакталган эмес', 'Date unavailable');
+
+  String orderDetailsQuantity(int quantity) =>
+      _pick('Количество: $quantity', 'Саны: $quantity', 'Quantity: $quantity');
+
+  String orderDetailsUnitPrice(String price) =>
+      _pick('$price за единицу', 'Бир даанасы $price', '$price each');
+
+  String get orderDetailsSnapshotProduct => _pick(
+    'Товар больше не представлен в текущем каталоге. Показаны сохранённые данные заказа.',
+    'Товар азыркы каталогдо жок. Заказда сакталган маалымат көрсөтүлдү.',
+    'This item is no longer in the current catalog. Saved order details are shown.',
+  );
+
+  String orderDetailsUnknownTopping(String id) =>
+      _pick('Добавка $id', '$id кошумчасы', 'Topping $id');
+
   String get profileOrderHistoryEmpty => _pick(
     'Здесь появятся ваши заказы после первого оформления.',
     'Биринчи заказдан кийин заказдарыңыз ушул жерде көрүнөт.',

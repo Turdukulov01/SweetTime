@@ -1333,3 +1333,28 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
   установлен и запущен поверх данных на Redmi `f3bff2a5`.
 - Осталась физическая проверка: Checkout arrow и аппаратная Back → Cart; Back с Cart/Catalog/Profile → Home;
   Back с Home → системный выход. Backend/admin/server redeploy не нужен.
+
+## 2026-07-16 — CX-027: компактная история и полные детали заказа
+
+- По запросу владельца история в профиле больше не размножает карточки: одна компактная строка со стрелкой
+  открывает `/profile/orders`, где есть прокрутка, подробная карточка заказа, режим выбора, «выбрать все» и
+  эстетичная корзина. Удаление означает только локальное скрытие ID на устройстве; серверный заказ, отчётность,
+  баллы и запись для кухни не удаляются. При удалении аккаунта локальный список скрытых ID очищается.
+- Backend сохраняет неизменяемый снимок заказа: локализованные название/описание товара, optional image URL,
+  размер, сахар, лёд, ID и локализованные названия топпингов с доплатами, количество/цены; отдельно телефон,
+  название и адрес филиала, стабильное время и комментарий. Это защищает историю от последующего изменения меню.
+  Миграция `f27a4d9c8b11` добавляет optional product image и поля заказа без разрушения legacy-записей.
+- Flutter показывает фото из snapshot/current catalog с asset/placeholder fallback, все позиции одного заказа,
+  филиал/адрес, тип, время, оплату, статус, телефон, комментарий и баллы. Checkout теперь отправляет стабильные
+  `asap`, `HH:mm` или номер стола вместо переведённой строки и передаёт пожелание бариста (до 1000 символов).
+- Admin получил «Подробнее» на активных и отменённых заказах и responsive drawer с тем же полным составом;
+  отсутствующие legacy-поля не выдумываются. SSE и действия смены статуса не изменялись.
+- Изменены Flutter `lib/core/{api_client.dart,order_history_store.dart,router.dart}`, localization/profile,
+  checkout/profile/models/state/product card и тесты; backend models/schemas/main/serializers, миграция и тесты;
+  admin orders page, detail drawer, API/types/mapper и mapper tests; `docs/TASKS.md` и этот файл.
+- Проверки: backend `62 passed`; чистая PostgreSQL миграция от нуля до `f27a4d9c8b11`; Flutter analyze clean и
+  `69 passed`; admin typecheck и `11 passed`; diff-check clean. Production rollout ещё не выполнен: сначала
+  backup + backend/admin build + Alembic, затем новая подписанная APK, потому что старый backend запрещает новое
+  поле `comment` как extra.
+- Просьба Claude Code: не превращать локальную кнопку удаления истории в DELETE server orders и не возвращать
+  локализованную display-строку в `readyTime`; кухня должна получать стабильные данные и server snapshots.

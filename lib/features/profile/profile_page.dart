@@ -66,7 +66,7 @@ class _ProfileContent extends ConsumerWidget {
           userContact: state.userContact,
           points: state.points,
           recurring: state.recurring,
-          orders: state.orders,
+          orders: state.visibleOrders,
           products: state.products,
           branches: state.branches,
         ),
@@ -113,52 +113,8 @@ class _ProfileContent extends ConsumerWidget {
               products: profile.products,
               branches: profile.branches,
             ),
-            const SizedBox(height: 24),
-            Text(
-              strings.profileOrderHistory,
-              style: theme.textTheme.titleLarge,
-            ),
             const SizedBox(height: 12),
-            if (profile.orders.isEmpty)
-              _MutedCard(text: strings.profileOrderHistoryEmpty)
-            else
-              for (final order in profile.orders) ...[
-                _OrderCard(
-                  order: order,
-                  products: profile.products,
-                  branches: profile.branches,
-                  onRepeat: () async {
-                    final result = await controller.repeatOrder(order);
-                    if (!context.mounted) return;
-                    switch (result) {
-                      case RepeatOrderResult.success:
-                        showTopNotice(
-                          context,
-                          message: strings.orderAddedToCart,
-                          actionLabel: strings.cart,
-                          onAction: () => context.go('/cart'),
-                        );
-                        context.go('/cart');
-                      case RepeatOrderResult.legacyOrder:
-                        _showRepeatMessage(
-                          context,
-                          strings.profileLegacyOrderRepeatUnavailable,
-                        );
-                      case RepeatOrderResult.catalogUnavailable:
-                        _showRepeatMessage(
-                          context,
-                          strings.profileRepeatNeedsServerCatalog,
-                        );
-                      case RepeatOrderResult.unavailableSelection:
-                        _showRepeatMessage(
-                          context,
-                          strings.profileRepeatSelectionUnavailable,
-                        );
-                    }
-                  },
-                ),
-                const SizedBox(height: 8),
-              ],
+            _OrderHistoryEntry(orders: profile.orders),
             const SizedBox(height: 16),
             Text(strings.profileAddresses, style: theme.textTheme.titleLarge),
             const SizedBox(height: 12),
@@ -691,142 +647,51 @@ void _showRepeatMessage(BuildContext context, String message) {
     );
 }
 
-class _OrderCard extends StatelessWidget {
-  const _OrderCard({
-    required this.order,
-    required this.products,
-    required this.branches,
-    required this.onRepeat,
-  });
+class _OrderHistoryEntry extends StatelessWidget {
+  const _OrderHistoryEntry({required this.orders});
 
-  final OrderHistoryEntry order;
-  final List<Product> products;
-  final List<Branch> branches;
-  final Future<void> Function() onRepeat;
+  final List<OrderHistoryEntry> orders;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final strings = AppLocalizations.of(context);
-    final branch = branches
-        .where((candidate) => candidate.id == order.branchId)
-        .firstOrNull;
-    final branchLabel = branch == null
-        ? strings.profileUnknownBranch(order.branchId)
-        : strings.branchName(branch);
-    final itemLabels = order.items
-        .map((item) {
-          final currentProduct = item.productId == null
-              ? null
-              : products
-                    .where((candidate) => candidate.id == item.productId)
-                    .firstOrNull;
-          final productName = currentProduct == null
-              ? item.productName.resolve(strings.language)
-              : strings.productName(currentProduct);
-          final sizeName = item.sizeName?.resolve(strings.language);
-          return <String>[
-            productName,
-            if (sizeName != null && sizeName.isNotEmpty) sizeName,
-            if (item.quantity > 1) '×${item.quantity}',
-          ].join(' · ');
-        })
-        .join(', ');
+    final latest = orders.firstOrNull;
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(order.number, style: theme.textTheme.titleMedium),
-                ),
-                _StatusPill(status: order.status),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '${strings.orderTypeLabel(order.type)} · '
-              '$branchLabel · '
-              '${strings.readyTimeLabel(order.readyTime)}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(itemLabels, style: theme.textTheme.bodyMedium),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Text(
-                  formatSom(order.total, strings.language),
-                  style: theme.textTheme.titleSmall,
-                ),
-                const Spacer(),
-                if (order.supportsExactRepeat)
-                  TextButton.icon(
-                    onPressed: onRepeat,
-                    icon: const Icon(Icons.replay, size: 18),
-                    label: Text(strings.profileRepeatOrder),
-                  ),
-              ],
-            ),
-            if (!order.supportsExactRepeat) ...[
-              const SizedBox(height: 4),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.info_outline,
-                    size: 16,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      strings.profileLegacyOrderRepeatUnavailable,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ],
+      child: ListTile(
+        key: const ValueKey('profile-order-history-entry'),
+        minTileHeight: 72,
+        onTap: () => context.push('/profile/orders'),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primaryContainer,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.receipt_long_outlined,
+            color: theme.colorScheme.onPrimaryContainer,
+          ),
         ),
-      ),
-    );
-  }
-}
-
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.status});
-
-  final OrderStatus status;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final strings = AppLocalizations.of(context);
-    final isActive =
-        status == OrderStatus.preparing || status == OrderStatus.ready;
-    final color = isActive
-        ? theme.colorScheme.primary
-        : theme.colorScheme.secondary;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        strings.orderStatusLabel(status),
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: color,
-          fontWeight: FontWeight.w700,
+        title: Text(
+          strings.profileOrderHistory,
+          style: theme.textTheme.titleMedium,
+        ),
+        subtitle: Text(
+          latest == null
+              ? strings.profileOrderHistoryEmptyCompact
+              : strings.profileOrderHistorySummary(
+                  orders.length,
+                  strings.orderStatusLabel(latest.status),
+                ),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Semantics(
+          label: strings.profileOpenOrderHistory,
+          child: const Icon(Icons.chevron_right_rounded),
         ),
       ),
     );
@@ -851,28 +716,6 @@ class _AddressCard extends StatelessWidget {
         ),
         title: Text(label, style: theme.textTheme.titleSmall),
         subtitle: Text(line),
-      ),
-    );
-  }
-}
-
-class _MutedCard extends StatelessWidget {
-  const _MutedCard({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Text(
-          text,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
       ),
     );
   }

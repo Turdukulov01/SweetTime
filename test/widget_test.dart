@@ -226,6 +226,7 @@ void main() {
         items: [item],
         branch: DemoData.branches.first,
         pointsUsed: 0,
+        comment: 'Без трубочки',
         paymentMethod: PaymentMethod.qrDemo,
       );
     }
@@ -234,6 +235,8 @@ void main() {
     expect(api.requests[0], api.requests[1]);
     final request = api.requests.first;
     expect(request['paymentMethod'], 'qr');
+    expect(request['readyTime'], 'asap');
+    expect(request['comment'], 'Без трубочки');
     expect(request['items'], [
       {
         'productId': product.id,
@@ -1940,6 +1943,7 @@ class _CapturingOrderApiClient extends _OfflineApiClient {
     required List<Map<String, Object?>> items,
     required String paymentMethod,
     required int pointsUsed,
+    String? comment,
   }) async {
     accessTokens.add(accessToken);
     requests.add({
@@ -1950,6 +1954,7 @@ class _CapturingOrderApiClient extends _OfflineApiClient {
       'items': items,
       'paymentMethod': paymentMethod,
       'pointsUsed': pointsUsed,
+      'comment': comment,
     });
     if (accessToken == rejectToken) {
       return const ApiResult<CreatedOrder>.rejected();

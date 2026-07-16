@@ -12,6 +12,7 @@ import '../features/news/news_page.dart';
 import '../features/product/product_page.dart';
 import '../features/profile/faq_page.dart';
 import '../features/profile/loyalty_page.dart';
+import '../features/profile/order_history_page.dart';
 import '../features/profile/profile_edit_page.dart';
 import '../features/profile/profile_page.dart';
 import '../features/profile/support_page.dart';
@@ -118,6 +119,12 @@ final appRouter = GoRouter(
       parentNavigatorKey: _rootKey,
       builder: (context, state) =>
           const _ProtectedProfileRoute(child: LoyaltyPage()),
+    ),
+    GoRoute(
+      path: '/profile/orders',
+      parentNavigatorKey: _rootKey,
+      builder: (context, state) =>
+          const _ProtectedProfileRoute(child: OrderHistoryPage()),
     ),
     GoRoute(
       path: '/profile/support',

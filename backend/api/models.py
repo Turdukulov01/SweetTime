@@ -238,6 +238,7 @@ class Product(Base):
     name: Mapped[dict | str] = mapped_column(JSON)
     category: Mapped[str]
     description: Mapped[dict | str] = mapped_column(JSON, default="")
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     price: Mapped[int]
     color: Mapped[str]
     # [{"name": "M", "priceDelta": 40}, ...]
@@ -425,12 +426,22 @@ class Order(Base):
     )
     number: Mapped[str]
     customer_name: Mapped[str]
+    customer_phone: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, default=None
+    )
     branch_id: Mapped[str]
+    branch_name: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, default=None
+    )
+    branch_address: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
     # pickup | scheduled | qr
     type: Mapped[str]
     # new | preparing | ready | done | cancelled
     status: Mapped[str]
     ready_time: Mapped[str | None] = mapped_column(default=None)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # V1: display-only legacy JSON. V2: stable product/modifier IDs + snapshots.
     items_version: Mapped[int] = mapped_column(Integer, default=1)
     items: Mapped[list] = mapped_column(JSON, default=list)

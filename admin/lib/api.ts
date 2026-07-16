@@ -22,6 +22,7 @@ import {
   READ_RETRY_DELAYS_MS,
   shouldRetryRead
 } from "@/lib/api-retry";
+import { mapApiOrder, type ApiOrderContract } from "@/lib/order-mapper";
 import { drainSseFrames } from "@/lib/sse";
 import type {
   AdminUser,
@@ -36,7 +37,6 @@ import type {
   StoryCollection,
   NewsPost,
   Order,
-  PaymentMethod,
   OrderStatus,
   OrderType,
   Product,
@@ -399,26 +399,6 @@ interface ApiBranch {
   isOpen: boolean;
 }
 
-interface ApiOrderItem {
-  productName: string;
-  size?: string | null;
-  quantity: number;
-  total: number;
-}
-
-interface ApiOrder {
-  id: string | number;
-  number: string;
-  customerName: string;
-  branchId: string;
-  type: OrderType;
-  status: OrderStatus;
-  items: ApiOrderItem[];
-  total: number;
-  createdAt: string;
-  paymentMethod?: PaymentMethod;
-}
-
 function mapProduct(companyId: string, p: ApiProduct): Product {
   return {
     id: String(p.id),
@@ -453,27 +433,6 @@ function mapBranch(companyId: string, b: ApiBranch): Branch {
     hours: b.hours,
     phone: b.phone,
     isOpen: b.isOpen
-  };
-}
-
-function mapOrder(companyId: string, o: ApiOrder): Order {
-  return {
-    id: String(o.id),
-    companyId,
-    number: o.number,
-    customerName: o.customerName,
-    branchId: o.branchId,
-    type: o.type,
-    status: o.status,
-    total: o.total,
-    createdAt: o.createdAt,
-    paymentMethod: o.paymentMethod,
-    items: (o.items ?? []).map((item) => ({
-      name: item.size ? `${item.productName} (${item.size})` : item.productName,
-      quantity: item.quantity,
-      unitPrice:
-        item.quantity > 0 ? Math.round(item.total / item.quantity) : item.total
-    }))
   };
 }
 
@@ -587,10 +546,10 @@ export async function apiPatchBranch(
 }
 
 export async function apiFetchOrders(companyId: string): Promise<Order[]> {
-  const orders = await request<ApiOrder[]>(
+  const orders = await request<ApiOrderContract[]>(
     `/api/companies/${companyId}/orders`
   );
-  return orders.map((o) => mapOrder(companyId, o));
+  return orders.map((order) => mapApiOrder(companyId, order));
 }
 
 export type OrderStreamEventType =
@@ -659,11 +618,11 @@ export async function apiPatchOrderStatus(
   orderId: string,
   status: OrderStatus
 ): Promise<Order> {
-  const updated = await request<ApiOrder>(
+  const updated = await request<ApiOrderContract>(
     `/api/companies/${companyId}/orders/${orderId}/status`,
     { method: "PATCH", body: JSON.stringify({ status }) }
   );
-  return mapOrder(companyId, updated);
+  return mapApiOrder(companyId, updated);
 }
 
 // ---------------------------------------------------------------------------

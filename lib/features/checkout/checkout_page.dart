@@ -260,6 +260,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
               child: TextField(
                 controller: _commentController,
                 maxLines: 3,
+                maxLength: 1000,
                 decoration: InputDecoration(
                   hintText: strings.baristaCommentHint,
                 ),
@@ -331,7 +332,11 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       ),
       OrderType.pickup => const OrderReadyTime(kind: OrderReadyTimeKind.asap),
     };
-    final apiReadyTime = strings.readyTimeLabel(readyTime);
+    final apiReadyTime = switch (readyTime.kind) {
+      OrderReadyTimeKind.asap => 'asap',
+      OrderReadyTimeKind.scheduled ||
+      OrderReadyTimeKind.table => readyTime.value ?? '',
+    };
     // Первый выполненный заказ приглашённого → пригласившему уходит бонус (REFERRAL_LOGIC.md).
     final inviterRewarded = state.orders.isEmpty && state.invitedByCode != null;
 
@@ -350,6 +355,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       items: cartItems,
       branch: branch,
       pointsUsed: pointsUsed,
+      comment: _commentController.text,
       paymentMethod: _payment,
     );
 

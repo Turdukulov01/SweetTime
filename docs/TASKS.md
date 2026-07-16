@@ -377,6 +377,16 @@ below remains authoritative; this section records the current execution order.
   Navigator history; product/auth entry points push onto the source stack. Back from Catalog/QR/Cart/Profile
   root tabs returns to Home first, while Back from Home may exit normally. Order submission blocks accidental
   navigation until its result is known.
+- [ ] **[implemented locally 2026-07-16; production rollout and phone acceptance pending]
+  Complete order history and preparation details.** Profile now exposes one compact history entry that opens
+  a dedicated scrollable route; each order opens a near-full-height detail sheet with immutable product,
+  description, image, size, sugar, ice, topping, pricing, branch/address, ready-time, payment, phone and comment
+  snapshots. Multi-select, select-all and trash actions hide history only on that device; PostgreSQL remains the
+  source of truth and admin/kitchen records are never deleted by this UX. Admin order cards now open a responsive
+  detail drawer with the same preparation data. New orders store localized snapshots and optional product image
+  URLs, while legacy orders degrade without invented values. Checkout sends stable `asap`/`HH:mm`/table values
+  plus the barista comment. Backend 62/62, Flutter 69/69, admin 11/11 and typecheck pass; the full Alembic chain
+  succeeds from an empty PostgreSQL database through `f27a4d9c8b11`.
 - [ ] Add end-to-end contract tests for Flutter -> API -> admin order processing and status refresh.
 - [ ] **White-label platform hardening.** Keep one tenant-aware backend and one configurable admin
   runtime for all companies; map approved custom domains to `company_id` and require Host, URL scope

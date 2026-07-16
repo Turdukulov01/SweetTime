@@ -117,6 +117,7 @@ class ProductOut(BaseModel):
     name: LocalizedOrText
     category: str
     description: LocalizedOrText
+    imageUrl: str | None = None
     price: int
     color: str
     sizes: list[ModifierOptionOut]
@@ -131,6 +132,7 @@ class ProductCreate(BaseModel):
     name: LocalizedOrText
     category: str
     description: LocalizedOrText = ""
+    imageUrl: str | None = None
     price: int = Field(ge=0)
     color: str = "#FF5C9A"
     sizes: list[ModifierOptionWrite] = []
@@ -147,6 +149,7 @@ class ProductPatch(BaseModel):
     name: LocalizedOrText | None = None
     category: str | None = None
     description: LocalizedOrText | None = None
+    imageUrl: str | None = None
     price: int | None = Field(default=None, ge=0)
     color: str | None = None
     sizes: list[ModifierOptionWrite] | None = None
@@ -239,13 +242,16 @@ class OrderItemCreate(BaseModel):
 
 
 class OrderItemOut(BaseModel):
-    productName: str
-    size: str | None = None
+    productName: LocalizedOrText
+    productDescription: LocalizedOrText | None = None
+    imageUrl: str | None = None
+    size: LocalizedOrText | None = None
     quantity: int = Field(ge=1)
     total: int = Field(ge=0)
     productId: str | None = None
     sizeId: str | None = None
     toppingIds: list[str] | None = None
+    toppings: list[ModifierOptionOut] | None = None
     sugarPercent: SugarPercent | None = None
     ice: IceLevel | None = None
     unitPrice: int | None = Field(default=None, ge=0)
@@ -255,10 +261,14 @@ class OrderOut(BaseModel):
     id: str
     number: str
     customerName: str
+    customerPhone: str | None = None
     branchId: str
+    branchName: str | None = None
+    branchAddress: str | None = None
     type: OrderType
     status: OrderStatus
     readyTime: str | None = None
+    comment: str | None = None
     itemsVersion: Literal[1, 2] = 1
     items: list[OrderItemOut]
     total: int
@@ -287,11 +297,20 @@ class OrderCreate(BaseModel):
     )
     branchId: str
     type: OrderType
-    readyTime: str | None = None
+    readyTime: str | None = Field(default=None, max_length=120)
+    comment: str | None = Field(default=None, max_length=1000)
     items: list[OrderItemCreate] = Field(min_length=1, max_length=50)
     # Optional: старые клиенты поля не шлют — по умолчанию демо-оплата
     paymentMethod: PaymentMethod = "mock"
     pointsUsed: int = Field(default=0, ge=0)
+
+    @field_validator("comment")
+    @classmethod
+    def strip_optional_comment(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
 
 class OrderStatusPatch(BaseModel):
