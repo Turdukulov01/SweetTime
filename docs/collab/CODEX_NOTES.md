@@ -1146,3 +1146,25 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
 непосредственно рисуется белым системным painter, фон остаётся 20% white. Тест переведён с проверки
 абстрактного `widthFactor` на реальное `LinearProgressIndicator.value`; analyze и targeted viewer test
 проходят. Нужна повторная физическая проверка установленного APK.
+
+## 2026-07-16 — CX-021: устранение production HTTP 500 при входе в admin
+
+- Точная причина подтверждена по production endpoint-матрице: config/products/branches/promotions и V2
+  `/stories/home` отвечали 200, а только legacy `/news` отвечал 500. После Content V2 опубликованная
+  media-only story законно имеет пустые `title/body/badge`, но старый `NewsOut` требовал непустой `ru`.
+  Pydantic validation внутри `_news_out` поэтому превращала совместимые V2 данные в HTTP 500.
+- Backend legacy output сделан blank-safe и стабилизирован до полных `{ru, ky, en}`; добавлен regression
+  test именно с опубликованной video story и пустыми текстами. Схемы создания legacy news оставлены
+  строгими — ослаблен только compatibility-ответ.
+- Глобальный `CompanyStoreProvider` больше не вызывает legacy `/news`. Необязательное мини-превью телефона
+  в Settings читает V2 admin stories, фильтрует только активные Home stories и при локальной ошибке контента
+  становится пустым, не блокируя orders/menu/branches и весь shell. Для безопасных GET/HEAD добавлены две
+  автоматические попытки с backoff 250/750 ms при network/408/500/502/503/504; POST/PATCH/DELETE никогда
+  автоматически не повторяются. Raw `HTTP 500` заменён понятным сообщением.
+- Изменены `backend/api/{schemas.py,main.py,tests/test_content_v2.py}`,
+  `admin/lib/{api.ts,api-retry.ts,api-retry.test.mjs,company-store.ts}`, `admin/package.json`, TASKS и этот
+  файл. Проверки: backend `54 passed`; admin typecheck + `6 passed`; compileall/diff-check clean; production
+  Docker images backend и admin успешно собраны. Локальный Next dev server не останавливался.
+- Осталось: выкатить backend/admin на production (миграция БД не нужна), затем проверить `/ready`=200,
+  legacy `/api/companies/sweettime/news`=200, вход owner и отсутствие блокирующего экрана. До rollout
+  текущий сервер продолжает работать на прежнем коде и может воспроизвести именно этот 500.

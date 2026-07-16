@@ -33,7 +33,7 @@ import {
   apiDeletePromotion,
   apiFetchBranches,
   apiFetchConfig,
-  apiFetchNews,
+  apiFetchContentStories,
   apiFetchProducts,
   apiFetchPromotions,
   apiPatchBranch,
@@ -47,6 +47,7 @@ import { logout } from "@/lib/session";
 import type {
   Branch,
   Company,
+  ContentStory,
   NewsStory,
   Product,
   Promotion
@@ -84,6 +85,37 @@ const CompanyStoreContext = createContext<CompanyStoreValue | null>(null);
 
 type LoadStatus = "loading" | "ready" | "error";
 
+function contentStoryToPreview(story: ContentStory): NewsStory {
+  return {
+    id: story.id,
+    companyId: story.companyId,
+    sortOrder: story.sortOrder,
+    isPublished: story.isPublished,
+    title: story.title,
+    body: story.body,
+    badge: story.badge,
+    accentColor: story.accentColor,
+    visual: story.visual,
+    publishedAt: story.publishedAt,
+    expiresAt: story.expiresAt,
+    imageUrl:
+      story.media.type === "image"
+        ? story.media.url
+        : story.media.thumbnailUrl ?? null,
+    ctaLabel: story.ctaLabel,
+    ctaRoute: story.ctaRoute
+  };
+}
+
+function isActiveHomeStory(story: ContentStory, now = Date.now()): boolean {
+  if (!story.showOnHome || !story.isPublished) return false;
+  const publishedAt = Date.parse(story.publishedAt);
+  if (!Number.isFinite(publishedAt) || publishedAt > now) return false;
+  if (story.expiresAt === null) return true;
+  const expiresAt = Date.parse(story.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt > now;
+}
+
 export function CompanyStoreProvider({
   companyId,
   children
@@ -113,14 +145,25 @@ export function CompanyStoreProvider({
     let cancelled = false;
     setLoadStatus("loading");
 
+    // Stories are optional here: they are used only by the miniature phone
+    // preview in Settings. A content permission/error must not block orders,
+    // menu, branches and the rest of the admin shell.
+    const previewStories = apiFetchContentStories(companyId)
+      .then((stories) =>
+        stories
+          .filter((story) => isActiveHomeStory(story))
+          .map(contentStoryToPreview)
+      )
+      .catch(() => [] as NewsStory[]);
+
     Promise.all([
       apiFetchConfig(companyId),
       apiFetchProducts(companyId),
       apiFetchBranches(companyId),
-      apiFetchNews(companyId),
-      apiFetchPromotions(companyId)
+      apiFetchPromotions(companyId),
+      previewStories
     ])
-      .then(([company, products, branches, news, promotions]) => {
+      .then(([company, products, branches, promotions, news]) => {
         if (cancelled) return;
         setState({
           company,

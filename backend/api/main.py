@@ -150,6 +150,20 @@ def _branch_out(b: Branch) -> schemas.BranchOut:
 # Форма заказа общая с историей клиента (api.serializers.order_out).
 
 
+def _news_localized_out(value: object) -> dict[str, str]:
+    """Normalize old strings/partial JSON and blank V2 media-only fields."""
+
+    if isinstance(value, str):
+        return {"ru": value, "ky": value, "en": value}
+    source = value if isinstance(value, dict) else {}
+    ru = str(source.get("ru") or "")
+    return {
+        "ru": ru,
+        "ky": str(source.get("ky") or ru),
+        "en": str(source.get("en") or ru),
+    }
+
+
 def _news_out(n: News) -> schemas.NewsOut:
     published_at = n.published_at
     if published_at.tzinfo is None:
@@ -161,15 +175,17 @@ def _news_out(n: News) -> schemas.NewsOut:
         id=n.id,
         sortOrder=n.sort_order,
         isPublished=n.is_published,
-        title=n.title,
-        body=n.body,
-        badge=n.badge,
+        title=_news_localized_out(n.title),
+        body=_news_localized_out(n.body),
+        badge=_news_localized_out(n.badge),
         accentColor=n.accent_color,
         visual=n.visual,
         publishedAt=published_at.isoformat(),
         expiresAt=expires_at.isoformat() if expires_at else None,
         imageUrl=n.image_url,
-        ctaLabel=n.cta_label,
+        ctaLabel=(
+            _news_localized_out(n.cta_label) if n.cta_label is not None else None
+        ),
         ctaRoute=n.cta_route,
     )
 

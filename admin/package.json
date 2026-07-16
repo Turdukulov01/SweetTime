@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start -p 3020",
     "typecheck": "tsc --noEmit",
-    "test:content": "node --experimental-strip-types --test lib/content-validation.test.mjs"
+    "test:content": "node --experimental-strip-types --test lib/*.test.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

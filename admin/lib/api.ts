@@ -17,6 +17,11 @@ import {
   readStoredSession,
   updateStoredTokens
 } from "@/lib/auth-storage";
+import {
+  isIdempotentRead,
+  READ_RETRY_DELAYS_MS,
+  shouldRetryRead
+} from "@/lib/api-retry";
 import type {
   AdminUser,
   Branch,
@@ -65,6 +70,9 @@ export function describeApiError(error: unknown): string {
     if (error.status === 413) return "Файл слишком большой.";
     if (error.status === 415) return "Формат файла не поддерживается.";
     if (error.status === 422) return error.message || "Проверьте заполненные поля.";
+    if (error.status >= 500) {
+      return "Сервер временно не смог обработать запрос. Повторите через несколько секунд.";
+    }
     return error.message;
   }
   return error instanceof Error ? error.message : "Неизвестная ошибка";
@@ -128,18 +136,36 @@ async function toApiError(response: Response): Promise<ApiError> {
 }
 
 async function sendRaw(path: string, init: RequestInit): Promise<Response> {
-  try {
-    const response = await fetch(`${API_URL}${path}`, {
-      ...init,
-      cache: "no-store"
-    });
-    // Сервер ответил — он жив, даже если вернул ошибку уровня запроса
-    setApiStatus("live");
-    return response;
-  } catch {
-    setApiStatus("down");
-    throw new ApiError(0, "API недоступен");
+  const method = init.method ?? "GET";
+  const retryDelays = isIdempotentRead(method) ? READ_RETRY_DELAYS_MS : [];
+
+  for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+    try {
+      const response = await fetch(`${API_URL}${path}`, {
+        ...init,
+        cache: "no-store"
+      });
+      // Сервер ответил — он жив, даже если вернул ошибку уровня запроса.
+      setApiStatus("live");
+      if (
+        attempt < retryDelays.length &&
+        shouldRetryRead(method, response.status)
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+        continue;
+      }
+      return response;
+    } catch {
+      if (attempt < retryDelays.length) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+        continue;
+      }
+      setApiStatus("down");
+      throw new ApiError(0, "API недоступен");
+    }
   }
+
+  throw new ApiError(0, "API недоступен");
 }
 
 /** Обновление пары токенов. Параллельные 401 ждут один и тот же запрос. */

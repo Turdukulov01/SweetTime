@@ -329,6 +329,15 @@ below remains authoritative; this section records the current execution order.
 - [ ] Enforce company/branch scope server-side and add isolation/permission tests; the two-company view remains a demo scenario, not production SaaS.
 - [ ] Align scripts, environment variables, ports, Docker configuration, and README with the custom Next.js stack.
 - [ ] Keep admin typecheck and production build green; add unit/E2E/accessibility tests and verify authenticated role/branch flows before acceptance.
+- [ ] **[fixed locally 2026-07-16; production rollout pending] Admin bootstrap HTTP 500 hardening.**
+  A published media-only V2 story with blank title/body/badge made the legacy `/news` response fail
+  Pydantic validation and return HTTP 500. The legacy output now accepts media-only content and always
+  emits stable `{ru, ky, en}` strings. The global admin bootstrap no longer depends on that legacy route:
+  its optional Settings phone-preview reads V2 stories and degrades to an empty preview without blocking
+  orders/menu/branches. Idempotent GET/HEAD requests retry network/408/500/502/503/504 failures twice with
+  short backoff; persistent 5xx errors no longer expose a raw `HTTP 500` message. Backend 54/54 tests,
+  admin typecheck, 6/6 admin tests and isolated production Docker builds pass. Deploy backend/admin and
+  verify `/api/companies/sweettime/news` returns 200 before marking complete.
 
 ## Phase 4 — Integration, Brand, Pilot, And Release
 

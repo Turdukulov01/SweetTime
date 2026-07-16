@@ -294,19 +294,29 @@ class OrderStatusPatch(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class NewsLocalizedTextOut(BaseModel):
+    """Legacy news output compatible with media-only V2 stories."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ru: str = Field(default="", max_length=10_000)
+    ky: str = Field(default="", max_length=10_000)
+    en: str = Field(default="", max_length=10_000)
+
+
 class NewsOut(BaseModel):
     id: str
     sortOrder: int
     isPublished: bool
-    title: LocalizedText
-    body: LocalizedText
-    badge: LocalizedText
+    title: NewsLocalizedTextOut
+    body: NewsLocalizedTextOut
+    badge: NewsLocalizedTextOut
     accentColor: HexColor
     visual: NewsVisual
     publishedAt: str
     expiresAt: str | None = None
     imageUrl: str | None = None
-    ctaLabel: LocalizedText | None = None
+    ctaLabel: NewsLocalizedTextOut | None = None
     ctaRoute: str | None = None
 
 

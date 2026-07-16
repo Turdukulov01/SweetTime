@@ -157,6 +157,27 @@ def test_public_home_and_legacy_hide_inactive_and_cap_at_30(content_db) -> None:
         assert {"draft", "future", "expired"}.isdisjoint(legacy_ids)
 
 
+def test_legacy_news_serializes_media_only_story_with_blank_text(content_db) -> None:
+    factory = content_db
+    with factory() as db:
+        story = _story("media-only-legacy")
+        story.title = _localized("")
+        story.body = _localized("")
+        story.badge = _localized("")
+        story.media_type = "video"
+        story.media_url = "/media/stories/media-only-legacy/video.mp4"
+        db.add(story)
+        db.commit()
+
+        company = db.get(Company, "sweettime")
+        legacy = list_news(company=company, db=db)
+        item = next(value for value in legacy if value.id == story.id)
+
+        assert item.title.model_dump() == {"ru": "", "ky": "", "en": ""}
+        assert item.body.model_dump() == {"ru": "", "ky": "", "en": ""}
+        assert item.badge.model_dump() == {"ru": "", "ky": "", "en": ""}
+
+
 def test_collection_cursor_supports_more_than_40_stories(content_db) -> None:
     factory = content_db
     collection = StoryCollection(
