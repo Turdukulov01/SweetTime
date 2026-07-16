@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 30
     refresh_token_days: int = 30
+    # Customer refresh sessions use a rolling idle window. Successful refresh
+    # moves this deadline; an unused session expires without requiring Google.
+    customer_session_idle_days: int = Field(default=30, ge=1, le=90)
 
     # OTP входа клиента. Пока БЕЗ SMS-провайдера: режим "mock", код всегда
     # otp_mock_code (совпадает с демо-кодом приложения). Реальный провайдер

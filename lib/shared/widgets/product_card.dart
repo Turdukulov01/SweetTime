@@ -137,7 +137,7 @@ class ProductCard extends ConsumerWidget {
                       ),
                       const Spacer(),
                       Text(
-                        formatSom(product.basePrice, strings.language),
+                        formatSom(product.startingPrice, strings.language),
                         style: theme.textTheme.titleSmall?.copyWith(
                           color: theme.colorScheme.onSurface,
                         ),

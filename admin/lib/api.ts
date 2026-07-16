@@ -40,6 +40,7 @@ import type {
   OrderStatus,
   OrderType,
   Product,
+  Category,
   Promotion,
   Role
 } from "@/lib/types";
@@ -377,9 +378,11 @@ interface ApiModifier {
 
 interface ApiProduct {
   id: string | number;
-  name: string;
+  name: string | ApiLocalized;
   category: string;
-  description?: string;
+  categoryId?: string | null;
+  description?: string | ApiLocalized;
+  imageUrl?: string | null;
   price: number;
   color: string;
   sizes: ApiModifier[];
@@ -400,10 +403,17 @@ interface ApiBranch {
 }
 
 function mapProduct(companyId: string, p: ApiProduct): Product {
+  const displayText = (value: string | ApiLocalized | undefined): string =>
+    typeof value === "string"
+      ? value
+      : value?.ru || value?.ky || value?.en || "";
   return {
     id: String(p.id),
     companyId,
-    name: p.name,
+    name: displayText(p.name),
+    description: displayText(p.description),
+    imageUrl: p.imageUrl ?? null,
+    categoryId: p.categoryId ?? null,
     category: p.category,
     color: p.color,
     price: p.price,
@@ -442,6 +452,10 @@ function serializeProductPatch(
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   if (patch.name !== undefined) body.name = patch.name;
+  if (patch.description !== undefined) body.description = patch.description;
+  if (patch.imageUrl !== undefined) body.imageUrl = patch.imageUrl;
+  if (patch.categoryId !== undefined && patch.categoryId !== null)
+    body.categoryId = patch.categoryId;
   if (patch.category !== undefined) body.category = patch.category;
   if (patch.color !== undefined) body.color = patch.color;
   if (patch.price !== undefined) body.price = patch.price;
@@ -513,6 +527,46 @@ export async function apiPatchProduct(
     { method: "PATCH", body: JSON.stringify(serializeProductPatch(patch)) }
   );
   return mapProduct(companyId, updated);
+}
+
+export async function apiPutProductImage(
+  companyId: string,
+  productId: string,
+  file: File
+): Promise<Product> {
+  const form = new FormData();
+  form.append("file", file);
+  const updated = await request<ApiProduct>(
+    `/api/companies/${companyId}/products/${productId}/image`,
+    { method: "PUT", body: form }
+  );
+  return mapProduct(companyId, updated);
+}
+
+export async function apiDeleteProductImage(
+  companyId: string,
+  productId: string
+): Promise<Product> {
+  const updated = await request<ApiProduct>(
+    `/api/companies/${companyId}/products/${productId}/image`,
+    { method: "DELETE" }
+  );
+  return mapProduct(companyId, updated);
+}
+
+export async function apiFetchCategories(companyId: string): Promise<Category[]> {
+  return request<Category[]>(`/api/companies/${companyId}/categories`);
+}
+
+export async function apiCreateCategory(
+  companyId: string,
+  name: Category["name"],
+  sortOrder: number
+): Promise<Category> {
+  return request<Category>(`/api/companies/${companyId}/categories`, {
+    method: "POST",
+    body: JSON.stringify({ name, sortOrder, active: true })
+  });
 }
 
 export async function apiFetchBranches(companyId: string): Promise<Branch[]> {

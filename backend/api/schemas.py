@@ -112,9 +112,45 @@ class ModifierOptionWrite(BaseModel):
     priceDelta: int
 
 
+class CategoryName(BaseModel):
+    """Categories are infrastructure data: all supported locales are required."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ru: str = Field(min_length=1, max_length=120)
+    ky: str = Field(min_length=1, max_length=120)
+    en: str = Field(min_length=1, max_length=120)
+
+
+class CategoryOut(BaseModel):
+    id: str
+    name: CategoryName
+    sortOrder: int
+    active: bool
+
+
+class CategoryCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: CategoryName
+    sortOrder: int = 0
+    active: bool = True
+
+
+class CategoryPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: CategoryName | None = None
+    sortOrder: int | None = None
+    active: bool | None = None
+
+
 class ProductOut(BaseModel):
     id: str
     name: LocalizedOrText
+    categoryId: str | None
+    categoryName: CategoryName
+    # Legacy display label retained for older Flutter/admin builds.
     category: str
     description: LocalizedOrText
     imageUrl: str | None = None
@@ -130,7 +166,8 @@ class ProductOut(BaseModel):
 
 class ProductCreate(BaseModel):
     name: LocalizedOrText
-    category: str
+    categoryId: str | None = Field(default=None, min_length=1, max_length=64)
+    category: str | None = Field(default=None, min_length=1, max_length=120)
     description: LocalizedOrText = ""
     imageUrl: str | None = None
     price: int = Field(ge=0)
@@ -142,11 +179,18 @@ class ProductCreate(BaseModel):
     isNew: bool = False
     isBestSeller: bool = False
 
+    @model_validator(mode="after")
+    def require_category_reference(self):
+        if self.categoryId is None and self.category is None:
+            raise ValueError("categoryId or legacy category is required")
+        return self
+
 
 class ProductPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: LocalizedOrText | None = None
+    categoryId: str | None = Field(default=None, min_length=1, max_length=64)
     category: str | None = None
     description: LocalizedOrText | None = None
     imageUrl: str | None = None
@@ -273,6 +317,7 @@ class OrderOut(BaseModel):
     items: list[OrderItemOut]
     total: int
     paymentMethod: PaymentMethod
+    promoCode: str | None = None
     pointsUsed: int
     pointsEarned: int
     createdAt: str
@@ -302,6 +347,7 @@ class OrderCreate(BaseModel):
     items: list[OrderItemCreate] = Field(min_length=1, max_length=50)
     # Optional: старые клиенты поля не шлют — по умолчанию демо-оплата
     paymentMethod: PaymentMethod = "mock"
+    promoCode: str | None = Field(default=None, min_length=1, max_length=64)
     pointsUsed: int = Field(default=0, ge=0)
 
     @field_validator("comment")
@@ -311,6 +357,16 @@ class OrderCreate(BaseModel):
             return None
         cleaned = value.strip()
         return cleaned or None
+
+    @field_validator("promoCode")
+    @classmethod
+    def normalize_promo_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip().upper()
+        if not cleaned:
+            raise ValueError("promoCode must not be blank")
+        return cleaned
 
 
 class OrderStatusPatch(BaseModel):
@@ -580,6 +636,14 @@ class PromotionCreate(BaseModel):
     active: bool = True
     sortOrder: int = 0
 
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().upper()
+        return normalized or None
+
 
 class PromotionPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -590,6 +654,14 @@ class PromotionPatch(BaseModel):
     accentColor: HexColor | None = None
     active: bool | None = None
     sortOrder: int | None = None
+
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().upper()
+        return normalized or None
 
 
 # ---------------------------------------------------------------------------

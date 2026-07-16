@@ -11,6 +11,8 @@
 `require_role(*roles)` — RBAC поверх get_current_staff.
 """
 
+from datetime import datetime, timezone
+
 from fastapi import Depends, HTTPException, Path, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
@@ -21,6 +23,7 @@ from .models import (
     Branch,
     Company,
     Customer,
+    CustomerSession,
     News,
     Order,
     Product,
@@ -201,7 +204,30 @@ def get_current_customer(
     customer = db.get(Customer, payload["sub"])
     if customer is None or customer.company_id != company.id:
         raise _unauthorized("Unknown customer")
+
+    # New customer access JWTs are bound to a revocable server session. Access
+    # JWTs issued before the rolling-session migration have no sid and remain
+    # accepted only for their existing short (30 minute) lifetime.
+    session_id = payload.get("sid")
+    if session_id is not None:
+        session = db.get(CustomerSession, session_id)
+        if (
+            session is None
+            or session.company_id != company.id
+            or session.customer_id != customer.id
+            or session.revoked_at is not None
+            or _db_utc(session.idle_expires_at) <= datetime.now(timezone.utc)
+        ):
+            raise _unauthorized("Customer session is no longer active")
     return customer
+
+
+def _db_utc(value: datetime) -> datetime:
+    """SQLite drops timezone metadata; persisted session timestamps are UTC."""
+
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def require_role(*roles: str):

@@ -7,11 +7,51 @@ import '../../core/localization/app_localizations.dart';
 import '../../shared/app_state.dart';
 import '../../shared/widgets/common.dart';
 
-class CartPage extends ConsumerWidget {
+class CartPage extends ConsumerStatefulWidget {
   const CartPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CartPage> createState() => _CartPageState();
+}
+
+class _CartPageState extends ConsumerState<CartPage> {
+  late final TextEditingController _promoController;
+  late final TextEditingController _pointsController;
+  bool _promoInvalid = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final state = ref.read(appStateProvider);
+    _promoController = TextEditingController(text: state.promoCode ?? '');
+    _pointsController = TextEditingController(
+      text: state.bonusApplied > 0 ? '${state.bonusApplied}' : '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _promoController.dispose();
+    _pointsController.dispose();
+    super.dispose();
+  }
+
+  void _applyPromo(AppStateController controller) {
+    final valid = controller.applyPromoCode(_promoController.text);
+    setState(() => _promoInvalid = !valid);
+  }
+
+  void _applyPoints(AppStateController controller) {
+    controller.setBonusPointsToUse(int.tryParse(_pointsController.text) ?? 0);
+    final applied = ref.read(appStateProvider).bonusApplied;
+    _pointsController.text = applied == 0 ? '' : '$applied';
+    _pointsController.selection = TextSelection.collapsed(
+      offset: _pointsController.text.length,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(appStateProvider);
     final controller = ref.read(appStateProvider.notifier);
     final theme = Theme.of(context);
@@ -51,13 +91,45 @@ class CartPage extends ConsumerWidget {
                   Text(strings.orderSummary, style: theme.textTheme.titleLarge),
                   const SizedBox(height: 12),
                   TextField(
-                    decoration: InputDecoration(hintText: strings.promoCode),
+                    controller: _promoController,
+                    textCapitalization: TextCapitalization.characters,
+                    onChanged: (_) {
+                      if (_promoInvalid) setState(() => _promoInvalid = false);
+                      if (state.promoCode != null &&
+                          _promoController.text.trim().toUpperCase() !=
+                              state.promoCode) {
+                        controller.applyPromoCode('');
+                      }
+                    },
+                    onSubmitted: (_) => _applyPromo(controller),
+                    decoration: InputDecoration(
+                      hintText: strings.promoCode,
+                      errorText: _promoInvalid
+                          ? strings.invalidPromoCode
+                          : null,
+                      helperText: state.promoCode == null
+                          ? null
+                          : strings.promoCodeApplied(state.promoCode!),
+                      suffixIcon: IconButton(
+                        onPressed: () => _applyPromo(controller),
+                        tooltip: strings.applyPromoCode,
+                        icon: const Icon(Icons.check_circle_outline),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     value: state.useBonus,
-                    onChanged: controller.setUseBonus,
+                    onChanged: state.maxBonusSpend > 0
+                        ? (value) {
+                            controller.setUseBonus(value);
+                            final next = ref
+                                .read(appStateProvider)
+                                .bonusApplied;
+                            _pointsController.text = next == 0 ? '' : '$next';
+                          }
+                        : null,
                     title: Text(strings.usePoints),
                     subtitle: Text(
                       strings.pointsSpendSummary(
@@ -68,6 +140,28 @@ class CartPage extends ConsumerWidget {
                       style: theme.textTheme.bodySmall,
                     ),
                   ),
+                  if (state.maxBonusSpend > 0) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _pointsController,
+                      enabled: state.useBonus,
+                      keyboardType: TextInputType.number,
+                      onSubmitted: (_) => _applyPoints(controller),
+                      onEditingComplete: () => _applyPoints(controller),
+                      decoration: InputDecoration(
+                        labelText: strings.pointsAmount,
+                        helperText: strings.pointsAmountLimit(
+                          state.maxBonusSpend,
+                        ),
+                        suffixIcon: IconButton(
+                          onPressed: state.useBonus
+                              ? () => _applyPoints(controller)
+                              : null,
+                          icon: const Icon(Icons.check),
+                        ),
+                      ),
+                    ),
+                  ],
                   const Divider(height: 24),
                   _Row(
                     label: strings.orderSubtotal,

@@ -13,11 +13,11 @@ from api.models import (
     Company,
     Customer,
     CustomerIdentity,
+    CustomerSession,
     MediaFile,
     Order,
     RecurringOrder,
 )
-from api.security import create_token_pair
 from api.storage import StorageService
 
 
@@ -133,16 +133,15 @@ def test_delete_account_removes_identity_and_anonymizes_ledgers(
         db.add_all([company, branch, customer, identity, order, recurring, media])
         db.commit()
 
-        _, old_refresh = create_token_pair(
-            subject=customer.id,
-            typ="customer",
-            company_id=company.id,
-        )
+        login = auth._customer_login_out(customer, db)
+        old_refresh = login.refreshToken
+        assert db.scalar(select(func.count(CustomerSession.id))) == 1
         response = auth.customer_delete_me(customer, db)
         assert response.status_code == 204
 
         assert db.get(Customer, "customer-delete") is None
         assert db.scalar(select(func.count(CustomerIdentity.id))) == 0
+        assert db.scalar(select(func.count(CustomerSession.id))) == 0
         assert db.scalar(select(func.count(MediaFile.id))) == 0
         assert not avatar_path.exists()
 

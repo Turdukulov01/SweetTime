@@ -389,6 +389,21 @@ below remains authoritative; this section records the current execution order.
   succeeds from an empty PostgreSQL database through `f27a4d9c8b11`. Production now exposes the new
   product image contract; the signed release APK is installed on Redmi Note 9 Pro with existing app data preserved.
 - [ ] Add end-to-end contract tests for Flutter -> API -> admin order processing and status refresh.
+- [ ] **[implemented locally 2026-07-16; production rollout and phone acceptance pending]
+  Catalog editing, rolling sessions, order refresh, promo codes and partial loyalty spend.** Admin menu
+  exposes an explicit edit action, editable product data, real image upload/delete with photo preview,
+  stable localized category creation/selection, and final per-size prices (the API continues to store
+  a delta). Flutter order history supports pull-to-refresh without discarding the last good list on an
+  error. Customer refresh sessions are server-persisted, rotated and extended to 30 days after activity;
+  concurrent mobile refresh is coalesced, logout/account deletion revoke/remove sessions. Orders snapshot
+  a normalized active promo code; unknown/inactive codes are rejected by the server and shown as an inline
+  cart error, while admin and customer order details display the accepted code. Loyalty spend is disabled
+  at zero and accepts a manually chosen amount up to the server-owned balance/30% cap. Migration chain:
+  `c64f0b2d8a31` -> `b17c9e4a2f60` -> `e18d7a4c9f22`; the last migration also corrects unmistakable legacy
+  full-size prices accidentally stored as deltas (for example 4000 + 3000). Backend 71/71, Flutter 75/75,
+  admin typecheck and 11/11 tests pass; clean PostgreSQL migration and production Docker admin build pass.
+  Catalog/admin list prices use the lowest configured final size price, and paid toppings are never
+  preselected, so opening a product cannot silently raise its displayed price.
 - [ ] **White-label platform hardening.** Keep one tenant-aware backend and one configurable admin
   runtime for all companies; map approved custom domains to `company_id` and require Host, URL scope
   and JWT `cid` to agree. Do not create one copied backend/admin and one port pair per company.

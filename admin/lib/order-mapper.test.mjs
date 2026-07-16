@@ -24,6 +24,7 @@ test("maps full optional order details and multiple item snapshots", () => {
     readyTime: "15:30",
     comment: "Без трубочки",
     paymentMethod: "qr",
+    promoCode: "SUMMER",
     paymentStatus: "paid",
     subtotal: 900,
     discount: 100,
@@ -63,6 +64,7 @@ test("maps full optional order details and multiple item snapshots", () => {
   assert.equal(order.readyTime, "15:30");
   assert.equal(order.itemsVersion, 2);
   assert.equal(order.pointsUsed, 0);
+  assert.equal(order.promoCode, "SUMMER");
   assert.equal(order.items.length, 2);
   assert.deepEqual(order.items[0], {
     productId: "p1",

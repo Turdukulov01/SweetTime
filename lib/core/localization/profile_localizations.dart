@@ -1,6 +1,8 @@
 part of 'app_localizations.dart';
 
 extension ProfileLocalizations on AppLocalizations {
+  String get orderDetailsPromoCode =>
+      _pick('Промокод', 'Промокод', 'Promo code');
   String get profileGuestMessage => _pick(
     'Баллы, история заказов и постоянный заказ доступны после входа.',
     'Упайлар, заказдар тарыхы жана туруктуу заказ киргенден кийин жеткиликтүү.',
@@ -312,6 +314,27 @@ extension ProfileLocalizations on AppLocalizations {
     '$count заказов убрано с устройства',
     '$count заказ түзмөктөн алынды',
     '$count orders removed from this device',
+  );
+
+  String get orderHistoryRefresh => _pick(
+    'Обновить историю заказов',
+    'Заказдар тарыхын жаңыртуу',
+    'Refresh order history',
+  );
+
+  String get orderHistoryRefreshFailed => _pick(
+    'Не удалось обновить историю. Последние загруженные заказы сохранены.',
+    'Тарыхты жаңыртуу мүмкүн болгон жок. Акыркы жүктөлгөн заказдар сакталды.',
+    'Could not refresh history. Your last loaded orders are still here.',
+  );
+
+  String get orderHistoryRetry =>
+      _pick('Повторить', 'Кайра аракет кылуу', 'Retry');
+
+  String get orderHistorySessionExpired => _pick(
+    'Сессия завершена. Войдите снова, чтобы обновить заказы.',
+    'Сессия бүттү. Заказдарды жаңыртуу үчүн кайра кириңиз.',
+    'Your session ended. Sign in again to refresh orders.',
   );
 
   String profileOrderItemsCount(int count) =>

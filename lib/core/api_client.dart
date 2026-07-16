@@ -192,10 +192,12 @@ OrderHistoryEntry? parseCustomerOrderHistoryEntry(dynamic raw) {
   final branchName = _optionalString(raw['branchName']);
   final branchAddress = _optionalString(raw['branchAddress']);
   final comment = _optionalString(raw['comment']);
+  final promoCode = _optionalString(raw['promoCode']);
   if ((raw['customerPhone'] != null && customerPhone == null) ||
       (raw['branchName'] != null && branchName == null) ||
       (raw['branchAddress'] != null && branchAddress == null) ||
-      (raw['comment'] != null && comment == null)) {
+      (raw['comment'] != null && comment == null) ||
+      (raw['promoCode'] != null && promoCode == null)) {
     return null;
   }
   final rawItems = raw['items'];
@@ -263,6 +265,7 @@ OrderHistoryEntry? parseCustomerOrderHistoryEntry(dynamic raw) {
     branchName: branchName,
     branchAddress: branchAddress,
     comment: comment,
+    promoCode: promoCode,
   );
 }
 
@@ -1169,6 +1172,7 @@ class ApiClient {
     required List<Map<String, Object?>> items,
     required String paymentMethod,
     required int pointsUsed,
+    String? promoCode,
     String? comment,
   }) async {
     try {
@@ -1184,6 +1188,7 @@ class ApiClient {
               'items': items,
               'paymentMethod': paymentMethod,
               'pointsUsed': pointsUsed,
+              'promoCode': promoCode,
               'comment': comment?.trim().isEmpty == true
                   ? null
                   : comment?.trim(),
@@ -1509,7 +1514,7 @@ class ApiClient {
       }
     }
     known ??= demoCategory;
-    final nameSource = rawMap?['name'] ?? raw;
+    final nameSource = productJson['categoryName'] ?? rawMap?['name'] ?? raw;
     final name = _mapLocalizedText(
       nameSource,
       known: known?.name,

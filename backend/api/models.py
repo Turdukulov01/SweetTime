@@ -168,6 +168,61 @@ class Customer(Base):
     )
 
 
+class CustomerSession(Base):
+    """Server-owned rotating refresh session for one customer device/login.
+
+    Refresh JWTs are never stored verbatim. ``current_refresh_token_hash`` is
+    replaced after every successful refresh; presenting an older token for the
+    same session is treated as replay and revokes the whole session family.
+    """
+
+    __tablename__ = "customer_sessions"
+    __table_args__ = (
+        UniqueConstraint(
+            "current_refresh_token_hash",
+            name="uq_customer_session_current_refresh_hash",
+        ),
+        UniqueConstraint(
+            "legacy_refresh_token_hash",
+            name="uq_customer_session_legacy_refresh_hash",
+        ),
+        Index(
+            "ix_customer_sessions_tenant_customer",
+            "company_id",
+            "customer_id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id"), index=True
+    )
+    customer_id: Mapped[str] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    current_refresh_token_hash: Mapped[str] = mapped_column(String(64))
+    # Transitional lookup for stateless refresh JWTs issued before this table
+    # existed. It remains after first rotation so replay is still detectable.
+    legacy_refresh_token_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    idle_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    last_refreshed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    revoke_reason: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, default=None
+    )
+
+
 class CustomerIdentity(Base):
     """External login identity scoped to one white-label company.
 
@@ -227,6 +282,23 @@ class Branch(Base):
     is_open: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class Category(Base):
+    """Tenant-owned product category with an opaque, rename-safe identifier."""
+
+    __tablename__ = "categories"
+    __table_args__ = (
+        Index("ix_categories_company_sort", "company_id", "sort_order", "id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id"), index=True
+    )
+    name: Mapped[dict] = mapped_column(JSON)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class Product(Base):
     __tablename__ = "products"
 
@@ -237,6 +309,9 @@ class Product(Base):
     # Строка (как в сиде/app_demo) ИЛИ локализованный объект {ru,ky,en}.
     name: Mapped[dict | str] = mapped_column(JSON)
     category: Mapped[str]
+    category_id: Mapped[str | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
     description: Mapped[dict | str] = mapped_column(JSON, default="")
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     price: Mapped[int]
@@ -448,6 +523,9 @@ class Order(Base):
     total: Mapped[int]
     # mock | cash | qr — демо-способ оплаты (для аналитики админки)
     payment_method: Mapped[str] = mapped_column(default="mock")
+    promo_code: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )
     points_used: Mapped[int] = mapped_column(Integer, default=0)
     points_earned: Mapped[int] = mapped_column(Integer, default=0)
     # ISO-8601 UTC ("2026-07-12T09:00:00.000Z") — строка сортируется корректно

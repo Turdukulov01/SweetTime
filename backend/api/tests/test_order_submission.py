@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from api import schemas
 from api.database import Base
 from api.main import create_order
-from api.models import Branch, Company, Customer, Order, Product
+from api.models import Branch, Company, Customer, Order, Product, Promotion
 from api.order_events import OrderEventHub
 
 
@@ -175,5 +175,43 @@ def test_reusing_client_request_for_different_order_is_rejected() -> None:
 
             assert caught.value.status_code == 409
             assert db.scalar(select(func.count()).select_from(Order)) == 1
+    finally:
+        engine.dispose()
+
+
+def test_active_promo_is_snapshotted_and_unknown_code_is_rejected() -> None:
+    engine, factory = _database()
+    try:
+        with factory() as db:
+            company, customer = _seed(db)
+            db.add(
+                Promotion(
+                    id="promo-summer",
+                    company_id=company.id,
+                    sort_order=0,
+                    active=True,
+                    title={"ru": "Лето", "ky": "Жай", "en": "Summer"},
+                    description={"ru": "", "ky": "", "en": ""},
+                    code="SUMMER",
+                    accent_color="#FF5C9A",
+                )
+            )
+            db.commit()
+
+            valid = _request("mobile-request-promo-1").model_copy(
+                update={"promoCode": "SUMMER", "pointsUsed": 10}
+            )
+            created = create_order(valid, company, customer, db)
+            assert created.promoCode == "SUMMER"
+            assert created.pointsUsed == 10
+            assert created.total == 380
+
+            invalid = _request("mobile-request-promo-2").model_copy(
+                update={"promoCode": "MISSING"}
+            )
+            with pytest.raises(HTTPException) as caught:
+                create_order(invalid, company, customer, db)
+            assert caught.value.status_code == 400
+            assert caught.value.detail == "Invalid promo code"
     finally:
         engine.dispose()

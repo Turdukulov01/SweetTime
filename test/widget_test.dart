@@ -98,6 +98,15 @@ Map<String, dynamic> _recurringJson({String? paidUntil}) => <String, dynamic>{
 };
 
 void main() {
+  test('catalog starting price uses the lowest final size price', () {
+    final product = DemoData.products.first;
+    final expected = product.sizes
+        .map((size) => product.basePrice + size.priceDelta)
+        .reduce((left, right) => left < right ? left : right);
+
+    expect(product.startingPrice, expected);
+  });
+
   test('dynamic localized content falls back to Russian', () {
     const text = LocalizedText(ru: 'Новости', ky: ' ', en: null);
 
@@ -389,6 +398,41 @@ void main() {
 
     expect(parseCustomerOrderHistoryEntry(raw), isNull);
   });
+
+  test(
+    'cart accepts only known promo codes and supports partial points',
+    () async {
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(),
+        cartStore: _MemoryCartStore(),
+      );
+      final product = DemoData.products.first;
+      expect(
+        await controller.addConfigured(
+          product,
+          sizeId: product.sizes.first.id,
+          sugarPercent: 50,
+          ice: IceLevel.regular,
+          toppingIds: const [],
+        ),
+        isTrue,
+      );
+
+      expect(controller.applyPromoCode('missing'), isFalse);
+      expect(controller.state.promoCode, isNull);
+      expect(controller.applyPromoCode(DemoData.promotions.first.code), isTrue);
+      expect(
+        controller.state.promoCode,
+        DemoData.promotions.first.code.toUpperCase(),
+      );
+
+      controller.setUseBonus(true);
+      controller.setBonusPointsToUse(10);
+      expect(controller.state.bonusApplied, 10);
+      expect(controller.state.total, controller.state.subtotal - 10);
+    },
+  );
 
   test(
     'company refresh accepts empty storefront content and reads later changes',
@@ -1943,6 +1987,7 @@ class _CapturingOrderApiClient extends _OfflineApiClient {
     required List<Map<String, Object?>> items,
     required String paymentMethod,
     required int pointsUsed,
+    String? promoCode,
     String? comment,
   }) async {
     accessTokens.add(accessToken);
@@ -1954,6 +1999,7 @@ class _CapturingOrderApiClient extends _OfflineApiClient {
       'items': items,
       'paymentMethod': paymentMethod,
       'pointsUsed': pointsUsed,
+      'promoCode': promoCode,
       'comment': comment,
     });
     if (accessToken == rejectToken) {

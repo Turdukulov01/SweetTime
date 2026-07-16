@@ -55,6 +55,7 @@ export interface ApiOrderContract {
   discount?: number | null;
   total: number;
   paymentMethod?: string | null;
+  promoCode?: string | null;
   paymentStatus?: string | null;
   pointsUsed?: number | null;
   pointsEarned?: number | null;
@@ -151,6 +152,7 @@ export function mapApiOrder(companyId: string, value: ApiOrderContract): Order {
     discount: finiteOptional(value.discount),
     createdAt: value.createdAt,
     paymentMethod: mapPaymentMethod(value.paymentMethod),
+    promoCode: optionalText(value.promoCode),
     paymentStatus: optionalText(value.paymentStatus),
     pointsUsed: finiteOptional(value.pointsUsed),
     pointsEarned: finiteOptional(value.pointsEarned),

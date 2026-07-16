@@ -129,6 +129,25 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
       _pick('Перейти в каталог', 'Каталогго өтүү', 'Go to catalog');
   String get orderSummary => _pick('Итого', 'Жыйынтык', 'Summary');
   String get promoCode => _pick('Промокод', 'Промокод', 'Promo code');
+  String get applyPromoCode =>
+      _pick('Применить промокод', 'Промокодду колдонуу', 'Apply promo code');
+  String get invalidPromoCode => _pick(
+    'Такого промокода нет или он больше не действует',
+    'Мындай промокод жок же анын мөөнөтү бүттү',
+    'This promo code does not exist or is no longer active',
+  );
+  String promoCodeApplied(String code) => _pick(
+    'Промокод $code применён',
+    '$code промокоду колдонулду',
+    'Promo code $code applied',
+  );
+  String get pointsAmount =>
+      _pick('Сколько баллов списать', 'Канча упай колдонулат', 'Points to use');
+  String pointsAmountLimit(int max) => _pick(
+    'Можно списать от 1 до $max',
+    '1ден $max чейин колдонсо болот',
+    'You can use from 1 to $max',
+  );
   String get usePoints =>
       _pick('Списать баллы', 'Упайларды колдонуу', 'Use points');
 

@@ -53,6 +53,17 @@ enum ContactSaveResult { success, rejected, unavailable, busy }
 
 enum AccountDeletionResult { success, rejected, unavailable, busy }
 
+enum CustomerHistoryRefreshResult { success, unavailable, sessionExpired }
+
+enum CustomerSessionResumeResult { active, unavailable, sessionExpired, none }
+
+ApiResult<T> _resultWithoutValue<T>(ApiAuthStatus status) => switch (status) {
+  ApiAuthStatus.ok => throw StateError('An ok result must carry a value.'),
+  ApiAuthStatus.rejected => ApiResult<T>.rejected(),
+  ApiAuthStatus.invalid => ApiResult<T>.invalid(),
+  ApiAuthStatus.unavailable => ApiResult<T>.unavailable(),
+};
+
 abstract interface class LanguagePreferenceStore {
   Future<String?> readLanguageCode();
   Future<void> writeLanguageCode(String code);
@@ -118,6 +129,8 @@ class AppState {
     required this.favoriteIds,
     required this.cart,
     required this.useBonus,
+    required this.bonusPointsToUse,
+    required this.promoCode,
     required this.orders,
     required this.hiddenOrderIds,
     required this.pointEvents,
@@ -174,6 +187,8 @@ class AppState {
   final List<String> favoriteIds;
   final List<CartItem> cart;
   final bool useBonus;
+  final int bonusPointsToUse;
+  final String? promoCode;
   final List<OrderHistoryEntry> orders;
   final Set<String> hiddenOrderIds;
 
@@ -193,7 +208,10 @@ class AppState {
     return points < cap ? points : cap;
   }
 
-  int get bonusApplied => useBonus ? maxBonusSpend : 0;
+  int get bonusApplied {
+    if (!useBonus || maxBonusSpend <= 0) return 0;
+    return bonusPointsToUse.clamp(0, maxBonusSpend);
+  }
 
   int get total {
     final value = subtotal - bonusApplied;
@@ -240,6 +258,8 @@ class AppState {
     List<String>? favoriteIds,
     List<CartItem>? cart,
     bool? useBonus,
+    int? bonusPointsToUse,
+    String? promoCode,
     List<OrderHistoryEntry>? orders,
     Set<String>? hiddenOrderIds,
     List<PointEvent>? pointEvents,
@@ -250,6 +270,7 @@ class AppState {
     bool clearInvitedByCode = false,
     bool clearPendingAuthReturn = false,
     bool clearRecurring = false,
+    bool clearPromoCode = false,
   }) {
     return AppState(
       apiConnected: apiConnected ?? this.apiConnected,
@@ -287,6 +308,8 @@ class AppState {
       favoriteIds: favoriteIds ?? this.favoriteIds,
       cart: cart ?? this.cart,
       useBonus: useBonus ?? this.useBonus,
+      bonusPointsToUse: bonusPointsToUse ?? this.bonusPointsToUse,
+      promoCode: clearPromoCode ? null : (promoCode ?? this.promoCode),
       orders: orders ?? this.orders,
       hiddenOrderIds: hiddenOrderIds ?? this.hiddenOrderIds,
       pointEvents: pointEvents ?? this.pointEvents,
@@ -349,6 +372,8 @@ class AppStateController extends StateNotifier<AppState> {
            favoriteIds: DemoData.favoriteIds,
            cart: const [],
            useBonus: false,
+           bonusPointsToUse: 0,
+           promoCode: null,
            orders: const [],
            hiddenOrderIds: const {},
            pointEvents: DemoData.pointEvents,
@@ -374,6 +399,8 @@ class AppStateController extends StateNotifier<AppState> {
   bool _favoritesSyncRunning = false;
   bool _favoritesSyncDirty = false;
   Completer<void>? _favoritesSyncCompleter;
+  Future<ApiResult<String>>? _tokenRefreshInFlight;
+  Future<CustomerSessionResumeResult>? _sessionResumeInFlight;
   Future<void>? _companyRefreshInFlight;
   DateTime? _lastCompanyRefreshAt;
   int _cartRevision = 0;
@@ -488,7 +515,11 @@ class AppStateController extends StateNotifier<AppState> {
     }
 
     if (revisionAtStart != _cartRevision) return;
-    state = state.copyWith(cart: List.unmodifiable(restored), useBonus: false);
+    state = state.copyWith(
+      cart: List.unmodifiable(restored),
+      useBonus: false,
+      bonusPointsToUse: 0,
+    );
     await _queueCartPersist();
   }
 
@@ -595,18 +626,7 @@ class AppStateController extends StateNotifier<AppState> {
   Future<void> _restoreSession() async {
     final epoch = _accountEpoch;
     try {
-      final accessToken = await _authStore.readAccessToken();
-      if (epoch != _accountEpoch ||
-          accessToken == null ||
-          accessToken.isEmpty) {
-        return;
-      }
-
-      var result = await _api.fetchCustomerMe(accessToken);
-      if (result.isRejected) {
-        final refreshed = await _refreshAccessToken();
-        if (refreshed != null) result = await _api.fetchCustomerMe(refreshed);
-      }
+      final result = await _withCustomerToken(_api.fetchCustomerMe);
       if (epoch != _accountEpoch) return;
       switch (result.status) {
         case ApiAuthStatus.ok:
@@ -615,7 +635,7 @@ class AppStateController extends StateNotifier<AppState> {
           await _loadCustomerOrders();
           await _loadCustomerRecurring();
         case ApiAuthStatus.rejected:
-          await _authStore.clear();
+          _expireCustomerSession();
         case ApiAuthStatus.invalid:
         case ApiAuthStatus.unavailable:
           break; // офлайн: состояние не меняем
@@ -625,25 +645,92 @@ class AppStateController extends StateNotifier<AppState> {
     }
   }
 
-  /// Новая пара токенов по refresh-токену. null — обновиться не удалось;
-  /// при явном отказе сервера токены с устройства удаляются.
-  Future<String?> _refreshAccessToken() async {
-    final refreshToken = await _authStore.readRefreshToken();
-    if (refreshToken == null || refreshToken.isEmpty) {
-      await _authStore.clear();
-      return null;
-    }
-    final result = await _api.refreshTokens(refreshToken);
-    if (!result.isOk) {
-      if (result.isRejected) await _authStore.clear();
-      return null;
-    }
-    final tokens = result.value!;
-    await _authStore.writeTokens(
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
+  /// Revalidates an already active customer session after app resume.
+  ///
+  /// Temporary network failures preserve both tokens and the last successful
+  /// private state. A local logout happens only after the refresh credential is
+  /// definitively rejected and the profile request still cannot authenticate.
+  Future<CustomerSessionResumeResult> resumeCustomerSession() {
+    final active = _sessionResumeInFlight;
+    if (active != null) return active;
+    final resume = _performSessionResume();
+    _sessionResumeInFlight = resume;
+    unawaited(
+      resume.whenComplete(() {
+        if (identical(_sessionResumeInFlight, resume)) {
+          _sessionResumeInFlight = null;
+        }
+      }),
     );
-    return tokens.accessToken;
+    return resume;
+  }
+
+  Future<CustomerSessionResumeResult> _performSessionResume() async {
+    if (state.isGuest) return CustomerSessionResumeResult.none;
+    final epoch = _accountEpoch;
+    final customerId = state.customerId;
+    final result = await _withCustomerToken(_api.fetchCustomerMe);
+    if (epoch != _accountEpoch || state.isGuest) {
+      return CustomerSessionResumeResult.none;
+    }
+    switch (result.status) {
+      case ApiAuthStatus.ok:
+        if (customerId != null && result.value!.id != customerId) {
+          _expireCustomerSession();
+          return CustomerSessionResumeResult.sessionExpired;
+        }
+        _applyCustomerProfile(result.value!);
+        await _loadCustomerOrders();
+        return CustomerSessionResumeResult.active;
+      case ApiAuthStatus.rejected:
+        _expireCustomerSession();
+        return CustomerSessionResumeResult.sessionExpired;
+      case ApiAuthStatus.invalid:
+      case ApiAuthStatus.unavailable:
+        return CustomerSessionResumeResult.unavailable;
+    }
+  }
+
+  /// Requests a rotated pair by refresh token. Concurrent callers share one
+  /// request, which is required when the server rotates refresh credentials.
+  /// Only an explicit rejection clears stored tokens; network errors preserve
+  /// the current session for a later retry.
+  Future<ApiResult<String>> _refreshAccessToken() {
+    final active = _tokenRefreshInFlight;
+    if (active != null) return active;
+    final refresh = _performTokenRefresh();
+    _tokenRefreshInFlight = refresh;
+    unawaited(
+      refresh.whenComplete(() {
+        if (identical(_tokenRefreshInFlight, refresh)) {
+          _tokenRefreshInFlight = null;
+        }
+      }),
+    );
+    return refresh;
+  }
+
+  Future<ApiResult<String>> _performTokenRefresh() async {
+    try {
+      final refreshToken = await _authStore.readRefreshToken();
+      if (refreshToken == null || refreshToken.isEmpty) {
+        await _clearTokens();
+        return const ApiResult<String>.rejected();
+      }
+      final result = await _api.refreshTokens(refreshToken);
+      if (!result.isOk) {
+        if (result.isRejected) await _clearTokens();
+        return _resultWithoutValue<String>(result.status);
+      }
+      final tokens = result.value!;
+      await _authStore.writeTokens(
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      );
+      return ApiResult<String>.ok(tokens.accessToken);
+    } catch (_) {
+      return const ApiResult<String>.unavailable();
+    }
   }
 
   /// Серверный профиль -> состояние приложения. Личные данные показываем
@@ -704,6 +791,32 @@ class AppStateController extends StateNotifier<AppState> {
       return;
     }
     state = state.copyWith(orders: List.unmodifiable(result.value!));
+  }
+
+  /// Pull-to-refresh entry point for the customer order history.
+  ///
+  /// The existing list is replaced only by a fully parsed successful response.
+  /// Network/schema errors leave the last successful list untouched.
+  Future<CustomerHistoryRefreshResult> refreshCustomerOrders() async {
+    final epoch = _accountEpoch;
+    final customerId = state.customerId;
+    if (state.isGuest) return CustomerHistoryRefreshResult.sessionExpired;
+    if (customerId == null) return CustomerHistoryRefreshResult.unavailable;
+    final result = await _withCustomerToken(_api.fetchCustomerOrders);
+    if (epoch != _accountEpoch || state.isGuest) {
+      return CustomerHistoryRefreshResult.sessionExpired;
+    }
+    if (result.isOk) {
+      state = state.copyWith(orders: List.unmodifiable(result.value!));
+      return CustomerHistoryRefreshResult.success;
+    }
+    if (result.isRejected) {
+      final session = await resumeCustomerSession();
+      return session == CustomerSessionResumeResult.sessionExpired
+          ? CustomerHistoryRefreshResult.sessionExpired
+          : CustomerHistoryRefreshResult.unavailable;
+    }
+    return CustomerHistoryRefreshResult.unavailable;
   }
 
   Future<void> _loadCustomerRecurring() async {
@@ -857,6 +970,7 @@ class AppStateController extends StateNotifier<AppState> {
     required List<CartItem> items,
     required Branch branch,
     required int pointsUsed,
+    String? promoCode,
     String? comment,
     PaymentMethod paymentMethod = PaymentMethod.mock,
   }) async {
@@ -891,12 +1005,18 @@ class AppStateController extends StateNotifier<AppState> {
           PaymentMethod.qrDemo => 'qr',
         },
         pointsUsed: pointsUsed,
+        promoCode: promoCode,
         comment: comment,
       ),
     );
 
     if (result.isOk) {
-      state = state.copyWith(cart: const [], useBonus: false);
+      state = state.copyWith(
+        cart: const [],
+        useBonus: false,
+        bonusPointsToUse: 0,
+        clearPromoCode: true,
+      );
       _cartRevision++;
       await _queueCartPersist();
       await _loadCustomerOrders();
@@ -1034,13 +1154,19 @@ class AppStateController extends StateNotifier<AppState> {
     try {
       var token = await _authStore.readAccessToken();
       if (token == null || token.isEmpty) {
-        return ApiResult<T>.unavailable();
+        final refreshed = await _refreshAccessToken();
+        if (!refreshed.isOk) {
+          return _resultWithoutValue<T>(refreshed.status);
+        }
+        token = refreshed.value!;
       }
       var result = await request(token);
       if (result.isRejected) {
-        token = await _refreshAccessToken();
-        if (token == null) return ApiResult<T>.rejected();
-        result = await request(token);
+        final refreshed = await _refreshAccessToken();
+        if (!refreshed.isOk) {
+          return _resultWithoutValue<T>(refreshed.status);
+        }
+        result = await request(refreshed.value!);
       }
       return result;
     } catch (_) {
@@ -1068,9 +1194,9 @@ class AppStateController extends StateNotifier<AppState> {
       );
       if (result.isRejected) {
         final refreshed = await _refreshAccessToken();
-        if (refreshed == null) return;
+        if (!refreshed.isOk) return;
         result = await _api.patchCustomerMe(
-          refreshed,
+          refreshed.value!,
           firstName: firstName,
           lastName: lastName,
           birthDate: isoBirthDate,
@@ -1087,11 +1213,10 @@ class AppStateController extends StateNotifier<AppState> {
       '${date.month.toString().padLeft(2, '0')}-'
       '${date.day.toString().padLeft(2, '0')}';
 
-  void logout() {
+  void _expireCustomerSession() {
     _accountEpoch++;
     _favoritesSyncDirty = false;
     unawaited(_clearTokens());
-    unawaited(_googleIdentity.signOut());
     state = state.copyWith(
       isGuest: true,
       clearCustomerId: true,
@@ -1111,6 +1236,11 @@ class AppStateController extends StateNotifier<AppState> {
     );
     _cartRevision++;
     unawaited(_queueCartPersist());
+  }
+
+  void logout() {
+    _expireCustomerSession();
+    unawaited(_googleIdentity.signOut());
   }
 
   /// Токены с устройства убираем всегда, даже если хранилище ругнулось:
@@ -1170,6 +1300,8 @@ class AppStateController extends StateNotifier<AppState> {
       favoriteIds: const [],
       cart: const [],
       useBonus: false,
+      bonusPointsToUse: 0,
+      clearPromoCode: true,
       orders: const [],
       hiddenOrderIds: const {},
       pointEvents: const [],
@@ -1331,7 +1463,33 @@ class AppStateController extends StateNotifier<AppState> {
   }
 
   void setUseBonus(bool value) {
-    state = state.copyWith(useBonus: value);
+    if (!value || state.maxBonusSpend <= 0) {
+      state = state.copyWith(useBonus: false, bonusPointsToUse: 0);
+      return;
+    }
+    state = state.copyWith(
+      useBonus: true,
+      bonusPointsToUse: state.maxBonusSpend,
+    );
+  }
+
+  void setBonusPointsToUse(int value) {
+    final next = value.clamp(0, state.maxBonusSpend);
+    state = state.copyWith(useBonus: next > 0, bonusPointsToUse: next);
+  }
+
+  bool applyPromoCode(String value) {
+    final normalized = value.trim().toUpperCase();
+    if (normalized.isEmpty) {
+      state = state.copyWith(clearPromoCode: true);
+      return true;
+    }
+    final exists = state.promotions.any(
+      (promotion) => promotion.code.trim().toUpperCase() == normalized,
+    );
+    if (!exists) return false;
+    state = state.copyWith(promoCode: normalized);
+    return true;
   }
 
   Future<void> hideOrdersOnDevice(Iterable<String> orderIds) async {

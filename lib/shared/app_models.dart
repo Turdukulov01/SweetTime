@@ -316,6 +316,18 @@ class Product {
   final bool isBestSeller;
 
   bool availableIn(Branch branch) => availableBranchIds.contains(branch.id);
+
+  /// Lowest configured final price shown in catalog cards.
+  ///
+  /// Size prices are stored as deltas for order calculations, but the admin
+  /// edits them as final prices. Showing [basePrice] here would therefore
+  /// disagree with the initially selected size whenever it is cheaper.
+  int get startingPrice {
+    if (sizes.isEmpty) return basePrice;
+    return sizes
+        .map((size) => basePrice + size.priceDelta)
+        .reduce((left, right) => left < right ? left : right);
+  }
 }
 
 class ModifierOption {
@@ -422,6 +434,7 @@ class CustomerOrder {
     required this.total,
     required this.pointsUsed,
     required this.pointsEarned,
+    this.promoCode,
   });
 
   final String id;
@@ -434,6 +447,7 @@ class CustomerOrder {
   final int total;
   final int pointsUsed;
   final int pointsEarned;
+  final String? promoCode;
 }
 
 /// Immutable order-history snapshot returned by the customer API.
@@ -507,6 +521,7 @@ class OrderHistoryEntry {
     this.branchName,
     this.branchAddress,
     this.comment,
+    this.promoCode,
   });
 
   final String id;
@@ -526,6 +541,7 @@ class OrderHistoryEntry {
   final String? branchName;
   final String? branchAddress;
   final String? comment;
+  final String? promoCode;
 
   bool get supportsExactRepeat => itemsVersion == 2;
 
@@ -542,6 +558,7 @@ class OrderHistoryEntry {
     total: order.total,
     pointsUsed: order.pointsUsed,
     pointsEarned: order.pointsEarned,
+    promoCode: order.promoCode,
   );
 }
 

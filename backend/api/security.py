@@ -18,7 +18,10 @@ JWT (S2): два вида токенов — access (короткий, `settings
 """
 
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+from hmac import compare_digest
 from typing import Any, Literal
+from uuid import uuid4
 
 import jwt
 from passlib.context import CryptContext
@@ -67,6 +70,8 @@ def _create_token(
     kind: TokenKind,
     expires_delta: timedelta,
     role: str | None = None,
+    session_id: str | None = None,
+    expires_at: datetime | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     payload: dict[str, Any] = {
@@ -75,10 +80,13 @@ def _create_token(
         "cid": company_id,
         "kind": kind,
         "iat": int(now.timestamp()),
-        "exp": int((now + expires_delta).timestamp()),
+        "exp": int((expires_at or (now + expires_delta)).timestamp()),
+        "jti": uuid4().hex,
     }
     if role is not None:
         payload["role"] = role
+    if session_id is not None:
+        payload["sid"] = session_id
     return jwt.encode(
         payload, settings.jwt_secret, algorithm=settings.jwt_algorithm
     )
@@ -90,6 +98,7 @@ def create_access_token(
     typ: TokenSubjectType,
     company_id: str,
     role: str | None = None,
+    session_id: str | None = None,
 ) -> str:
     return _create_token(
         subject=subject,
@@ -98,6 +107,7 @@ def create_access_token(
         role=role,
         kind="access",
         expires_delta=timedelta(minutes=settings.access_token_minutes),
+        session_id=session_id,
     )
 
 
@@ -107,6 +117,8 @@ def create_refresh_token(
     typ: TokenSubjectType,
     company_id: str,
     role: str | None = None,
+    session_id: str | None = None,
+    expires_at: datetime | None = None,
 ) -> str:
     return _create_token(
         subject=subject,
@@ -115,6 +127,8 @@ def create_refresh_token(
         role=role,
         kind="refresh",
         expires_delta=timedelta(days=settings.refresh_token_days),
+        session_id=session_id,
+        expires_at=expires_at,
     )
 
 
@@ -134,6 +148,42 @@ def create_token_pair(
             subject=subject, typ=typ, company_id=company_id, role=role
         ),
     )
+
+
+def create_customer_session_token_pair(
+    *,
+    subject: str,
+    company_id: str,
+    session_id: str,
+    idle_expires_at: datetime,
+) -> tuple[str, str]:
+    """Issue a short access JWT and one rotating customer refresh JWT."""
+
+    return (
+        create_access_token(
+            subject=subject,
+            typ="customer",
+            company_id=company_id,
+            session_id=session_id,
+        ),
+        create_refresh_token(
+            subject=subject,
+            typ="customer",
+            company_id=company_id,
+            session_id=session_id,
+            expires_at=idle_expires_at,
+        ),
+    )
+
+
+def refresh_token_hash(token: str) -> str:
+    """Non-reversible lookup value; raw bearer credentials never reach DB."""
+
+    return sha256(token.encode("utf-8")).hexdigest()
+
+
+def refresh_token_matches(token: str, expected_hash: str) -> bool:
+    return compare_digest(refresh_token_hash(token), expected_hash)
 
 
 def decode_token(

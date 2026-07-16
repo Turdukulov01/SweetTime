@@ -355,6 +355,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       items: cartItems,
       branch: branch,
       pointsUsed: pointsUsed,
+      promoCode: state.promoCode,
       comment: _commentController.text,
       paymentMethod: _payment,
     );
@@ -390,6 +391,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
       total: total,
       pointsUsed: pointsUsed,
       pointsEarned: created.pointsEarned,
+      promoCode: state.promoCode,
     );
     showDialog<void>(
       context: context,

@@ -76,6 +76,11 @@ export interface Product {
   id: string;
   companyId: string;
   name: string;
+  /** Описание товара, которое возвращает и принимает product API. */
+  description: string;
+  /** Серверный URL фото или null; произвольный локальный файл здесь не хранится. */
+  imageUrl: string | null;
+  categoryId?: string | null;
   /** Категория меню, отображаемая строка на русском */
   category: string;
   /** Цвет фото-заглушки товара, HEX (#RRGGBB) */
@@ -94,6 +99,13 @@ export interface Product {
   isBestSeller?: boolean;
   /** «Новинка» — попадает в подборку «Новое в меню» на витрине приложения */
   isNew?: boolean;
+}
+
+export interface Category {
+  id: string;
+  name: { ru: string; ky: string; en: string };
+  sortOrder: number;
+  active: boolean;
 }
 
 /** Визуал сторис (иконка-заглушка новости на витрине приложения) */
@@ -269,6 +281,7 @@ export interface Order {
   itemsVersion?: 1 | 2;
   /** Может отсутствовать у старого demo API или локальных моков */
   paymentMethod?: PaymentMethod;
+  promoCode?: string;
   paymentStatus?: string;
   subtotal?: number;
   discount?: number;

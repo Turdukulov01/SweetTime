@@ -28,11 +28,11 @@ import json
 from uuid import uuid4
 
 import anyio
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -54,10 +54,21 @@ from .deps import (
     get_current_staff,
     require_role,
 )
-from .models import Branch, Company, Customer, News, Order, Product, Promotion
+from .models import (
+    Branch,
+    Category,
+    Company,
+    Customer,
+    MediaFile,
+    News,
+    Order,
+    Product,
+    Promotion,
+)
 from .order_events import encode_sse, event_payload, order_event_hub
 from .seed import seed_if_empty
 from .serializers import order_out as _order_out
+from .storage import StorageValidationError, storage_service
 
 
 @asynccontextmanager
@@ -125,10 +136,35 @@ def _company_out(c: Company) -> schemas.CompanyOut:
     )
 
 
-def _product_out(p: Product) -> schemas.ProductOut:
+def _category_name(value: object, fallback: str = "Uncategorized") -> dict[str, str]:
+    source = value if isinstance(value, dict) else {}
+    ru = str(source.get("ru") or fallback)
+    return {
+        "ru": ru,
+        "ky": str(source.get("ky") or ru),
+        "en": str(source.get("en") or ru),
+    }
+
+
+def _category_out(category: Category) -> schemas.CategoryOut:
+    return schemas.CategoryOut(
+        id=category.id,
+        name=_category_name(category.name),
+        sortOrder=category.sort_order,
+        active=category.active,
+    )
+
+
+def _product_out(p: Product, category: Category | None = None) -> schemas.ProductOut:
+    localized_category = _category_name(
+        category.name if category is not None else None,
+        fallback=p.category,
+    )
     return schemas.ProductOut(
         id=p.id,
         name=p.name,
+        categoryId=p.category_id,
+        categoryName=localized_category,
         category=p.category,
         description=p.description,
         imageUrl=p.image_url,
@@ -279,6 +315,144 @@ def patch_config(
 
 
 @app.get(
+    "/api/companies/{companyId}/categories",
+    response_model=list[schemas.CategoryOut],
+    tags=["products"],
+)
+def list_categories(
+    company: Company = Depends(get_company), db: Session = Depends(get_db)
+) -> list[schemas.CategoryOut]:
+    categories = db.scalars(
+        select(Category)
+        .where(Category.company_id == company.id)
+        .order_by(Category.sort_order, Category.id)
+    ).all()
+    return [_category_out(category) for category in categories]
+
+
+@app.post(
+    "/api/companies/{companyId}/categories",
+    response_model=schemas.CategoryOut,
+    status_code=201,
+    tags=["products"],
+    dependencies=[Depends(require_content_staff)],
+)
+def create_category(
+    body: schemas.CategoryCreate,
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> schemas.CategoryOut:
+    category = Category(
+        id=f"category-{uuid4().hex}",
+        company_id=company.id,
+        name=body.name.model_dump(),
+        sort_order=body.sortOrder,
+        active=body.active,
+    )
+    db.add(category)
+    db.commit()
+    return _category_out(category)
+
+
+def _company_category_or_404(
+    db: Session, company_id: str, category_id: str
+) -> Category:
+    category = db.get(Category, category_id)
+    if category is None or category.company_id != company_id:
+        raise HTTPException(status_code=404, detail="Category not found")
+    return category
+
+
+@app.patch(
+    "/api/companies/{companyId}/categories/{categoryId}",
+    response_model=schemas.CategoryOut,
+    tags=["products"],
+    dependencies=[Depends(require_content_staff)],
+)
+def patch_category(
+    categoryId: str,
+    patch: schemas.CategoryPatch,
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> schemas.CategoryOut:
+    category = _company_category_or_404(db, company.id, categoryId)
+    data = patch.model_dump(exclude_unset=True)
+    if "name" in data:
+        category.name = data["name"]
+        # Keep the legacy label coherent for older app/admin builds.
+        db.query(Product).filter(
+            Product.company_id == company.id,
+            Product.category_id == category.id,
+        ).update({Product.category: data["name"]["ru"]}, synchronize_session=False)
+    if "sortOrder" in data:
+        category.sort_order = data["sortOrder"]
+    if "active" in data:
+        category.active = data["active"]
+    db.add(category)
+    db.commit()
+    return _category_out(category)
+
+
+@app.delete(
+    "/api/companies/{companyId}/categories/{categoryId}",
+    status_code=204,
+    tags=["products"],
+    dependencies=[Depends(require_content_staff)],
+)
+def delete_category(
+    categoryId: str,
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> Response:
+    category = _company_category_or_404(db, company.id, categoryId)
+    in_use = db.scalar(
+        select(func.count(Product.id)).where(
+            Product.company_id == company.id,
+            Product.category_id == category.id,
+        )
+    )
+    if in_use:
+        raise HTTPException(status_code=409, detail="Category is used by products")
+    db.delete(category)
+    db.commit()
+    return Response(status_code=204)
+
+
+def _resolve_product_category(
+    *,
+    db: Session,
+    company_id: str,
+    category_id: str | None,
+    legacy_label: str | None,
+) -> Category:
+    if category_id is not None:
+        return _company_category_or_404(db, company_id, category_id)
+
+    label = (legacy_label or "").strip()
+    candidates = db.scalars(
+        select(Category).where(Category.company_id == company_id)
+    ).all()
+    for candidate in candidates:
+        if _category_name(candidate.name)["ru"].casefold() == label.casefold():
+            return candidate
+
+    # Transitional compatibility for an older admin that sends only a label.
+    next_order = (db.scalar(
+        select(func.max(Category.sort_order)).where(Category.company_id == company_id)
+    ) or -1) + 1
+    category = Category(
+        id=f"category-{uuid4().hex}",
+        company_id=company_id,
+        name={"ru": label, "ky": label, "en": label},
+        sort_order=next_order,
+        active=True,
+    )
+    db.add(category)
+    db.flush()
+    return category
+
+
+@app.get(
     "/api/companies/{companyId}/products",
     response_model=list[schemas.ProductOut],
     tags=["products"],
@@ -289,7 +463,13 @@ def list_products(
     products = db.scalars(
         select(Product).where(Product.company_id == company.id)
     ).all()
-    return [_product_out(p) for p in products]
+    categories = {
+        category.id: category
+        for category in db.scalars(
+            select(Category).where(Category.company_id == company.id)
+        ).all()
+    }
+    return [_product_out(p, categories.get(p.category_id)) for p in products]
 
 
 @app.post(
@@ -304,11 +484,18 @@ def create_product(
     company: Company = Depends(get_company),
     db: Session = Depends(get_db),
 ) -> schemas.ProductOut:
+    category = _resolve_product_category(
+        db=db,
+        company_id=company.id,
+        category_id=body.categoryId,
+        legacy_label=body.category,
+    )
     product = Product(
         id=f"p-{uuid4().hex[:8]}",
         company_id=company.id,
         name=_localized_or_text(body.name),
-        category=body.category,
+        category=_category_name(category.name)["ru"],
+        category_id=category.id,
         description=_localized_or_text(body.description),
         image_url=body.imageUrl,
         price=body.price,
@@ -322,7 +509,7 @@ def create_product(
     )
     db.add(product)
     db.commit()
-    return _product_out(product)
+    return _product_out(product, category)
 
 
 @app.patch(
@@ -337,9 +524,18 @@ def patch_product(
     db: Session = Depends(get_db),
 ) -> schemas.ProductOut:
     data = patch.model_dump(exclude_unset=True)
+    category: Category | None = None
+    if "categoryId" in data or "category" in data:
+        category = _resolve_product_category(
+            db=db,
+            company_id=product.company_id,
+            category_id=data.get("categoryId"),
+            legacy_label=data.get("category"),
+        )
+        product.category_id = category.id
+        product.category = _category_name(category.name)["ru"]
     field_map = {
         "name": "name",
-        "category": "category",
         "description": "description",
         "imageUrl": "image_url",
         "price": "price",
@@ -364,7 +560,117 @@ def patch_product(
             setattr(product, orm_field, value)
     db.add(product)
     db.commit()
-    return _product_out(product)
+    if category is None and product.category_id is not None:
+        category = db.get(Category, product.category_id)
+    return _product_out(product, category)
+
+
+def _cleanup_product_media(storage_keys: list[str]) -> None:
+    try:
+        storage_service.delete_image_variants(storage_keys)
+    except (OSError, StorageValidationError):
+        # The DB is authoritative; orphan cleanup can be retried by reconciliation.
+        pass
+
+
+@app.put(
+    "/api/companies/{companyId}/products/{productId}/image",
+    response_model=schemas.ProductOut,
+    tags=["products"],
+    dependencies=[Depends(require_content_staff)],
+)
+def put_product_image(
+    file: UploadFile = File(...),
+    product: Product = Depends(get_company_product),
+    db: Session = Depends(get_db),
+) -> schemas.ProductOut:
+    content = file.file.read(storage_service.max_image_bytes + 1)
+    try:
+        saved = storage_service.save_image(
+            tenant_slug=product.company_id,
+            media_kind="products",
+            content=content,
+            original_filename=file.filename,
+            declared_content_type=file.content_type,
+        )
+    except StorageValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    new_keys = [variant.storage_key for variant in saved.variants.values()]
+    old_keys: list[str] = []
+    try:
+        db.execute(
+            select(Product).where(Product.id == product.id).with_for_update()
+        ).scalar_one()
+        old_rows = db.scalars(
+            select(MediaFile).where(
+                MediaFile.tenant_id == product.company_id,
+                MediaFile.entity_type == "product_image",
+                MediaFile.entity_id == product.id,
+            )
+        ).all()
+        old_keys = [row.storage_key for row in old_rows]
+        for row in old_rows:
+            db.delete(row)
+        db.flush()
+        db.add_all(
+            [
+                MediaFile(
+                    id=f"{saved.image_id}:{variant_name}",
+                    tenant_id=product.company_id,
+                    entity_type="product_image",
+                    entity_id=product.id,
+                    storage_key=variant.storage_key,
+                    original_filename=saved.original_filename,
+                    mime_type="image/webp",
+                    size_bytes=variant.size_bytes,
+                    width=variant.width,
+                    height=variant.height,
+                    variant=variant_name,
+                )
+                for variant_name, variant in saved.variants.items()
+            ]
+        )
+        product.image_url = storage_service.get_public_url(saved.medium.storage_key)
+        db.add(product)
+        db.commit()
+    except Exception:
+        db.rollback()
+        _cleanup_product_media(new_keys)
+        raise
+
+    _cleanup_product_media(old_keys)
+    category = db.get(Category, product.category_id) if product.category_id else None
+    return _product_out(product, category)
+
+
+@app.delete(
+    "/api/companies/{companyId}/products/{productId}/image",
+    response_model=schemas.ProductOut,
+    tags=["products"],
+    dependencies=[Depends(require_content_staff)],
+)
+def delete_product_image(
+    product: Product = Depends(get_company_product),
+    db: Session = Depends(get_db),
+) -> schemas.ProductOut:
+    db.execute(select(Product).where(Product.id == product.id).with_for_update())
+    rows = db.scalars(
+        select(MediaFile).where(
+            MediaFile.tenant_id == product.company_id,
+            MediaFile.entity_type == "product_image",
+            MediaFile.entity_id == product.id,
+        )
+    ).all()
+    old_keys = [row.storage_key for row in rows]
+    for row in rows:
+        db.delete(row)
+    product.image_url = None
+    db.add(product)
+    db.commit()
+    _cleanup_product_media(old_keys)
+    category = db.get(Category, product.category_id) if product.category_id else None
+    return _product_out(product, category)
 
 
 def _localized_or_text(value):
@@ -736,6 +1042,24 @@ def create_order(
     stored_items, subtotal = _build_order_items_v2(
         body, locked_company, branch, db
     )
+    promo_code = body.promoCode
+    if promo_code is not None:
+        matching_promotion = next(
+            (
+                candidate
+                for candidate in db.scalars(
+                    select(Promotion).where(
+                        Promotion.company_id == locked_company.id,
+                        Promotion.active.is_(True),
+                        Promotion.code.is_not(None),
+                    )
+                ).all()
+                if candidate.code and candidate.code.strip().upper() == promo_code
+            ),
+            None,
+        )
+        if matching_promotion is None:
+            raise HTTPException(status_code=400, detail="Invalid promo code")
     max_points = min(
         locked_customer.points,
         int(subtotal * locked_company.loyalty["maxSpendShare"]),
@@ -766,6 +1090,7 @@ def create_order(
         items=stored_items,
         total=payable_total,
         payment_method=body.paymentMethod,
+        promo_code=promo_code,
         points_used=body.pointsUsed,
         # Серверный расчёт: earnRate компании (5% SweetTime, 3% CoffeeGo)
         points_earned=round(payable_total * locked_company.loyalty["earnRate"]),
@@ -955,6 +1280,13 @@ def create_promotion(
     company: Company = Depends(get_company),
     db: Session = Depends(get_db),
 ) -> schemas.PromotionOut:
+    if body.code and db.scalar(
+        select(Promotion.id).where(
+            Promotion.company_id == company.id,
+            Promotion.code == body.code,
+        )
+    ):
+        raise HTTPException(status_code=409, detail="Promo code already exists")
     promotion = Promotion(
         id=f"promo-{uuid4().hex[:8]}",
         company_id=company.id,
@@ -982,6 +1314,14 @@ def patch_promotion(
     db: Session = Depends(get_db),
 ) -> schemas.PromotionOut:
     data = patch.model_dump(exclude_unset=True)
+    if data.get("code") and db.scalar(
+        select(Promotion.id).where(
+            Promotion.company_id == promotion.company_id,
+            Promotion.code == data["code"],
+            Promotion.id != promotion.id,
+        )
+    ):
+        raise HTTPException(status_code=409, detail="Promo code already exists")
     field_map = {
         "title": "title",
         "description": "description",

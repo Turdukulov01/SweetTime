@@ -19,6 +19,7 @@ class OrderHistoryPage extends ConsumerStatefulWidget {
 class _OrderHistoryPageState extends ConsumerState<OrderHistoryPage> {
   final Set<String> _selectedIds = {};
   bool _selectionMode = false;
+  bool _refreshFailed = false;
 
   @override
   Widget build(BuildContext context) {
@@ -96,51 +97,71 @@ class _OrderHistoryPageState extends ConsumerState<OrderHistoryPage> {
                   ),
                 ],
         ),
-        body: state.orders.isEmpty
-            ? EmptyState(
-                icon: Icons.receipt_long_outlined,
-                title: strings.profileOrderHistoryEmptyCompact,
-                message: strings.profileOrderHistoryEmpty,
-              )
-            : ListView.separated(
-                key: const PageStorageKey('order-history-list'),
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                itemCount: state.orders.length,
-                separatorBuilder: (context, index) =>
-                    const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  final order = state.orders[index];
-                  return _OrderListCard(
-                    key: ValueKey('order-${order.id}'),
-                    order: order,
-                    branch: state.branches
-                        .where((branch) => branch.id == order.branchId)
-                        .firstOrNull,
-                    selected: _selectedIds.contains(order.id),
-                    selectionMode: _selectionMode,
-                    onTap: () {
-                      if (_selectionMode) {
-                        _toggleOrder(order.id);
-                      } else {
-                        _showOrderDetail(
-                          context,
-                          order: order,
-                          products: state.products,
-                          branches: state.branches,
-                        );
-                      }
+        body: RefreshIndicator(
+          key: const ValueKey('order-history-refresh'),
+          semanticsLabel: strings.orderHistoryRefresh,
+          onRefresh: _refreshHistory,
+          child: CustomScrollView(
+            key: const PageStorageKey('order-history-list'),
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              if (_refreshFailed)
+                SliverToBoxAdapter(
+                  child: _RefreshErrorCard(onRetry: _refreshHistory),
+                ),
+              if (state.orders.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: EmptyState(
+                    icon: Icons.receipt_long_outlined,
+                    title: strings.profileOrderHistoryEmptyCompact,
+                    message: strings.profileOrderHistoryEmpty,
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                  sliver: SliverList.separated(
+                    itemCount: state.orders.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final order = state.orders[index];
+                      return _OrderListCard(
+                        key: ValueKey('order-${order.id}'),
+                        order: order,
+                        branch: state.branches
+                            .where((branch) => branch.id == order.branchId)
+                            .firstOrNull,
+                        selected: _selectedIds.contains(order.id),
+                        selectionMode: _selectionMode,
+                        onTap: () {
+                          if (_selectionMode) {
+                            _toggleOrder(order.id);
+                          } else {
+                            _showOrderDetail(
+                              context,
+                              order: order,
+                              products: state.products,
+                              branches: state.branches,
+                            );
+                          }
+                        },
+                        onLongPress: () {
+                          if (!_selectionMode) {
+                            setState(() {
+                              _selectionMode = true;
+                              _selectedIds.add(order.id);
+                            });
+                          }
+                        },
+                      );
                     },
-                    onLongPress: () {
-                      if (!_selectionMode) {
-                        setState(() {
-                          _selectionMode = true;
-                          _selectedIds.add(order.id);
-                        });
-                      }
-                    },
-                  );
-                },
-              ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -170,6 +191,29 @@ class _OrderHistoryPageState extends ConsumerState<OrderHistoryPage> {
       _selectionMode = false;
       _selectedIds.clear();
     });
+  }
+
+  Future<void> _refreshHistory() async {
+    final result = await ref
+        .read(appStateProvider.notifier)
+        .refreshCustomerOrders();
+    if (!mounted) return;
+    switch (result) {
+      case CustomerHistoryRefreshResult.success:
+        setState(() => _refreshFailed = false);
+      case CustomerHistoryRefreshResult.unavailable:
+        setState(() => _refreshFailed = true);
+      case CustomerHistoryRefreshResult.sessionExpired:
+        setState(() => _refreshFailed = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppLocalizations.of(context).orderHistorySessionExpired,
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    }
   }
 
   Future<void> _confirmHideOrders(BuildContext context) async {
@@ -206,6 +250,54 @@ class _OrderHistoryPageState extends ConsumerState<OrderHistoryPage> {
       SnackBar(
         content: Text(strings.orderHistoryHidden(count)),
         behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+}
+
+class _RefreshErrorCard extends StatelessWidget {
+  const _RefreshErrorCard({required this.onRetry});
+
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final strings = AppLocalizations.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Material(
+        key: const ValueKey('order-history-refresh-error'),
+        color: theme.colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(
+                  Icons.cloud_off_outlined,
+                  color: theme.colorScheme.onErrorContainer,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  strings.orderHistoryRefreshFailed,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onErrorContainer,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: onRetry,
+                child: Text(strings.orderHistoryRetry),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -518,6 +610,13 @@ class _OrderDetailSheet extends ConsumerWidget {
                     padding: const EdgeInsets.all(16),
                     child: Column(
                       children: [
+                        if (order.promoCode case final promoCode?) ...[
+                          _PriceRow(
+                            label: strings.orderDetailsPromoCode,
+                            value: promoCode,
+                          ),
+                          const SizedBox(height: 8),
+                        ],
                         _PriceRow(
                           label: strings.orderDetailsPointsUsed,
                           value: strings.pointCount(order.pointsUsed),

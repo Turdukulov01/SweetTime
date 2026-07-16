@@ -41,12 +41,21 @@ from .models import (
     Company,
     Customer,
     CustomerIdentity,
+    CustomerSession,
     MediaFile,
     Order,
     Product,
     RecurringOrder,
 )
-from .security import TokenError, create_token_pair, decode_token, verify_password
+from .security import (
+    TokenError,
+    create_customer_session_token_pair,
+    create_token_pair,
+    decode_token,
+    refresh_token_hash,
+    refresh_token_matches,
+    verify_password,
+)
 from .serializers import order_out
 from .storage import StorageValidationError, storage_service
 
@@ -157,6 +166,55 @@ def _new_referral_code(db: Session, company: Company) -> str:
             return code
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _db_utc(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _issue_customer_session(
+    customer: Customer, db: Session
+) -> tuple[str, str]:
+    """Create one independently revocable rolling customer login session."""
+
+    now = _utc_now()
+    idle_expires_at = now + timedelta(days=settings.customer_session_idle_days)
+    session_id = f"cs-{uuid4().hex}"
+    access, refresh = create_customer_session_token_pair(
+        subject=customer.id,
+        company_id=customer.company_id,
+        session_id=session_id,
+        idle_expires_at=idle_expires_at,
+    )
+    db.add(
+        CustomerSession(
+            id=session_id,
+            company_id=customer.company_id,
+            customer_id=customer.id,
+            current_refresh_token_hash=refresh_token_hash(refresh),
+            legacy_refresh_token_hash=None,
+            idle_expires_at=idle_expires_at,
+            created_at=now,
+            last_refreshed_at=now,
+        )
+    )
+    db.commit()
+    return access, refresh
+
+
+def _customer_login_out(
+    customer: Customer, db: Session
+) -> schemas.CustomerLoginOut:
+    access, refresh = _issue_customer_session(customer, db)
+    return schemas.CustomerLoginOut(
+        accessToken=access, refreshToken=refresh, user=customer_out(customer)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Стафф админки
 # ---------------------------------------------------------------------------
@@ -245,6 +303,110 @@ def staff_me(
 # ---------------------------------------------------------------------------
 
 
+def _locked_customer_session(
+    *,
+    db: Session,
+    payload: dict,
+    presented_token: str,
+    customer: Customer,
+) -> CustomerSession:
+    """Resolve a session family and one-time upgrade legacy stateless JWTs."""
+
+    session_id = payload.get("sid")
+    token_hash = refresh_token_hash(presented_token)
+    if isinstance(session_id, str) and session_id:
+        session = db.scalar(
+            select(CustomerSession)
+            .where(CustomerSession.id == session_id)
+            .with_for_update()
+        )
+        if session is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired refresh token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return session
+
+    # Transitional path for a refresh JWT issued before server sessions. The
+    # customer row is locked by the caller so only one session can claim it at
+    # a time; the unique legacy hash is the final concurrency guard.
+    session = db.scalar(
+        select(CustomerSession)
+        .where(CustomerSession.legacy_refresh_token_hash == token_hash)
+        .with_for_update()
+    )
+    if session is not None:
+        return session
+
+    now = _utc_now()
+    session = CustomerSession(
+        id=f"cs-{uuid4().hex}",
+        company_id=customer.company_id,
+        customer_id=customer.id,
+        current_refresh_token_hash=token_hash,
+        legacy_refresh_token_hash=token_hash,
+        idle_expires_at=now + timedelta(days=settings.customer_session_idle_days),
+        created_at=now,
+        last_refreshed_at=now,
+    )
+    db.add(session)
+    db.flush()
+    return session
+
+
+def _rotate_customer_session(
+    *,
+    db: Session,
+    payload: dict,
+    presented_token: str,
+    customer: Customer,
+    unauthorized: HTTPException,
+) -> tuple[str, str]:
+    session = _locked_customer_session(
+        db=db,
+        payload=payload,
+        presented_token=presented_token,
+        customer=customer,
+    )
+    if (
+        session.company_id != customer.company_id
+        or session.customer_id != customer.id
+    ):
+        raise unauthorized
+
+    now = _utc_now()
+    if session.revoked_at is not None:
+        raise unauthorized
+    if _db_utc(session.idle_expires_at) <= now:
+        session.revoked_at = now
+        session.revoke_reason = "idle_expired"
+        db.commit()
+        raise unauthorized
+    if not refresh_token_matches(
+        presented_token, session.current_refresh_token_hash
+    ):
+        # A rotated token was presented again. Assume theft/replay and revoke
+        # the full session family, including the most recently issued token.
+        session.revoked_at = now
+        session.revoke_reason = "refresh_replay"
+        db.commit()
+        raise unauthorized
+
+    idle_expires_at = now + timedelta(days=settings.customer_session_idle_days)
+    access, refresh = create_customer_session_token_pair(
+        subject=customer.id,
+        company_id=customer.company_id,
+        session_id=session.id,
+        idle_expires_at=idle_expires_at,
+    )
+    session.current_refresh_token_hash = refresh_token_hash(refresh)
+    session.idle_expires_at = idle_expires_at
+    session.last_refreshed_at = now
+    db.commit()
+    return access, refresh
+
+
 @router.post(
     "/refresh",
     response_model=schemas.TokenPair,
@@ -284,16 +446,97 @@ def refresh_tokens(
             role=user.role,
         )
     elif typ == "customer":
-        customer = db.get(Customer, payload["sub"])
-        if customer is None or customer.company_id != company.id:
+        # The customer row serializes the one-time upgrade of stateless legacy
+        # refresh tokens. Established sessions additionally lock their own row.
+        customer = db.scalar(
+            select(Customer)
+            .where(
+                Customer.id == payload["sub"],
+                Customer.company_id == company.id,
+            )
+            .with_for_update()
+        )
+        if customer is None:
             raise unauthorized
-        access, refresh = create_token_pair(
-            subject=customer.id, typ="customer", company_id=customer.company_id
+        access, refresh = _rotate_customer_session(
+            db=db,
+            payload=payload,
+            presented_token=body.refreshToken,
+            customer=customer,
+            unauthorized=unauthorized,
         )
     else:
         raise unauthorized
 
     return schemas.TokenPair(accessToken=access, refreshToken=refresh)
+
+
+@router.post(
+    "/customer/logout",
+    status_code=204,
+    summary="End the current customer login session",
+    tags=["customer"],
+)
+def customer_logout(
+    body: schemas.RefreshIn,
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Revoke the refresh-token family without requiring a live access JWT.
+
+    The refresh token is the credential for logout. This lets a client clear a
+    session even after its short-lived access JWT has expired. Repeating logout
+    for the same otherwise-valid session is intentionally idempotent.
+    """
+
+    unauthorized = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired refresh token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = decode_token(body.refreshToken, expected_kind="refresh")
+    except TokenError as exc:
+        raise unauthorized from exc
+
+    if payload.get("cid") != company.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Token was issued for another company",
+        )
+    if payload.get("typ") != "customer":
+        raise unauthorized
+
+    # Locking the customer also serializes the one-time conversion of a legacy
+    # stateless refresh JWT into a revoked session tombstone.
+    customer = db.scalar(
+        select(Customer)
+        .where(
+            Customer.id == payload["sub"],
+            Customer.company_id == company.id,
+        )
+        .with_for_update()
+    )
+    if customer is None:
+        raise unauthorized
+
+    session = _locked_customer_session(
+        db=db,
+        payload=payload,
+        presented_token=body.refreshToken,
+        customer=customer,
+    )
+    if (
+        session.company_id != customer.company_id
+        or session.customer_id != customer.id
+    ):
+        raise unauthorized
+
+    if session.revoked_at is None:
+        session.revoked_at = _utc_now()
+        session.revoke_reason = "logout"
+    db.commit()
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
@@ -354,26 +597,12 @@ def otp_verify(
         db.add(customer)
         db.commit()
 
-    access, refresh = create_token_pair(
-        subject=customer.id, typ="customer", company_id=customer.company_id
-    )
-    return schemas.CustomerLoginOut(
-        accessToken=access, refreshToken=refresh, user=customer_out(customer)
-    )
+    return _customer_login_out(customer, db)
 
 
 # ---------------------------------------------------------------------------
 # Клиент приложения: Google ID-token exchange
 # ---------------------------------------------------------------------------
-
-
-def _customer_login_out(customer: Customer) -> schemas.CustomerLoginOut:
-    access, refresh = create_token_pair(
-        subject=customer.id, typ="customer", company_id=customer.company_id
-    )
-    return schemas.CustomerLoginOut(
-        accessToken=access, refreshToken=refresh, user=customer_out(customer)
-    )
 
 
 @router.post(
@@ -420,7 +649,7 @@ def google_login(
             raise HTTPException(status_code=409, detail="Google identity is inconsistent")
         identity.last_login_at = datetime.now(timezone.utc)
         db.commit()
-        return _customer_login_out(customer)
+        return _customer_login_out(customer, db)
 
     now = datetime.now(timezone.utc)
     customer = Customer(
@@ -473,7 +702,7 @@ def google_login(
                 status_code=409, detail="Google identity is inconsistent"
             ) from exc
 
-    return _customer_login_out(customer)
+    return _customer_login_out(customer, db)
 
 
 # ---------------------------------------------------------------------------
@@ -587,6 +816,14 @@ def customer_delete_me(
             sql_delete(CustomerIdentity).where(
                 CustomerIdentity.company_id == locked_customer.company_id,
                 CustomerIdentity.customer_id == locked_customer.id,
+            )
+        )
+        # Explicit deletion keeps account-removal semantics correct on SQLite
+        # test databases too, where foreign-key cascades may be disabled.
+        db.execute(
+            sql_delete(CustomerSession).where(
+                CustomerSession.company_id == locked_customer.company_id,
+                CustomerSession.customer_id == locked_customer.id,
             )
         )
         for item in media:

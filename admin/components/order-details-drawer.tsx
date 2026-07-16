@@ -341,6 +341,12 @@ export function OrderDetailsDrawer({
                   <dd>{order.pointsUsed}</dd>
                 </div>
               )}
+              {order.promoCode && (
+                <div className="flex justify-between gap-4 text-coffee-700">
+                  <dt>Промокод</dt>
+                  <dd className="font-medium">{order.promoCode}</dd>
+                </div>
+              )}
               <div className="flex justify-between gap-4 border-t border-coffee-900/10 pt-3 text-base font-semibold text-coffee-900">
                 <dt>К оплате</dt>
                 <dd>{formatCurrency(order.total, currency)}</dd>

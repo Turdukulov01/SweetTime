@@ -11,7 +11,7 @@ from api import auth, google_auth, schemas
 from api.config import Settings
 from api.google_auth import GoogleIdentityClaims, GoogleTokenVerificationError
 from api.google_auth import GoogleProviderUnavailableError
-from api.models import Company, Customer, CustomerIdentity
+from api.models import Company, Customer, CustomerIdentity, CustomerSession
 from api.security import decode_token
 
 _WEB_CLIENT_ID = "web-client.apps.googleusercontent.com"
@@ -38,6 +38,7 @@ def db() -> Session:
     Company.__table__.create(engine)
     Customer.__table__.create(engine)
     CustomerIdentity.__table__.create(engine)
+    CustomerSession.__table__.create(engine)
     with Session(engine, expire_on_commit=False) as session:
         yield session
 

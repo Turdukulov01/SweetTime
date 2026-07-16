@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -52,7 +54,9 @@ class _SweetTimeAppState extends ConsumerState<SweetTimeApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      ref.read(appStateProvider.notifier).refreshCompanyData();
+      final controller = ref.read(appStateProvider.notifier);
+      unawaited(controller.refreshCompanyData());
+      unawaited(controller.resumeCustomerSession());
     }
   }
 

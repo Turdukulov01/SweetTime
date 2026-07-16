@@ -27,6 +27,7 @@ def order_out(o: Order) -> schemas.OrderOut:
         items=o.items,
         total=o.total,
         paymentMethod=o.payment_method,
+        promoCode=o.promo_code,
         pointsUsed=o.points_used,
         pointsEarned=o.points_earned,
         createdAt=o.created_at,

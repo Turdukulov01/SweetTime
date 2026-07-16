@@ -44,13 +44,10 @@ class _ProductPageState extends ConsumerState<ProductPage> {
         .map((topping) => topping.id)
         .toSet();
     if (isNewProduct) {
-      _toppingIds
-        ..clear()
-        ..addAll(
-          availableToppingIds.contains('tapioca')
-              ? const {'tapioca'}
-              : const <String>{},
-        );
+      // Paid extras must always be an explicit customer choice. Previously
+      // tapioca was selected automatically and silently increased the price
+      // as soon as the product page opened.
+      _toppingIds.clear();
     } else {
       _toppingIds.removeWhere((id) => !availableToppingIds.contains(id));
     }

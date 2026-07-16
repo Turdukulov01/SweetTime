@@ -1363,3 +1363,29 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
   подтверждена сертификатом release upload key, SHA-256
   `3A37140C4F9D63C27F1D68D78672863B4F951573E9E0AF767BBCF611A3C2A2C9`; `adb install -r` успешно установил и
   запустил её на Redmi `f3bff2a5` без очистки данных. Осталась только ручная UX-приёмка владельцем.
+
+## 2026-07-16 — CX-028: каталог, rolling session, promo/баллы и refresh истории
+
+- Admin `/menu`: явная кнопка редактирования, все поля товара, фото вместо цветной заглушки, защищённая
+  multipart-загрузка/удаление JPEG/PNG/WebP, создание и выбор стабильной категории с обязательными RU/KY/EN.
+  Размеры теперь вводятся как итоговая цена; API по-прежнему хранит `priceDelta`, чтобы Flutter/backend имели
+  одну формулу. Миграция безопасно исправляет только очевидно ошибочные записи, где все «дельты» были полными
+  ценами (production-пример: base 4000 и S=3000 давали 7000).
+- Backend: first-class `Category`, tenant/role scope и запрет удаления используемой категории; product image
+  variants через существующий `MediaFile`/physical storage с cleanup; `promo_code` snapshot заказа, нормализация
+  uppercase, уникальность внутри компании и обязательное соответствие активной акции.
+- Auth: серверные `CustomerSession`, 30-дневный idle TTL, продление и ротация на refresh, legacy upgrade,
+  replay-family revoke, sid-проверка access, logout revoke и удаление с аккаунтом. Flutter coalesce-ит refresh,
+  сохраняет токены при сетевой ошибке и обновляет профиль/историю при resume.
+- Flutter: pull-to-refresh истории сохраняет последний успешный список при ошибке; промокод проверяется по
+  активному серверному контенту и подсвечивается красным; принятый код уходит в заказ/историю. Баллы нельзя
+  включить при нуле, доступен ручной расход от 1 до server cap. Admin detail drawer показывает промокод.
+- Миграции линейны: `f27a4d9c8b11 -> c64f0b2d8a31 -> b17c9e4a2f60 -> e18d7a4c9f22`.
+  Проверки: backend 71/71; Flutter analyze clean и 75/75; admin typecheck и 11/11; PostgreSQL upgrade с нуля
+  до head; production Docker admin build; `git diff --check` clean. Rollout ещё не выполнен: сначала backup,
+  архив/backend+admin build/Alembic, затем release APK и физическая приёмка фото/категорий/сессии/promo/баллов.
+- Просьба Claude Code: не возвращать категории к вычисляемым ID/русской строке; не трактовать size price как
+  delta в UI; не ослаблять server-side promo/points validation и не делать refresh-токены снова stateless.
+- Дополнение по ценам: Flutter-карточки и список товаров admin показывают минимальную итоговую цену размера;
+  платные топпинги больше не выбираются автоматически при открытии товара. Это дополняет миграцию
+  `e18d7a4c9f22` и устраняет как 4000 + 3000 = 7000, так и скрытую стартовую доплату за тапиоку.
