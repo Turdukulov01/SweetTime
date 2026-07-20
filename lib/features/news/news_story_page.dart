@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +9,7 @@ import '../../core/localization/app_localizations.dart';
 import '../../shared/app_models.dart';
 import '../../shared/app_state.dart';
 import 'news_media.dart';
+import 'news_page.dart' show adaptiveNewsVideoHeight;
 
 class NewsStoryPage extends ConsumerStatefulWidget {
   const NewsStoryPage({super.key, this.initialStoryId, this.collectionId})
@@ -40,6 +43,9 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage>
   Duration _currentVideoDuration = Duration.zero;
   int _videoEndSequence = 0;
   String? _scheduledPlaybackKey;
+  // Как в _NewsPostSheet (news_page.dart): пока реальные пропорции видео не
+  // пришли из VideoPlayerController, используем портретный дефолт 9:16.
+  double _currentVideoAspectRatio = 9 / 16;
 
   @override
   void initState() {
@@ -191,8 +197,12 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage>
                 language: state.language,
                 isCurrent: index == safeIndex,
                 playbackPaused: _held,
+                videoAspectRatio: _currentVideoAspectRatio,
                 onVideoReady: index == safeIndex
                     ? (duration) => _handleVideoReady(stories[index], duration)
+                    : null,
+                onVideoAspectRatio: index == safeIndex
+                    ? (ratio) => _handleVideoAspectRatio(stories[index], ratio)
                     : null,
                 onVideoProgress: index == safeIndex
                     ? (position, duration) => _handleVideoProgress(
@@ -303,6 +313,7 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage>
   }
 
   void _activateStory(NewsStory story) {
+    unawaited(ref.read(appStateProvider.notifier).markStoryViewed(story.id));
     _progressController.stop();
     _currentVideoReady = false;
     _videoEndedWhileHeld = false;
@@ -333,16 +344,25 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage>
     return _renderedStories[_currentIndex];
   }
 
-  bool _isVideo(NewsStory story) =>
-      story.effectiveMediaType == NewsMediaType.video &&
-      (story.effectiveMediaUrl?.trim().isNotEmpty ?? false);
+  bool _isVideo(NewsStory story) => _isPlayableVideo(story);
 
   void _handlePageChanged(int index) {
     if (!mounted) return;
     setState(() {
       _currentIndex = index;
       _held = false;
+      // Синхронно, той же setState — иначе первый кадр новой истории успеет
+      // отрисоваться с пропорциями предыдущего видео (сброс из _activateStory
+      // приходит только в postFrameCallback, то есть на кадр позже).
+      _currentVideoAspectRatio = 9 / 16;
     });
+  }
+
+  void _handleVideoAspectRatio(NewsStory story, double ratio) {
+    if (!mounted || _currentStory?.id != story.id) return;
+    if (!ratio.isFinite || ratio <= 0) return;
+    if ((_currentVideoAspectRatio - ratio).abs() < 0.001) return;
+    setState(() => _currentVideoAspectRatio = ratio);
   }
 
   void _handleTap(TapUpDetails details) {
@@ -482,6 +502,10 @@ class _NewsStoryPageState extends ConsumerState<NewsStoryPage>
   }
 }
 
+bool _isPlayableVideo(NewsStory story) =>
+    story.effectiveMediaType == NewsMediaType.video &&
+    (story.effectiveMediaUrl?.trim().isNotEmpty ?? false);
+
 class _StoryProgress extends StatelessWidget {
   const _StoryProgress({
     required this.count,
@@ -528,18 +552,22 @@ class _StoryContent extends StatelessWidget {
     required this.language,
     required this.isCurrent,
     required this.playbackPaused,
+    required this.videoAspectRatio,
     this.onVideoReady,
     this.onVideoProgress,
     this.onVideoEnded,
+    this.onVideoAspectRatio,
   });
 
   final NewsStory story;
   final AppLanguage language;
   final bool isCurrent;
   final bool playbackPaused;
+  final double videoAspectRatio;
   final ValueChanged<Duration>? onVideoReady;
   final void Function(Duration position, Duration duration)? onVideoProgress;
   final VoidCallback? onVideoEnded;
+  final ValueChanged<double>? onVideoAspectRatio;
 
   @override
   Widget build(BuildContext context) {
@@ -549,6 +577,9 @@ class _StoryContent extends StatelessWidget {
     final hasMedia =
         story.effectiveMediaType != NewsMediaType.none ||
         story.assetImage != null;
+    // Медиа не должно залезать под системные иконки (время/заряд/уведомления):
+    // верхний край стартует сразу под статус-баром, а не поверх него.
+    final topInset = MediaQuery.paddingOf(context).top;
 
     return ColoredBox(
       key: ValueKey('story-current-${story.id}'),
@@ -556,47 +587,89 @@ class _StoryContent extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (hasMedia)
-            NewsMediaView(
-              mediaType: story.effectiveMediaType,
-              url: story.effectiveMediaUrl,
-              thumbnailUrl: story.thumbnailUrl,
-              assetImage: story.assetImage,
-              allowVideo: isCurrent,
-              isActive: isCurrent,
-              fallbackIcon: story.visual.icon,
-              borderRadius: BorderRadius.zero,
-              fit: BoxFit.contain,
-              expand: true,
-              backgroundColor: Colors.black,
-              autoPlay: true,
-              playbackPaused: playbackPaused,
-              showPlaybackControls: false,
-              initialMuted: false,
-              onVideoReady: onVideoReady,
-              onVideoProgress: onVideoProgress,
-              onVideoEnded: onVideoEnded,
-            )
-          else
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    story.accentColor,
-                    Color.lerp(story.accentColor, Colors.black, 0.36)!,
-                  ],
-                ),
-              ),
-              child: Center(
-                child: Icon(
-                  story.visual.icon,
-                  color: Colors.white.withValues(alpha: 0.9),
-                  size: 92,
-                ),
-              ),
+          Positioned(
+            top: topInset,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final media = hasMedia
+                    ? NewsMediaView(
+                        mediaType: story.effectiveMediaType,
+                        url: story.effectiveMediaUrl,
+                        thumbnailUrl: story.thumbnailUrl,
+                        assetImage: story.assetImage,
+                        allowVideo: isCurrent,
+                        isActive: isCurrent,
+                        fallbackIcon: story.visual.icon,
+                        borderRadius: BorderRadius.zero,
+                        // cover: пока реальные пропорции видео не пришли (см.
+                        // ниже), просто без пустых полей по бокам. Как только
+                        // площадка становится аспект-локальной, cover ничего
+                        // не обрезает — кроме сверхвысоких роликов, которым не
+                        // хватает высоты экрана (тот же приём, что в
+                        // _NewsPostSheet из news_page.dart).
+                        fit: BoxFit.cover,
+                        expand: true,
+                        backgroundColor: Colors.black,
+                        autoPlay: true,
+                        playbackPaused: playbackPaused,
+                        showPlaybackControls: false,
+                        initialMuted: false,
+                        onVideoReady: onVideoReady,
+                        onVideoProgress: onVideoProgress,
+                        onVideoEnded: onVideoEnded,
+                        onVideoAspectRatio: onVideoAspectRatio,
+                      )
+                    : DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              story.accentColor,
+                              Color.lerp(
+                                story.accentColor,
+                                Colors.black,
+                                0.36,
+                              )!,
+                            ],
+                          ),
+                        ),
+                        child: Center(
+                          child: Icon(
+                            story.visual.icon,
+                            color: Colors.white.withValues(alpha: 0.9),
+                            size: 92,
+                          ),
+                        ),
+                      );
+
+                if (!isCurrent || !_isPlayableVideo(story)) return media;
+
+                // Активная история с видео: площадка следует пропорциям
+                // ролика (адаптивная высота, как в ленте новостей), а не
+                // растягивается на весь экран — иначе альбомное/квадратное
+                // видео обрезалось бы сильнее, чем нужно. Ширина всегда
+                // полная, привязка к верху — видео тянется вниз настолько,
+                // насколько позволяют его собственные пропорции.
+                final mediaHeight = adaptiveNewsVideoHeight(
+                  availableWidth: constraints.maxWidth,
+                  availableHeight: constraints.maxHeight,
+                  videoAspectRatio: videoAspectRatio,
+                );
+                return Align(
+                  alignment: Alignment.topCenter,
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: mediaHeight,
+                    child: media,
+                  ),
+                );
+              },
             ),
+          ),
           const Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
