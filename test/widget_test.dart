@@ -11,6 +11,7 @@ import 'package:sweettime/core/google_identity.dart';
 import 'package:sweettime/core/localization/app_localizations.dart';
 import 'package:sweettime/core/router.dart';
 import 'package:sweettime/core/theme/app_theme.dart';
+import 'package:sweettime/features/product/product_page.dart';
 import 'package:sweettime/main.dart';
 import 'package:sweettime/shared/app_models.dart';
 import 'package:sweettime/shared/app_state.dart';
@@ -750,6 +751,57 @@ void main() {
     );
   });
 
+  test(
+    'editing one duplicate cart row replaces only that configuration',
+    () async {
+      final cartStore = _MemoryCartStore();
+      final product = DemoData.products.first;
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(),
+        cartStore: cartStore,
+        api: _OfflineApiClient(),
+      );
+
+      await controller.addConfigured(
+        product,
+        sizeId: product.sizes.first.id,
+        sugarPercent: 30,
+        ice: IceLevel.less,
+        toppingIds: const [],
+      );
+      await controller.updateQuantity(0, 1);
+      await controller.addConfigured(
+        product,
+        sizeId: product.sizes.last.id,
+        sugarPercent: 70,
+        ice: IceLevel.extra,
+        toppingIds: [product.toppings.last.id],
+      );
+      final untouched = controller.state.cart[1];
+
+      final replaced = await controller.replaceConfiguredAt(
+        0,
+        product,
+        sizeId: product.sizes[1].id,
+        sugarPercent: 50,
+        ice: IceLevel.regular,
+        toppingIds: [product.toppings.first.id],
+      );
+
+      expect(replaced, isTrue);
+      expect(controller.state.cart, hasLength(2));
+      expect(controller.state.cart[0].quantity, 2);
+      expect(controller.state.cart[0].sizeId, product.sizes[1].id);
+      expect(controller.state.cart[0].toppingIds, [product.toppings.first.id]);
+      expect(controller.state.cart[1].sizeId, untouched.sizeId);
+      expect(controller.state.cart[1].toppingIds, untouched.toppingIds);
+      expect(cartStore.items, hasLength(2));
+      expect(cartStore.items[0].quantity, 2);
+      expect(cartStore.items[0].sizeId, product.sizes[1].id);
+    },
+  );
+
   test('stale cart products and modifiers are cleaned safely', () async {
     final product = DemoData.products.first;
     final cartStore = _MemoryCartStore([
@@ -1426,6 +1478,47 @@ void main() {
     expect(controller.state.cart, isNotEmpty);
   });
 
+  testWidgets('cart edit opens configured product and replaces the same row', (
+    tester,
+  ) async {
+    final product = DemoData.products.first;
+    final topping = product.toppings.first;
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(),
+      cartStore: _MemoryCartStore(),
+      api: _OfflineApiClient(),
+    );
+    await controller.addConfigured(
+      product,
+      sizeId: product.sizes.last.id,
+      sugarPercent: 30,
+      ice: IceLevel.less,
+      toppingIds: [topping.id],
+    );
+    await controller.updateQuantity(0, 1);
+
+    await tester.pumpWidget(_testAppWithController(controller));
+    appRouter.go('/cart');
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('edit-cart-item-0')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('edit-cart-item-0')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ProductPage), findsOneWidget);
+    await tester.tap(find.textContaining('Сохранить').last);
+    await tester.pumpAndSettle();
+
+    expect(appRouter.routeInformationProvider.value.uri.path, '/cart');
+    expect(controller.state.cart, hasLength(1));
+    expect(controller.state.cart.single.quantity, 2);
+    expect(controller.state.cart.single.sizeId, product.sizes.last.id);
+    expect(controller.state.cart.single.sugarPercent, 30);
+    expect(controller.state.cart.single.ice, IceLevel.less);
+    expect(controller.state.cart.single.toppingIds, [topping.id]);
+  });
+
   testWidgets('Android Back from a root tab returns to Home first', (
     WidgetTester tester,
   ) async {
@@ -1587,8 +1680,15 @@ void main() {
     expect(find.text('Recurring order'), findsOneWidget);
     await _scrollToText(tester, 'Order history');
     expect(find.text('Order history'), findsOneWidget);
-    await _scrollToText(tester, 'Addresses');
-    expect(find.text('Addresses'), findsOneWidget);
+    await _scrollToText(tester, 'Our branches');
+    expect(find.text('Our branches'), findsOneWidget);
+    expect(find.textContaining('Zhal microdistrict'), findsNothing);
+    expect(find.textContaining('Manas Ave.'), findsNothing);
+    await tester.tap(find.text('Our branches'));
+    await tester.pumpAndSettle();
+    expect(find.text('SweetTime on Chuy'), findsOneWidget);
+    await tester.tap(find.text('SweetTime on Chuy'));
+    await tester.pumpAndSettle();
     expect(find.text('Favorite drinks'), findsNothing);
     await _scrollToText(tester, 'Help and account');
     expect(find.text('Contact support'), findsOneWidget);
@@ -2385,6 +2485,7 @@ class _PendingFavoritePut {
 class _MemoryLanguagePreferenceStore implements LanguagePreferenceStore {
   String? code;
   String? themeMode;
+  String? backgroundOverride;
 
   @override
   Future<String?> readLanguageCode() async => code;
@@ -2400,5 +2501,13 @@ class _MemoryLanguagePreferenceStore implements LanguagePreferenceStore {
   @override
   Future<void> writeThemeMode(String value) async {
     themeMode = value;
+  }
+
+  @override
+  Future<String?> readBackgroundOverride() async => backgroundOverride;
+
+  @override
+  Future<void> writeBackgroundOverride(String? value) async {
+    backgroundOverride = value;
   }
 }

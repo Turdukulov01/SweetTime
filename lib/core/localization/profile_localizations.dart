@@ -411,22 +411,13 @@ extension ProfileLocalizations on AppLocalizations {
     'Branch unavailable ($branchId)',
   );
 
-  String get profileAddresses => _pick('Адреса', 'Даректер', 'Addresses');
+  String get profileOurBranches =>
+      _pick('Наши филиалы', 'Биздин филиалдар', 'Our branches');
 
-  String get profileHomeAddressLabel => _pick('Дом', 'Үй', 'Home');
-
-  String get profileHomeAddress => _pick(
-    'мкр. Джал 23, кв. 12, Бишкек',
-    'Жал кичи району 23, 12-батир, Бишкек',
-    '23 Zhal microdistrict, apt. 12, Bishkek',
-  );
-
-  String get profileOfficeAddressLabel => _pick('Офис', 'Кеңсе', 'Office');
-
-  String get profileOfficeAddress => _pick(
-    'пр. Манаса 40, 4 этаж, Бишкек',
-    'Манас проспекти 40, 4-кабат, Бишкек',
-    '40 Manas Ave., 4th floor, Bishkek',
+  String get profileOurBranchesHint => _pick(
+    'Адреса, часы работы и выбор филиала',
+    'Даректер, иштөө убактысы жана филиалды тандоо',
+    'Addresses, opening hours and branch selection',
   );
 
   String get profileFavoriteDrinks =>

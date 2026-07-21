@@ -18,6 +18,10 @@ import { LocalizedField } from "@/components/localized-field";
 import { RoleGate } from "@/components/role-gate";
 import { Toggle } from "@/components/toggle";
 import { useCompanyStore } from "@/lib/company-store";
+import {
+  apiDeletePromotionImage,
+  apiPutPromotionImage
+} from "@/lib/api";
 import type { LocalizedText, Promotion } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -71,11 +75,20 @@ function PromoPanel({
           sortOrder: nextSortOrder
         }
   );
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [removeImage, setRemoveImage] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const canSave = draft.title.ru.trim().length > 0;
+  const canSave =
+    draft.title.ru.trim().length > 0 ||
+    selectedImage !== null ||
+    (!!promo?.imageUrl && !removeImage);
 
-  function handleSave() {
+  async function handleSave() {
     if (!canSave) return;
+    setSaving(true);
+    setSaveError(null);
     const code = draft.code.trim();
     const payload = {
       title: draft.title,
@@ -85,16 +98,32 @@ function PromoPanel({
       active: draft.active,
       sortOrder: draft.sortOrder
     };
-    if (promo) {
-      updatePromotion(promo.id, payload);
-    } else {
-      addPromotion({
-        id: `${company.id}-promo-${uid()}`,
-        companyId: company.id,
-        ...payload
-      });
+    try {
+      let saved: Promotion;
+      if (promo) {
+        saved = await updatePromotion(promo.id, payload);
+      } else {
+        saved = await addPromotion({
+          id: `${company.id}-promo-${uid()}`,
+          companyId: company.id,
+          imageUrl: null,
+          thumbnailUrl: null,
+          ...payload
+        });
+      }
+      if (selectedImage) {
+        await apiPutPromotionImage(company.id, saved.id, selectedImage);
+        await updatePromotion(saved.id, {});
+      } else if (removeImage && saved.imageUrl) {
+        await apiDeletePromotionImage(company.id, saved.id);
+        await updatePromotion(saved.id, {});
+      }
+      onClose();
+    } catch {
+      setSaveError("Не удалось сохранить акцию или её изображение.");
+    } finally {
+      setSaving(false);
     }
-    onClose();
   }
 
   return (
@@ -118,13 +147,47 @@ function PromoPanel({
         </header>
 
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-coffee-700">Изображение</p>
+            {!removeImage && promo?.imageUrl && !selectedImage && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={promo.imageUrl} alt="" className="mb-2 h-32 w-full rounded-xl object-cover" />
+            )}
+            <label className="focus-ring inline-flex h-9 cursor-pointer items-center rounded-full border border-coffee-900/15 px-3 text-xs font-semibold text-coffee-700">
+              {selectedImage ? selectedImage.name : "Выбрать фото"}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="sr-only"
+                disabled={saving}
+                onChange={(event) => {
+                  setSelectedImage(event.target.files?.[0] ?? null);
+                  setRemoveImage(false);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
+            {(selectedImage || (!removeImage && promo?.imageUrl)) && (
+              <button
+                type="button"
+                className="ml-2 text-xs font-semibold text-red-600"
+                onClick={() => {
+                  setSelectedImage(null);
+                  setRemoveImage(true);
+                }}
+              >Убрать</button>
+            )}
+            <p className="mt-1.5 text-xs text-coffee-500">
+              Можно опубликовать только фото. Если добавить текст, он будет показан поверх изображения.
+            </p>
+          </div>
           <LocalizedField
             label="Заголовок"
-            required
             value={draft.title}
             onChange={(title) => setDraft({ ...draft, title })}
             placeholder="Утренний дуэт"
           />
+          {saveError && <p className="text-sm text-red-600">{saveError}</p>}
           <LocalizedField
             label="Описание"
             multiline
@@ -361,8 +424,12 @@ function PromotionsContent() {
     const current = sorted[index];
     const target = sorted[index + dir];
     if (!current || !target) return;
-    updatePromotion(current.id, { sortOrder: target.sortOrder });
-    updatePromotion(target.id, { sortOrder: current.sortOrder });
+    void updatePromotion(current.id, { sortOrder: target.sortOrder }).catch(
+      () => undefined
+    );
+    void updatePromotion(target.id, { sortOrder: current.sortOrder }).catch(
+      () => undefined
+    );
   }
 
   return (

@@ -416,6 +416,25 @@ below remains authoritative; this section records the current execution order.
   is revalidated against fresh server content before checkout and blocks navigation when invalid, inactive or
   unverifiable. Migration head `a62f1c9d4e30`; backend 72/72, Flutter 77/77, admin 14/14/typecheck, production
   Docker admin build and empty-PostgreSQL migration pass.
+- [ ] **[implemented locally 2026-07-16; phone acceptance pending] Edit a configured cart line.**
+  Every mobile cart card exposes an explicit localized Edit action that opens the full product constructor
+  with that row's size, sugar, ice and toppings. Save replaces exactly that index, preserves quantity and
+  local persistence, and never appends or merges a neighbouring row of the same product. Invalid/stale indices
+  return safely to Cart. This is Flutter-only and does not require another backend migration.
+- [ ] **[implemented locally 2026-07-20; production rollout and phone acceptance pending]
+  White-label visual branding and content media.** Company settings persist an uploaded logo and branded
+  background, while Flutter restores cached branding before the first frame and applies it to Home and News.
+  Story rings use the company accent, viewed stories become neutral per tenant, video thumbnails no longer show
+  a floating white play button and fall back to the business logo. Promotions support image-only and image with
+  overlaid localized text. Product/size/topping display data retain RU/KY/EN, and Profile replaces fake Home/Office
+  addresses with a localized list of real API branches. Migration head `b84c1a7e2d90`; backend 74/74, Flutter
+  analyze plus 82/82 tests, admin typecheck plus 14/14 content tests and release APK build pass.
+- [ ] **[implemented locally 2026-07-20; phone acceptance pending] Adaptive video-news viewer.** Video detail
+  begins below the system status bar, fills the available width without side gutters and derives its height from
+  the initialized video's native aspect ratio, capped by the safe screen height. The title overlays the lower
+  video gradient; tapping it expands the localized description and date. Existing play/pause, sound toggle,
+  close and Android Back behavior remains. Flutter analyze and 84/84 tests pass; release APK is built, but the
+  target Redmi disconnected from ADB before installation.
 - [ ] **White-label platform hardening.** Keep one tenant-aware backend and one configurable admin
   runtime for all companies; map approved custom domains to `company_id` and require Host, URL scope
   and JWT `cid` to agree. Do not create one copied backend/admin and one port pair per company.

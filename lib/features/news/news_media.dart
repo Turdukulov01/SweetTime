@@ -12,6 +12,7 @@ class NewsMediaView extends StatefulWidget {
     required this.mediaType,
     required this.url,
     this.thumbnailUrl,
+    this.fallbackImageUrl,
     this.assetImage,
     this.allowVideo = false,
     this.isActive = true,
@@ -27,13 +28,16 @@ class NewsMediaView extends StatefulWidget {
     this.tapToToggleMute = false,
     this.initialMuted = false,
     this.onVideoReady,
+    this.onVideoAspectRatio,
     this.onVideoProgress,
     this.onVideoEnded,
+    this.controlsBottomInset = 14,
   });
 
   final NewsMediaType mediaType;
   final String? url;
   final String? thumbnailUrl;
+  final String? fallbackImageUrl;
   final String? assetImage;
   final bool allowVideo;
   final bool isActive;
@@ -52,8 +56,10 @@ class NewsMediaView extends StatefulWidget {
   final bool tapToToggleMute;
   final bool initialMuted;
   final ValueChanged<Duration>? onVideoReady;
+  final ValueChanged<double>? onVideoAspectRatio;
   final void Function(Duration position, Duration duration)? onVideoProgress;
   final VoidCallback? onVideoEnded;
+  final double controlsBottomInset;
 
   @override
   State<NewsMediaView> createState() => _NewsMediaViewState();
@@ -64,10 +70,13 @@ class _NewsMediaViewState extends State<NewsMediaView>
   VideoPlayerController? _controller;
   String? _controllerUrl;
   bool _initializing = false;
-  bool _videoFailed = false;
   bool _muted = false;
   bool _completionReported = false;
   bool? _lastPlaying;
+  // Play/pause and mute icons fade out after a couple of seconds, like
+  // Reels/Stories, so they don't sit permanently over the video.
+  bool _controlsVisible = true;
+  Timer? _hideControlsTimer;
 
   bool get _shouldLoadVideo =>
       widget.mediaType == NewsMediaType.video &&
@@ -130,7 +139,6 @@ class _NewsMediaViewState extends State<NewsMediaView>
     _lastPlaying = null;
     setState(() {
       _initializing = true;
-      _videoFailed = false;
     });
     try {
       await controller.initialize().timeout(const Duration(seconds: 15));
@@ -145,7 +153,12 @@ class _NewsMediaViewState extends State<NewsMediaView>
         _initializing = false;
         _lastPlaying = controller.value.isPlaying;
       });
+      _showControlsTemporarily();
       widget.onVideoReady?.call(controller.value.duration);
+      final videoSize = controller.value.size;
+      if (videoSize.width > 0 && videoSize.height > 0) {
+        widget.onVideoAspectRatio?.call(videoSize.width / videoSize.height);
+      }
       await _syncPlayback();
     } catch (_) {
       if (identical(_controller, controller)) {
@@ -153,11 +166,20 @@ class _NewsMediaViewState extends State<NewsMediaView>
         if (mounted) {
           setState(() {
             _initializing = false;
-            _videoFailed = true;
           });
         }
       }
     }
+  }
+
+  void _showControlsTemporarily() {
+    _hideControlsTimer?.cancel();
+    if (!_controlsVisible) {
+      setState(() => _controlsVisible = true);
+    }
+    _hideControlsTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _controlsVisible = false);
+    });
   }
 
   Future<void> _syncPlayback() async {
@@ -199,6 +221,7 @@ class _NewsMediaViewState extends State<NewsMediaView>
   }
 
   Future<void> _togglePlayback() async {
+    _showControlsTemporarily();
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
     if (controller.value.isPlaying) {
@@ -215,6 +238,7 @@ class _NewsMediaViewState extends State<NewsMediaView>
   }
 
   Future<void> _toggleMuted() async {
+    _showControlsTemporarily();
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
     _muted = !_muted;
@@ -223,6 +247,7 @@ class _NewsMediaViewState extends State<NewsMediaView>
   }
 
   Future<void> _disposeController() async {
+    _hideControlsTimer?.cancel();
     final controller = _controller;
     _controller = null;
     _controllerUrl = null;
@@ -237,6 +262,7 @@ class _NewsMediaViewState extends State<NewsMediaView>
 
   @override
   void dispose() {
+    _hideControlsTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     final controller = _controller;
     _controller = null;
@@ -278,41 +304,57 @@ class _NewsMediaViewState extends State<NewsMediaView>
             video,
           if (widget.showPlaybackControls)
             Center(
-              child: IconButton.filled(
-                tooltip: controller.value.isPlaying
-                    ? AppLocalizations.of(context).pauseVideo
-                    : AppLocalizations.of(context).playVideo,
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.black.withValues(alpha: 0.52),
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: _togglePlayback,
-                iconSize: 34,
-                icon: Icon(
-                  controller.value.isPlaying
-                      ? Icons.pause_rounded
-                      : Icons.play_arrow_rounded,
+              // Hidden state also stops the button from swallowing taps, so
+              // tapping the video while faded out reaches the mute
+              // GestureDetector underneath instead of doing nothing.
+              child: IgnorePointer(
+                ignoring: !_controlsVisible,
+                child: AnimatedOpacity(
+                  opacity: _controlsVisible ? 1 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                  child: IconButton.filled(
+                    tooltip: controller.value.isPlaying
+                        ? AppLocalizations.of(context).pauseVideo
+                        : AppLocalizations.of(context).playVideo,
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.black.withValues(alpha: 0.52),
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _togglePlayback,
+                    iconSize: 34,
+                    icon: Icon(
+                      controller.value.isPlaying
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                    ),
+                  ),
                 ),
               ),
             ),
           if (widget.tapToToggleMute)
             Positioned(
               right: 14,
-              bottom: 14,
+              bottom: widget.controlsBottomInset,
               child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.56),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(9),
-                    child: Icon(
-                      _muted
-                          ? Icons.volume_off_rounded
-                          : Icons.volume_up_rounded,
-                      color: Colors.white,
-                      size: 21,
+                child: AnimatedOpacity(
+                  opacity: _controlsVisible ? 1 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.56),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(9),
+                      child: Icon(
+                        _muted
+                            ? Icons.volume_off_rounded
+                            : Icons.volume_up_rounded,
+                        color: Colors.white,
+                        size: 21,
+                      ),
                     ),
                   ),
                 ),
@@ -325,24 +367,18 @@ class _NewsMediaViewState extends State<NewsMediaView>
       media = _NetworkMediaImage(url: widget.url!, fit: widget.fit);
     } else if (widget.mediaType == NewsMediaType.video) {
       final preview = widget.thumbnailUrl?.trim();
+      final fallbackImage = widget.fallbackImageUrl?.trim();
       media = Stack(
         fit: StackFit.expand,
         children: [
           if (preview != null && preview.isNotEmpty)
             _NetworkMediaImage(url: preview, fit: widget.fit)
+          else if (fallbackImage != null && fallbackImage.isNotEmpty)
+            _NetworkMediaImage(url: fallbackImage, fit: widget.fit)
           else
             _FallbackMedia(icon: widget.fallbackIcon),
           if (_initializing)
-            const Center(child: CircularProgressIndicator.adaptive())
-          else
-            Center(
-              child: Icon(
-                _videoFailed ? Icons.videocam_off_outlined : Icons.play_circle,
-                size: 58,
-                color: Colors.white,
-                shadows: const [Shadow(blurRadius: 12, color: Colors.black54)],
-              ),
-            ),
+            const Center(child: CircularProgressIndicator.adaptive()),
         ],
       );
     } else if (widget.assetImage != null) {

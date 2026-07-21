@@ -182,6 +182,14 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
     'Remove “$productName” from cart',
   );
 
+  String get editCartItem => _pick('Редактировать', 'Өзгөртүү', 'Edit');
+
+  String editCartItemTooltip(String productName) => _pick(
+    'Изменить настройки «$productName»',
+    '«$productName» жөндөөлөрүн өзгөртүү',
+    'Edit “$productName” options',
+  );
+
   String get checkoutTitle =>
       _pick('Оформление', 'Заказды тариздөө', 'Checkout');
   String get fulfillmentMethod =>

@@ -68,6 +68,9 @@ extension CatalogProductLocalizations on AppLocalizations {
   String addToCartWithPrice(String price) =>
       _pick('В корзину — $price', 'Себетке — $price', 'Add to cart — $price');
 
+  String saveCartChangesWithPrice(String price) =>
+      _pick('Сохранить — $price', 'Сактоо — $price', 'Save changes — $price');
+
   String get productUnavailableAction => _pick(
     'Недоступно в этом филиале',
     'Бул филиалда жеткиликсиз',

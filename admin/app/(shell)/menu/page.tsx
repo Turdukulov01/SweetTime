@@ -6,6 +6,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ImageIcon, Minus, Pencil, Plus, X } from "lucide-react";
 import { RoleGate } from "@/components/role-gate";
+import { LocalizedField } from "@/components/localized-field";
 import { Toggle } from "@/components/toggle";
 import { useCompanyStore } from "@/lib/company-store";
 import {
@@ -18,6 +19,7 @@ import {
 } from "@/lib/api";
 import type {
   Category,
+  LocalizedText,
   ModifierOption,
   Product,
   ToppingCatalogItem
@@ -39,8 +41,8 @@ const PRODUCT_COLORS = [
 const uid = () => Math.random().toString(36).slice(2, 9);
 
 interface ProductDraft {
-  name: string;
-  description: string;
+  name: LocalizedText;
+  description: LocalizedText;
   imageUrl: string;
   category: string;
   categoryId: string | null;
@@ -56,8 +58,8 @@ interface ProductDraft {
 
 function draftFromProduct(product: Product): ProductDraft {
   return {
-    name: product.name,
-    description: product.description,
+    name: product.nameLocalized ?? { ru: product.name },
+    description: product.descriptionLocalized ?? { ru: product.description },
     imageUrl: product.imageUrl ?? "",
     category: product.category,
     categoryId: product.categoryId ?? null,
@@ -147,21 +149,24 @@ function ModifierEditor({
       <p className="mb-1.5 text-sm font-medium text-coffee-700">{title}</p>
       <div className="space-y-2">
         {options.map((option, index) => (
-          <div key={option.id} className="flex items-center gap-2">
-            <input
-              value={option.label}
-              onChange={(e) => {
+          <div key={option.id} className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <LocalizedField
+                label="Название варианта"
+                required
+                value={option.localizedName ?? { ru: option.label }}
+                onChange={(name) => {
                 const next = [...options];
                 next[index] = {
                   ...option,
-                  label: e.target.value,
-                  localizedName: undefined
+                    label: name.ru,
+                    localizedName: name
                 };
                 onChange(next);
               }}
-              placeholder="Название"
-              className="input flex-1"
-            />
+                placeholder="Название"
+              />
+            </div>
             <div className="flex items-center gap-1">
               {showPlus && <span className="text-xs text-coffee-500">+</span>}
               <input
@@ -231,8 +236,8 @@ function ProductPanel({
     product
       ? draftFromProduct(product)
       : {
-          name: "",
-          description: "",
+          name: { ru: "" },
+          description: { ru: "" },
           imageUrl: "",
           category: "",
           categoryId: null,
@@ -280,7 +285,7 @@ function ProductPanel({
   const price = normalizedPricing.basePrice;
   const hasPrice = normalizedPricing.hasPrice;
   const canSave =
-    draft.name.trim().length > 0 && hasPrice && draft.categoryId !== null;
+    draft.name.ru.trim().length > 0 && hasPrice && draft.categoryId !== null;
 
   function toggleBranch(branchId: string) {
     setDraft((prev) => ({
@@ -419,8 +424,10 @@ function ProductPanel({
       size.label.trim()
     );
     const payload = {
-      name: draft.name.trim(),
-      description: draft.description.trim(),
+      name: draft.name.ru.trim(),
+      nameLocalized: draft.name,
+      description: draft.description.ru.trim(),
+      descriptionLocalized: draft.description,
       imageUrl: persistedProduct?.imageUrl ?? null,
       category: draft.category.trim() || "Прочее",
       categoryId: draft.categoryId,
@@ -491,26 +498,21 @@ function ProductPanel({
         </header>
 
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
-          <Field label="Название">
-            <input
-              value={draft.name}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              placeholder="Например, Клубничный латте"
-              className="input"
-            />
-          </Field>
+          <LocalizedField
+            label="Название"
+            required
+            value={draft.name}
+            onChange={(name) => setDraft({ ...draft, name })}
+            placeholder="Например, Клубничный латте"
+          />
 
-          <Field label="Описание">
-            <textarea
-              value={draft.description}
-              onChange={(e) =>
-                setDraft({ ...draft, description: e.target.value })
-              }
-              placeholder="Кратко опишите напиток или блюдо"
-              rows={3}
-              className="input min-h-24 resize-y py-3"
-            />
-          </Field>
+          <LocalizedField
+            label="Описание"
+            multiline
+            value={draft.description}
+            onChange={(description) => setDraft({ ...draft, description })}
+            placeholder="Кратко опишите напиток или блюдо"
+          />
 
           <div>
             <p className="mb-1.5 text-sm font-medium text-coffee-700">Фото</p>
@@ -522,7 +524,7 @@ function ProductPanel({
                   (imageRemoved ? null : draft.imageUrl || null)
                 }
                 color={draft.color}
-                name={draft.name}
+                name={draft.name.ru}
                 className="h-24 w-24 rounded-2xl"
               />
               <div className="min-w-0 flex-1">

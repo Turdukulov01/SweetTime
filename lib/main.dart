@@ -6,12 +6,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/router.dart';
 import 'core/localization/app_localizations.dart';
+import 'core/branding_store.dart';
 import 'core/theme/app_theme.dart';
 import 'shared/app_state.dart';
 import 'shared/app_models.dart';
+import 'shared/widgets/branded_background.dart';
 
-void main() {
-  runApp(const ProviderScope(child: SweetTimeApp()));
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final cachedBranding = await SharedPreferencesBrandingStore(
+    companyId: 'sweettime',
+  ).read();
+  runApp(
+    ProviderScope(
+      overrides: [initialBrandingProvider.overrideWithValue(cachedBranding)],
+      child: const SweetTimeApp(),
+    ),
+  );
 }
 
 /// Разбор `?seed=` из URL для демо/скриншотов (auth,cart,history,recurring).
@@ -87,6 +98,11 @@ class _SweetTimeAppState extends ConsumerState<SweetTimeApp>
         GlobalCupertinoLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
       ],
+      // Один фон под всем приложением: Scaffold'ы прозрачны (см. AppTheme), а
+      // брендовый фон рисуется здесь, поэтому виден на КАЖДОМ экране, включая
+      // push-страницы (товар, оформление, профиль-подэкраны).
+      builder: (context, child) =>
+          BrandedBackground(child: child ?? const SizedBox.shrink()),
       routerConfig: appRouter,
     );
   }

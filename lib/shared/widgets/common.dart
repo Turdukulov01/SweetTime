@@ -13,10 +13,12 @@ class AppLogo extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final appName = ref.watch(appStateProvider.select((s) => s.appName));
-    final letter = appName.isEmpty
-        ? 'S'
-        : appName.substring(0, 1).toUpperCase();
+    final branding = ref.watch(
+      appStateProvider.select(
+        (s) => (appName: s.appName, logoUrl: s.logoThumbnailUrl ?? s.logoUrl),
+      ),
+    );
+    final appName = branding.appName;
     final theme = Theme.of(context);
     final mark = Container(
       width: size,
@@ -32,15 +34,25 @@ class AppLogo extends ConsumerWidget {
           ),
         ],
       ),
+      clipBehavior: Clip.antiAlias,
       alignment: Alignment.center,
-      child: Text(
-        letter,
-        style: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w700,
-          fontSize: size * 0.45,
-        ),
-      ),
+      child: branding.logoUrl == null
+          ? Icon(
+              Icons.storefront_rounded,
+              color: Colors.white,
+              size: size * 0.5,
+            )
+          : Image.network(
+              branding.logoUrl!,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => Icon(
+                Icons.storefront_rounded,
+                color: Colors.white,
+                size: size * 0.5,
+              ),
+            ),
     );
     if (!showWordmark) return mark;
     return Row(

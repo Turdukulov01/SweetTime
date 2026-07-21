@@ -289,6 +289,16 @@ class _CartItemCard extends ConsumerWidget {
                   onIncrement: () => controller.updateQuantity(index, 1),
                 ),
                 const Spacer(),
+                TextButton.icon(
+                  key: ValueKey('edit-cart-item-$index'),
+                  onPressed: () => context.push('/cart/edit/$index'),
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: Text(strings.editCartItem),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
                 IconButton(
                   onPressed: () => controller.removeFromCart(index),
                   tooltip: strings.removeCartItem(productName),

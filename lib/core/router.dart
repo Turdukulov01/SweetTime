@@ -104,6 +104,13 @@ final appRouter = GoRouter(
       builder: (context, state) => const _ProtectedCheckoutRoute(),
     ),
     GoRoute(
+      path: '/cart/edit/:index',
+      parentNavigatorKey: _rootKey,
+      builder: (context, state) => _CartItemEditRoute(
+        index: int.tryParse(state.pathParameters['index'] ?? '') ?? -1,
+      ),
+    ),
+    GoRoute(
       path: '/auth',
       parentNavigatorKey: _rootKey,
       builder: (context, state) => const AuthPage(),
@@ -138,6 +145,24 @@ final appRouter = GoRouter(
     ),
   ],
 );
+
+class _CartItemEditRoute extends ConsumerWidget {
+  const _CartItemEditRoute({required this.index});
+
+  final int index;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cart = ref.watch(appStateProvider.select((state) => state.cart));
+    if (index < 0 || index >= cart.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) context.go('/cart');
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    return ProductPage(productId: cart[index].product.id, editCartIndex: index);
+  }
+}
 
 class _ProtectedCheckoutRoute extends ConsumerWidget {
   const _ProtectedCheckoutRoute();

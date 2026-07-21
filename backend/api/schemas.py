@@ -37,6 +37,15 @@ class LocalizedText(BaseModel):
     en: str | None = None
 
 
+class OptionalLocalizedText(BaseModel):
+    """Localized promotion copy; blank values are valid for image-only cards."""
+
+    model_config = ConfigDict(extra="forbid")
+    ru: str = ""
+    ky: str | None = None
+    en: str | None = None
+
+
 # Название/описание товара: строка (как сейчас) или локализованный объект.
 LocalizedOrText = str | LocalizedText
 
@@ -57,11 +66,34 @@ class ReferralConfig(BaseModel):
     inviterBonus: int
 
 
+class BackgroundTheme(BaseModel):
+    kind: Literal["plain", "pattern", "image"] = "plain"
+    preset: Literal["none", "bubbles", "doodles", "coffee"] = "none"
+    lightBase: HexColor = "#FFFAF0"
+    darkBase: HexColor = "#161215"
+    patternOpacity: float = Field(default=0.12, ge=0, le=0.35)
+    imageUrl: str | None = None
+    thumbnailUrl: str | None = None
+
+
+class BackgroundThemePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["plain", "pattern", "image"] | None = None
+    preset: Literal["none", "bubbles", "doodles", "coffee"] | None = None
+    lightBase: HexColor | None = None
+    darkBase: HexColor | None = None
+    patternOpacity: float | None = Field(default=None, ge=0, le=0.35)
+
+
 class CompanyOut(BaseModel):
     id: str
     name: str
     appName: str
     accentColor: str
+    logoUrl: str | None = None
+    logoThumbnailUrl: str | None = None
+    background: BackgroundTheme = Field(default_factory=BackgroundTheme)
     currency: str
     loyalty: LoyaltyConfig
     referral: ReferralConfig
@@ -87,7 +119,8 @@ class CompanyPatch(BaseModel):
 
     name: str | None = None
     appName: str | None = None
-    accentColor: str | None = None
+    accentColor: HexColor | None = None
+    background: BackgroundThemePatch | None = None
     currency: str | None = None
     loyalty: LoyaltyPatch | None = None
     referral: ReferralPatch | None = None
@@ -648,15 +681,17 @@ class PromotionOut(BaseModel):
     id: str
     sortOrder: int
     active: bool
-    title: LocalizedText
-    description: LocalizedText
+    title: OptionalLocalizedText
+    description: OptionalLocalizedText
     code: str | None = None
     accentColor: HexColor
+    imageUrl: str | None = None
+    thumbnailUrl: str | None = None
 
 
 class PromotionCreate(BaseModel):
-    title: LocalizedText
-    description: LocalizedText
+    title: OptionalLocalizedText = Field(default_factory=OptionalLocalizedText)
+    description: OptionalLocalizedText = Field(default_factory=OptionalLocalizedText)
     code: str | None = None
     accentColor: HexColor = "#FF5C9A"
     active: bool = True
@@ -674,8 +709,8 @@ class PromotionCreate(BaseModel):
 class PromotionPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    title: LocalizedText | None = None
-    description: LocalizedText | None = None
+    title: OptionalLocalizedText | None = None
+    description: OptionalLocalizedText | None = None
     code: str | None = None
     accentColor: HexColor | None = None
     active: bool | None = None

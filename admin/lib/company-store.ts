@@ -30,6 +30,8 @@ import {
   apiCreateProduct,
   apiCreatePromotion,
   apiDeleteNews,
+  apiDeleteCompanyBackground,
+  apiDeleteCompanyLogo,
   apiDeletePromotion,
   apiFetchBranches,
   apiFetchConfig,
@@ -41,6 +43,8 @@ import {
   apiPatchNews,
   apiPatchProduct,
   apiPatchPromotion,
+  apiPutCompanyBackground,
+  apiPutCompanyLogo,
   describeApiError
 } from "@/lib/api";
 import { logout } from "@/lib/session";
@@ -68,6 +72,10 @@ interface CompanyStoreValue extends CompanyState {
   updateCompany: (
     patch: Partial<Omit<Company, "id">>
   ) => Promise<Company>;
+  putCompanyLogo: (file: File) => Promise<Company>;
+  deleteCompanyLogo: () => Promise<Company>;
+  putCompanyBackground: (file: File) => Promise<Company>;
+  deleteCompanyBackground: () => Promise<Company>;
   addProduct: (product: Product) => Promise<Product>;
   updateProduct: (
     productId: string,
@@ -78,11 +86,11 @@ interface CompanyStoreValue extends CompanyState {
   addNews: (news: NewsStory) => void;
   updateNews: (newsId: string, patch: Partial<Omit<NewsStory, "id">>) => void;
   removeNews: (newsId: string) => void;
-  addPromotion: (promotion: Promotion) => void;
+  addPromotion: (promotion: Promotion) => Promise<Promotion>;
   updatePromotion: (
     promotionId: string,
     patch: Partial<Omit<Promotion, "id">>
-  ) => void;
+  ) => Promise<Promotion>;
   removePromotion: (promotionId: string) => void;
 }
 
@@ -211,6 +219,38 @@ export function CompanyStoreProvider({
       }
     },
     [companyId, applyCompany, showError]
+  );
+
+  const runBrandMutation = useCallback(
+    async (mutation: () => Promise<Company>): Promise<Company> => {
+      try {
+        const saved = await mutation();
+        applyCompany(saved);
+        return saved;
+      } catch (error: unknown) {
+        showError(error);
+        throw error;
+      }
+    },
+    [applyCompany, showError]
+  );
+
+  const putCompanyLogo = useCallback(
+    (file: File) => runBrandMutation(() => apiPutCompanyLogo(companyId, file)),
+    [companyId, runBrandMutation]
+  );
+  const deleteCompanyLogo = useCallback(
+    () => runBrandMutation(() => apiDeleteCompanyLogo(companyId)),
+    [companyId, runBrandMutation]
+  );
+  const putCompanyBackground = useCallback(
+    (file: File) =>
+      runBrandMutation(() => apiPutCompanyBackground(companyId, file)),
+    [companyId, runBrandMutation]
+  );
+  const deleteCompanyBackground = useCallback(
+    () => runBrandMutation(() => apiDeleteCompanyBackground(companyId)),
+    [companyId, runBrandMutation]
   );
 
   // ----- Товары -----
@@ -492,7 +532,7 @@ export function CompanyStoreProvider({
     [...list].sort((a, b) => a.sortOrder - b.sortOrder);
 
   const addPromotion = useCallback(
-    (promotion: Promotion) => {
+    async (promotion: Promotion): Promise<Promotion> => {
       setState((prev) =>
         prev
           ? {
@@ -503,8 +543,8 @@ export function CompanyStoreProvider({
       );
 
       const { id: tempId, companyId: _cid, ...payload } = promotion;
-      apiCreatePromotion(companyId, payload)
-        .then((created) => {
+      try {
+        const created = await apiCreatePromotion(companyId, payload);
           setState((prev) =>
             prev
               ? {
@@ -515,8 +555,8 @@ export function CompanyStoreProvider({
                 }
               : prev
           );
-        })
-        .catch((error: unknown) => {
+        return created;
+      } catch (error: unknown) {
           setState((prev) =>
             prev
               ? {
@@ -525,14 +565,18 @@ export function CompanyStoreProvider({
                 }
               : prev
           );
-          showError(error);
-        });
+        showError(error);
+        throw error;
+      }
     },
     [companyId, showError]
   );
 
   const updatePromotion = useCallback(
-    (promotionId: string, patch: Partial<Omit<Promotion, "id">>) => {
+    async (
+      promotionId: string,
+      patch: Partial<Omit<Promotion, "id">>
+    ): Promise<Promotion> => {
       let previous: Promotion | undefined;
       setState((prev) => {
         if (!prev) return prev;
@@ -547,8 +591,8 @@ export function CompanyStoreProvider({
         };
       });
 
-      apiPatchPromotion(companyId, promotionId, patch)
-        .then((updated) => {
+      try {
+        const updated = await apiPatchPromotion(companyId, promotionId, patch);
           setState((prev) =>
             prev
               ? {
@@ -561,8 +605,8 @@ export function CompanyStoreProvider({
                 }
               : prev
           );
-        })
-        .catch((error: unknown) => {
+        return updated;
+      } catch (error: unknown) {
           setState((prev) =>
             prev && previous
               ? {
@@ -575,8 +619,9 @@ export function CompanyStoreProvider({
                 }
               : prev
           );
-          showError(error);
-        });
+        showError(error);
+        throw error;
+      }
     },
     [companyId, showError]
   );
@@ -615,6 +660,10 @@ export function CompanyStoreProvider({
             ...state,
             errorMessage,
             updateCompany,
+            putCompanyLogo,
+            deleteCompanyLogo,
+            putCompanyBackground,
+            deleteCompanyBackground,
             addProduct,
             updateProduct,
             addBranch,
@@ -631,6 +680,10 @@ export function CompanyStoreProvider({
       state,
       errorMessage,
       updateCompany,
+      putCompanyLogo,
+      deleteCompanyLogo,
+      putCompanyBackground,
+      deleteCompanyBackground,
       addProduct,
       updateProduct,
       addBranch,

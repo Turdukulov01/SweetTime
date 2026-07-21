@@ -36,12 +36,91 @@ class CompanyConfig {
     required this.accentColor,
     required this.earnRate,
     required this.maxSpendShare,
+    this.logoUrl,
+    this.logoThumbnailUrl,
+    this.backgroundTheme = const BrandBackgroundTheme(),
   });
 
   final String? appName;
   final Color? accentColor;
   final double? earnRate;
   final double? maxSpendShare;
+  final String? logoUrl;
+  final String? logoThumbnailUrl;
+  final BrandBackgroundTheme backgroundTheme;
+
+  Map<String, dynamic> toJson() => {
+    'appName': appName,
+    'accentColor': accentColor == null
+        ? null
+        : '#${accentColor!.toARGB32().toRadixString(16).substring(2).toUpperCase()}',
+    'earnRate': earnRate,
+    'maxSpendShare': maxSpendShare,
+    'logoUrl': logoUrl,
+    'logoThumbnailUrl': logoThumbnailUrl,
+    'background': backgroundTheme.toJson(),
+  };
+
+  factory CompanyConfig.fromJson(Map<String, dynamic> json) => CompanyConfig(
+    appName: json['appName'] as String?,
+    accentColor: parseHexColor(json['accentColor'] as String?),
+    earnRate: (json['earnRate'] as num?)?.toDouble(),
+    maxSpendShare: (json['maxSpendShare'] as num?)?.toDouble(),
+    logoUrl: _resolvePublicUrl(json['logoUrl']),
+    logoThumbnailUrl: _resolvePublicUrl(json['logoThumbnailUrl']),
+    backgroundTheme: BrandBackgroundTheme.fromJson(json['background']),
+  );
+}
+
+@immutable
+class BrandBackgroundTheme {
+  const BrandBackgroundTheme({
+    this.kind = 'plain',
+    this.preset = 'none',
+    this.lightBase = const Color(0xFFFFFAF0),
+    this.darkBase = const Color(0xFF161215),
+    this.patternOpacity = 0.12,
+    this.imageUrl,
+    this.thumbnailUrl,
+  });
+
+  final String kind;
+  final String preset;
+  final Color lightBase;
+  final Color darkBase;
+  final double patternOpacity;
+  final String? imageUrl;
+  final String? thumbnailUrl;
+
+  factory BrandBackgroundTheme.fromJson(dynamic raw) {
+    final json = raw is Map<String, dynamic> ? raw : const <String, dynamic>{};
+    return BrandBackgroundTheme(
+      kind: json['kind'] as String? ?? 'plain',
+      preset: json['preset'] as String? ?? 'none',
+      lightBase:
+          parseHexColor(json['lightBase'] as String?) ??
+          const Color(0xFFFFFAF0),
+      darkBase:
+          parseHexColor(json['darkBase'] as String?) ?? const Color(0xFF161215),
+      patternOpacity: ((json['patternOpacity'] as num?)?.toDouble() ?? 0.12)
+          .clamp(0, 0.35)
+          .toDouble(),
+      imageUrl: _resolvePublicUrl(json['imageUrl']),
+      thumbnailUrl: _resolvePublicUrl(json['thumbnailUrl']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'kind': kind,
+    'preset': preset,
+    'lightBase':
+        '#${lightBase.toARGB32().toRadixString(16).substring(2).toUpperCase()}',
+    'darkBase':
+        '#${darkBase.toARGB32().toRadixString(16).substring(2).toUpperCase()}',
+    'patternOpacity': patternOpacity,
+    'imageUrl': imageUrl,
+    'thumbnailUrl': thumbnailUrl,
+  };
 }
 
 /// Ответ сервера на `POST /orders` — то, что показываем в диалоге успеха.
@@ -511,6 +590,9 @@ class ApiClient {
         accentColor: parseHexColor(json['accentColor'] as String?),
         earnRate: (loyaltyMap['earnRate'] as num?)?.toDouble(),
         maxSpendShare: (loyaltyMap['maxSpendShare'] as num?)?.toDouble(),
+        logoUrl: _resolvePublicUrl(json['logoUrl']),
+        logoThumbnailUrl: _resolvePublicUrl(json['logoThumbnailUrl']),
+        backgroundTheme: BrandBackgroundTheme.fromJson(json['background']),
       );
     } catch (_) {
       return null;
@@ -1483,6 +1565,8 @@ class ApiClient {
         fallback: const LocalizedText(ru: '', ky: '', en: ''),
       ),
       code: (json['code'] as String?) ?? '',
+      imageUrl: _resolvePublicUrl(json['imageUrl']),
+      thumbnailUrl: _resolvePublicUrl(json['thumbnailUrl']),
     );
   }
 

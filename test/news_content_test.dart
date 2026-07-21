@@ -7,9 +7,11 @@ import 'package:sweettime/core/api_client.dart';
 import 'package:sweettime/core/auth_store.dart';
 import 'package:sweettime/core/cart_store.dart';
 import 'package:sweettime/core/localization/app_localizations.dart';
+import 'package:sweettime/core/story_view_store.dart';
 import 'package:sweettime/core/theme/app_theme.dart';
 import 'package:sweettime/features/news/news_page.dart';
 import 'package:sweettime/features/news/news_story_page.dart';
+import 'package:sweettime/features/home/home_page.dart';
 import 'package:sweettime/shared/app_models.dart';
 import 'package:sweettime/shared/app_state.dart';
 import 'package:sweettime/shared/demo_data.dart';
@@ -135,6 +137,10 @@ void main() {
         find.byKey(const ValueKey('story-current-collection-story-44')),
         findsOneWidget,
       );
+      expect(
+        harness.controller.state.viewedStoryIds,
+        contains('collection-story-44'),
+      );
       expect(find.byIcon(Icons.arrow_back_rounded), findsNothing);
       expect(find.byIcon(Icons.arrow_forward_rounded), findsNothing);
 
@@ -196,6 +202,72 @@ void main() {
     },
   );
 
+  test('viewed story state survives controller recreation', () async {
+    final store = _MemoryStoryViewStore();
+    final first = _newsController(store);
+    await first.bootstrap();
+    await first.markStoryViewed('story-persisted');
+
+    final restored = _newsController(store);
+    await restored.bootstrap();
+
+    expect(restored.state.viewedStoryIds, {'story-persisted'});
+  });
+
+  testWidgets('home story ring uses brand accent then becomes neutral', (
+    tester,
+  ) async {
+    final story = _story('home-ring', DateTime.utc(2026, 7, 15));
+    final controller = AppStateController(
+      api: _NewsApi(homeStories: [story], accentColor: const Color(0xFFEE7722)),
+      languagePreferences: _MemoryPreferences(),
+      authStore: _MemoryAuthStore(),
+      cartStore: _MemoryCartStore(),
+      storyViewStore: _MemoryStoryViewStore(),
+    );
+    await controller.bootstrap();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [appStateProvider.overrideWith((ref) => controller)],
+        child: MaterialApp(
+          theme: AppTheme.light(const Color(0xFFEE7722)),
+          locale: const Locale('en'),
+          supportedLocales: [
+            for (final language in AppLanguage.values) language.locale,
+          ],
+          localizationsDelegates: const [
+            AppLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          home: const HomePage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    BoxDecoration decoration() =>
+        tester
+                .widget<Container>(
+                  find.byKey(const ValueKey('story-ring-home-ring')),
+                )
+                .decoration!
+            as BoxDecoration;
+
+    expect(decoration().gradient, isA<LinearGradient>());
+    expect(
+      (decoration().gradient! as LinearGradient).colors.first,
+      const Color(0xFFEE7722),
+    );
+
+    await controller.markStoryViewed(story.id);
+    await tester.pump();
+
+    expect(decoration().gradient, isNull);
+    expect(decoration().border, isNotNull);
+  });
+
   testWidgets('news post sheet closes with Android back', (tester) async {
     final harness = await _pumpNewsApp(tester);
     addTearDown(harness.dispose);
@@ -209,6 +281,39 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('news-post-sheet')), findsNothing);
     expect(find.byKey(const ValueKey('news-post-post-a')), findsOneWidget);
+  });
+
+  testWidgets('video post uses adaptive stage and expandable overlay caption', (
+    tester,
+  ) async {
+    final harness = await _pumpNewsApp(tester);
+    addTearDown(harness.dispose);
+
+    final videoCard = find.byKey(const ValueKey('news-post-video-a'));
+    await tester.dragUntilVisible(
+      videoCard,
+      find.byType(CustomScrollView),
+      const Offset(0, -300),
+    );
+    // The video card is taller than the 600 px test viewport. Move its
+    // centre, not only its leading edge, into the tappable area.
+    await tester.drag(
+      find.byType(CustomScrollView),
+      const Offset(0, -320),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(videoCard);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('news-post-video-stage')), findsOneWidget);
+    expect(find.byKey(const ValueKey('news-post-video-title')), findsOneWidget);
+    expect(find.byKey(const ValueKey('news-post-video-body')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('news-post-video-caption')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('news-post-video-body')), findsOneWidget);
+    expect(find.byKey(const ValueKey('news-post-video-date')), findsOneWidget);
   });
 }
 
@@ -233,13 +338,7 @@ NewsStory _story(
 }
 
 Future<_NewsHarness> _pumpNewsApp(WidgetTester tester) async {
-  final api = _NewsApi();
-  final controller = AppStateController(
-    api: api,
-    languagePreferences: _MemoryPreferences(),
-    authStore: _MemoryAuthStore(),
-    cartStore: _MemoryCartStore(),
-  );
+  final controller = _newsController(_MemoryStoryViewStore());
   await controller.bootstrap();
   final router = GoRouter(
     initialLocation: '/news',
@@ -272,13 +371,24 @@ Future<_NewsHarness> _pumpNewsApp(WidgetTester tester) async {
     ),
   );
   await tester.pumpAndSettle();
-  return _NewsHarness(router);
+  return _NewsHarness(router, controller);
+}
+
+AppStateController _newsController(StoryViewStore storyViewStore) {
+  return AppStateController(
+    api: _NewsApi(),
+    languagePreferences: _MemoryPreferences(),
+    authStore: _MemoryAuthStore(),
+    cartStore: _MemoryCartStore(),
+    storyViewStore: storyViewStore,
+  );
 }
 
 class _NewsHarness {
-  const _NewsHarness(this.router);
+  const _NewsHarness(this.router, this.controller);
 
   final GoRouter router;
+  final AppStateController controller;
 
   void dispose() {
     router.dispose();
@@ -286,6 +396,14 @@ class _NewsHarness {
 }
 
 class _NewsApi extends ApiClient {
+  _NewsApi({
+    this.homeStories = const [],
+    this.accentColor = AppColors.candy500,
+  });
+
+  final List<NewsStory> homeStories;
+  final Color accentColor;
+
   final collectionStories = [
     for (var index = 0; index < 45; index++)
       _story(
@@ -295,9 +413,9 @@ class _NewsApi extends ApiClient {
   ];
 
   @override
-  Future<CompanyConfig?> fetchConfig() async => const CompanyConfig(
+  Future<CompanyConfig?> fetchConfig() async => CompanyConfig(
     appName: 'SweetTime',
-    accentColor: AppColors.candy500,
+    accentColor: accentColor,
     earnRate: Loyalty.earnRate,
     maxSpendShare: Loyalty.maxSpendShare,
   );
@@ -312,7 +430,8 @@ class _NewsApi extends ApiClient {
   Future<List<Promotion>?> fetchPromotions() async => const [];
 
   @override
-  Future<List<NewsStory>?> fetchHomeStories({int limit = 30}) async => const [];
+  Future<List<NewsStory>?> fetchHomeStories({int limit = 30}) async =>
+      homeStories;
 
   @override
   Future<List<NewsStory>?> fetchNews() async => null;
@@ -343,6 +462,23 @@ class _NewsApi extends ApiClient {
       ),
       publishedAt: '2025-01-01T00:00:00Z',
     ),
+    NewsPost(
+      id: 'video-a',
+      title: LocalizedText(
+        ru: 'Видео публикация',
+        ky: 'Видео жарыя',
+        en: 'Video post',
+      ),
+      summary: LocalizedText(ru: '', ky: '', en: ''),
+      body: LocalizedText(
+        ru: 'Полный текст видео',
+        ky: 'Видеонун толук тексти',
+        en: 'Full video body',
+      ),
+      publishedAt: '2024-12-31T00:00:00Z',
+      mediaType: NewsMediaType.video,
+      mediaUrl: '',
+    ),
   ];
 }
 
@@ -358,6 +494,12 @@ class _MemoryPreferences implements LanguagePreferenceStore {
 
   @override
   Future<void> writeThemeMode(String value) async {}
+
+  @override
+  Future<String?> readBackgroundOverride() async => null;
+
+  @override
+  Future<void> writeBackgroundOverride(String? value) async {}
 }
 
 class _MemoryAuthStore implements AuthStore {
@@ -383,4 +525,16 @@ class _MemoryCartStore implements CartStore {
 
   @override
   Future<void> write(List<CartDraftItem> items) async {}
+}
+
+class _MemoryStoryViewStore implements StoryViewStore {
+  Set<String> ids = {};
+
+  @override
+  Future<Set<String>> readViewedStoryIds() async => Set.unmodifiable(ids);
+
+  @override
+  Future<void> writeViewedStoryIds(Set<String> ids) async {
+    this.ids = Set.of(ids);
+  }
 }

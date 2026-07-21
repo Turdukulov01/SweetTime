@@ -7,6 +7,7 @@ import '../../core/localization/app_localizations.dart';
 import '../../shared/app_models.dart';
 import '../../shared/app_state.dart';
 import '../../shared/widgets/common.dart';
+import '../../shared/widgets/fullscreen_image.dart';
 import '../../shared/widgets/top_notice.dart';
 import 'recurring_sheet.dart';
 
@@ -69,6 +70,7 @@ class _ProfileContent extends ConsumerWidget {
           orders: state.visibleOrders,
           products: state.products,
           branches: state.branches,
+          selectedBranch: state.selectedBranch,
         ),
       ),
     );
@@ -116,17 +118,15 @@ class _ProfileContent extends ConsumerWidget {
             const SizedBox(height: 12),
             _OrderHistoryEntry(orders: profile.orders),
             const SizedBox(height: 16),
-            Text(strings.profileAddresses, style: theme.textTheme.titleLarge),
+            _BranchesEntry(
+              branches: profile.branches,
+              selectedBranch: profile.selectedBranch,
+              onSelected: controller.selectBranch,
+            ),
+            const SizedBox(height: 24),
+            Text('Оформление', style: theme.textTheme.titleLarge),
             const SizedBox(height: 12),
-            _AddressCard(
-              label: strings.profileHomeAddressLabel,
-              line: strings.profileHomeAddress,
-            ),
-            const SizedBox(height: 8),
-            _AddressCard(
-              label: strings.profileOfficeAddressLabel,
-              line: strings.profileOfficeAddress,
-            ),
+            const _BackgroundEntry(),
             const SizedBox(height: 24),
             Text(
               strings.profileHelpAccountTitle,
@@ -304,14 +304,16 @@ class _ProfileAvatar extends StatelessWidget {
             ),
           );
 
-    return Semantics(
+    final hasPhoto = url != null && url.isNotEmpty;
+
+    final avatar = Semantics(
       image: true,
       label: AppLocalizations.of(context).profileAvatarLabel,
       child: CircleAvatar(
         radius: 36,
         backgroundColor: theme.colorScheme.primaryContainer,
         foregroundColor: theme.colorScheme.onPrimaryContainer,
-        child: url == null || url.isEmpty
+        child: !hasPhoto
             ? fallback
             : ClipOval(
                 child: Image.network(
@@ -330,6 +332,19 @@ class _ProfileAvatar extends StatelessWidget {
               ),
       ),
     );
+
+    // Открываем на весь экран только когда есть реальное фото — на кружке с
+    // инициалами рассматривать нечего.
+    if (!hasPhoto) return avatar;
+    return GestureDetector(
+      onTap: () => showFullscreenImage(
+        context,
+        imageProvider: NetworkImage(url),
+        heroTag: 'profile-avatar',
+        fallback: fallback,
+      ),
+      child: Hero(tag: 'profile-avatar', child: avatar),
+    );
   }
 }
 
@@ -339,6 +354,82 @@ String _initials(String firstName, String lastName) {
     lastName.trim(),
   ].where((part) => part.isNotEmpty).take(2);
   return parts.map((part) => part.substring(0, 1).toUpperCase()).join();
+}
+
+/// Выбор фона: `null` — как задано в админке, свой узор или выключить совсем.
+/// Пока RU-строки заданы прямо здесь; локализация — отдельной задачей.
+const _backgroundOptions = <({String? value, String label, IconData icon})>[
+  (value: null, label: 'Как в приложении', icon: Icons.auto_awesome_outlined),
+  (value: 'bubbles', label: 'Пузырьки', icon: Icons.bubble_chart_outlined),
+  (value: 'coffee', label: 'Кофе', icon: Icons.coffee_outlined),
+  (value: 'off', label: 'Без фона', icon: Icons.block_outlined),
+];
+
+class _BackgroundEntry extends ConsumerWidget {
+  const _BackgroundEntry();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final override = ref.watch(
+      appStateProvider.select((s) => s.backgroundOverride),
+    );
+    final current = _backgroundOptions.firstWhere(
+      (o) => o.value == override,
+      orElse: () => _backgroundOptions.first,
+    );
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.wallpaper_outlined),
+        title: const Text('Фон приложения'),
+        subtitle: Text(current.label),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => _pickBackground(context, ref, override),
+      ),
+    );
+  }
+
+  Future<void> _pickBackground(
+    BuildContext context,
+    WidgetRef ref,
+    String? current,
+  ) async {
+    final selected = await showModalBottomSheet<({String? value})>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Фон приложения',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+            ),
+            for (final option in _backgroundOptions)
+              ListTile(
+                leading: Icon(option.icon),
+                title: Text(option.label),
+                trailing: option.value == current
+                    ? Icon(
+                        Icons.check_rounded,
+                        color: Theme.of(context).colorScheme.primary,
+                      )
+                    : null,
+                onTap: () => Navigator.pop(context, (value: option.value)),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (selected == null) return;
+    ref.read(appStateProvider.notifier).setBackgroundOverride(selected.value);
+  }
 }
 
 class _PointsEntry extends StatelessWidget {
@@ -698,24 +789,72 @@ class _OrderHistoryEntry extends StatelessWidget {
   }
 }
 
-class _AddressCard extends StatelessWidget {
-  const _AddressCard({required this.label, required this.line});
+class _BranchesEntry extends StatelessWidget {
+  const _BranchesEntry({
+    required this.branches,
+    required this.selectedBranch,
+    required this.onSelected,
+  });
 
-  final String label;
-  final String line;
+  final List<Branch> branches;
+  final Branch selectedBranch;
+  final ValueChanged<Branch> onSelected;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final strings = AppLocalizations.of(context);
     return Card(
       child: ListTile(
-        minTileHeight: 56,
+        minTileHeight: 72,
         leading: Icon(
-          Icons.location_on_outlined,
+          Icons.storefront_outlined,
           color: theme.colorScheme.primary,
         ),
-        title: Text(label, style: theme.textTheme.titleSmall),
-        subtitle: Text(line),
+        title: Text(
+          strings.profileOurBranches,
+          style: theme.textTheme.titleSmall,
+        ),
+        subtitle: Text(strings.profileOurBranchesHint),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => showModalBottomSheet<void>(
+          context: context,
+          showDragHandle: true,
+          isScrollControlled: true,
+          builder: (sheetContext) => SafeArea(
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              children: [
+                Text(
+                  strings.profileOurBranches,
+                  style: theme.textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                for (final branch in branches)
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.location_on_outlined),
+                      title: Text(branch.name.resolve(strings.language)),
+                      subtitle: Text(
+                        '${branch.address.resolve(strings.language)} · ${branch.hours}',
+                      ),
+                      trailing: branch.id == selectedBranch.id
+                          ? Icon(
+                              Icons.check_circle,
+                              color: theme.colorScheme.primary,
+                            )
+                          : null,
+                      onTap: () {
+                        onSelected(branch);
+                        Navigator.pop(sheetContext);
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

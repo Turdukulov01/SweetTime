@@ -393,12 +393,16 @@ class Promotion {
     required this.title,
     required this.description,
     required this.code,
+    this.imageUrl,
+    this.thumbnailUrl,
   });
 
   final String id;
   final LocalizedText title;
   final LocalizedText description;
   final String code;
+  final String? imageUrl;
+  final String? thumbnailUrl;
 }
 
 class PointEvent {

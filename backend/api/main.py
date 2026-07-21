@@ -126,11 +126,20 @@ require_queue_staff = require_role("owner", "manager", "barista")
 
 
 def _company_out(c: Company) -> schemas.CompanyOut:
+    background = {
+        **schemas.BackgroundTheme().model_dump(),
+        **(c.background or {}),
+        "imageUrl": (c.background or {}).get("imageUrl"),
+        "thumbnailUrl": (c.background or {}).get("thumbnailUrl"),
+    }
     return schemas.CompanyOut(
         id=c.id,
         name=c.name,
         appName=c.app_name,
         accentColor=c.accent_color,
+        logoUrl=c.logo_url,
+        logoThumbnailUrl=c.logo_thumbnail_url,
+        background=schemas.BackgroundTheme(**background),
         currency=c.currency,
         loyalty=schemas.LoyaltyConfig(**c.loyalty),
         referral=schemas.ReferralConfig(**c.referral),
@@ -246,7 +255,25 @@ def _news_out(n: News) -> schemas.NewsOut:
     )
 
 
-def _promotion_out(p: Promotion) -> schemas.PromotionOut:
+def _promotion_image_urls(db: Session, p: Promotion) -> tuple[str | None, str | None]:
+    rows = db.scalars(
+        select(MediaFile).where(
+            MediaFile.tenant_id == p.company_id,
+            MediaFile.entity_type == "promotion_image",
+            MediaFile.entity_id == p.id,
+        )
+    ).all()
+    variants = {row.variant: row for row in rows}
+    medium = variants.get("medium") or variants.get("large") or variants.get("thumbnail")
+    thumbnail = variants.get("thumbnail") or medium
+    return (
+        storage_service.get_public_url(medium.storage_key) if medium else None,
+        storage_service.get_public_url(thumbnail.storage_key) if thumbnail else None,
+    )
+
+
+def _promotion_out(p: Promotion, db: Session) -> schemas.PromotionOut:
+    image_url, thumbnail_url = _promotion_image_urls(db, p)
     return schemas.PromotionOut(
         id=p.id,
         sortOrder=p.sort_order,
@@ -255,6 +282,8 @@ def _promotion_out(p: Promotion) -> schemas.PromotionOut:
         description=p.description,
         code=p.code,
         accentColor=p.accent_color,
+        imageUrl=image_url,
+        thumbnailUrl=thumbnail_url,
     )
 
 
@@ -311,6 +340,12 @@ def patch_config(
         company.app_name = data["appName"]
     if "accentColor" in data:
         company.accent_color = data["accentColor"]
+    if "background" in data:
+        current = {
+            **schemas.BackgroundTheme().model_dump(),
+            **(company.background or {}),
+        }
+        company.background = {**current, **data["background"]}
     if "currency" in data:
         company.currency = data["currency"]
     if "loyalty" in data:
@@ -320,6 +355,177 @@ def patch_config(
     db.add(company)
     db.commit()
     return _company_out(company)
+
+
+def _replace_company_brand_image(
+    *,
+    company: Company,
+    db: Session,
+    upload: UploadFile,
+    entity_type: str,
+) -> schemas.CompanyOut:
+    content = upload.file.read(storage_service.max_image_bytes + 1)
+    try:
+        saved = storage_service.save_image(
+            tenant_slug=company.id,
+            media_kind="branding",
+            content=content,
+            original_filename=upload.filename,
+            declared_content_type=upload.content_type,
+        )
+    except StorageValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    new_keys = [variant.storage_key for variant in saved.variants.values()]
+    old_keys: list[str] = []
+    try:
+        db.execute(select(Company).where(Company.id == company.id).with_for_update())
+        old_rows = db.scalars(
+            select(MediaFile).where(
+                MediaFile.tenant_id == company.id,
+                MediaFile.entity_type == entity_type,
+                MediaFile.entity_id == company.id,
+            )
+        ).all()
+        old_keys = [row.storage_key for row in old_rows]
+        for row in old_rows:
+            db.delete(row)
+        db.flush()
+        db.add_all(
+            [
+                MediaFile(
+                    id=f"{saved.image_id}:{variant_name}",
+                    tenant_id=company.id,
+                    entity_type=entity_type,
+                    entity_id=company.id,
+                    storage_key=variant.storage_key,
+                    original_filename=saved.original_filename,
+                    mime_type="image/webp",
+                    size_bytes=variant.size_bytes,
+                    width=variant.width,
+                    height=variant.height,
+                    variant=variant_name,
+                )
+                for variant_name, variant in saved.variants.items()
+            ]
+        )
+        medium_url = storage_service.get_public_url(saved.medium.storage_key)
+        thumbnail_url = storage_service.get_public_url(
+            saved.variants["thumbnail"].storage_key
+        )
+        if entity_type == "company_logo":
+            company.logo_url = medium_url
+            company.logo_thumbnail_url = thumbnail_url
+        else:
+            company.background = {
+                **schemas.BackgroundTheme().model_dump(),
+                **(company.background or {}),
+                "kind": "image",
+                "imageUrl": medium_url,
+                "thumbnailUrl": thumbnail_url,
+            }
+        db.add(company)
+        db.commit()
+    except Exception:
+        db.rollback()
+        _cleanup_product_media(new_keys)
+        raise
+    _cleanup_product_media(old_keys)
+    return _company_out(company)
+
+
+def _delete_company_brand_image(
+    *, company: Company, db: Session, entity_type: str
+) -> schemas.CompanyOut:
+    db.execute(select(Company).where(Company.id == company.id).with_for_update())
+    rows = db.scalars(
+        select(MediaFile).where(
+            MediaFile.tenant_id == company.id,
+            MediaFile.entity_type == entity_type,
+            MediaFile.entity_id == company.id,
+        )
+    ).all()
+    old_keys = [row.storage_key for row in rows]
+    for row in rows:
+        db.delete(row)
+    if entity_type == "company_logo":
+        company.logo_url = None
+        company.logo_thumbnail_url = None
+    else:
+        company.background = {
+            **schemas.BackgroundTheme().model_dump(),
+            **(company.background or {}),
+            "kind": "plain",
+            "imageUrl": None,
+            "thumbnailUrl": None,
+        }
+    db.add(company)
+    db.commit()
+    _cleanup_product_media(old_keys)
+    return _company_out(company)
+
+
+@app.put(
+    "/api/companies/{companyId}/branding/logo",
+    response_model=schemas.CompanyOut,
+    tags=["config"],
+    dependencies=[Depends(require_content_staff)],
+)
+def put_company_logo(
+    file: UploadFile = File(...),
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> schemas.CompanyOut:
+    return _replace_company_brand_image(
+        company=company, db=db, upload=file, entity_type="company_logo"
+    )
+
+
+@app.delete(
+    "/api/companies/{companyId}/branding/logo",
+    response_model=schemas.CompanyOut,
+    tags=["config"],
+    dependencies=[Depends(require_content_staff)],
+)
+def delete_company_logo(
+    company: Company = Depends(get_company), db: Session = Depends(get_db)
+) -> schemas.CompanyOut:
+    return _delete_company_brand_image(
+        company=company, db=db, entity_type="company_logo"
+    )
+
+
+@app.put(
+    "/api/companies/{companyId}/branding/background",
+    response_model=schemas.CompanyOut,
+    tags=["config"],
+    dependencies=[Depends(require_content_staff)],
+)
+def put_company_background(
+    file: UploadFile = File(...),
+    company: Company = Depends(get_company),
+    db: Session = Depends(get_db),
+) -> schemas.CompanyOut:
+    return _replace_company_brand_image(
+        company=company,
+        db=db,
+        upload=file,
+        entity_type="company_background",
+    )
+
+
+@app.delete(
+    "/api/companies/{companyId}/branding/background",
+    response_model=schemas.CompanyOut,
+    tags=["config"],
+    dependencies=[Depends(require_content_staff)],
+)
+def delete_company_background(
+    company: Company = Depends(get_company), db: Session = Depends(get_db)
+) -> schemas.CompanyOut:
+    return _delete_company_brand_image(
+        company=company, db=db, entity_type="company_background"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1373,7 +1579,7 @@ def list_promotions(
         .where(Promotion.company_id == company.id)
         .order_by(Promotion.sort_order.asc())
     ).all()
-    return [_promotion_out(p) for p in items]
+    return [_promotion_out(p, db) for p in items]
 
 
 @app.post(
@@ -1407,7 +1613,7 @@ def create_promotion(
     )
     db.add(promotion)
     db.commit()
-    return _promotion_out(promotion)
+    return _promotion_out(promotion, db)
 
 
 @app.patch(
@@ -1443,7 +1649,102 @@ def patch_promotion(
             setattr(promotion, orm_field, data[api_field])
     db.add(promotion)
     db.commit()
-    return _promotion_out(promotion)
+    return _promotion_out(promotion, db)
+
+
+@app.put(
+    "/api/companies/{companyId}/promotions/{promotionId}/image",
+    response_model=schemas.PromotionOut,
+    tags=["promotions"],
+    dependencies=[Depends(require_content_staff)],
+)
+def put_promotion_image(
+    file: UploadFile = File(...),
+    promotion: Promotion = Depends(get_company_promotion),
+    db: Session = Depends(get_db),
+) -> schemas.PromotionOut:
+    content = file.file.read(storage_service.max_image_bytes + 1)
+    try:
+        saved = storage_service.save_image(
+            tenant_slug=promotion.company_id,
+            # Promotion artwork shares the already whitelisted banner storage
+            # namespace.  The database entity_type still keeps promotion
+            # images isolated from every other banner-like asset.
+            media_kind="banners",
+            content=content,
+            original_filename=file.filename,
+            declared_content_type=file.content_type,
+        )
+    except StorageValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    new_keys = [variant.storage_key for variant in saved.variants.values()]
+    old_keys: list[str] = []
+    try:
+        db.execute(
+            select(Promotion).where(Promotion.id == promotion.id).with_for_update()
+        ).scalar_one()
+        old_rows = db.scalars(
+            select(MediaFile).where(
+                MediaFile.tenant_id == promotion.company_id,
+                MediaFile.entity_type == "promotion_image",
+                MediaFile.entity_id == promotion.id,
+            )
+        ).all()
+        old_keys = [row.storage_key for row in old_rows]
+        for row in old_rows:
+            db.delete(row)
+        db.flush()
+        db.add_all(
+            [
+                MediaFile(
+                    id=f"{saved.image_id}:{variant_name}",
+                    tenant_id=promotion.company_id,
+                    entity_type="promotion_image",
+                    entity_id=promotion.id,
+                    storage_key=variant.storage_key,
+                    original_filename=saved.original_filename,
+                    mime_type="image/webp",
+                    size_bytes=variant.size_bytes,
+                    width=variant.width,
+                    height=variant.height,
+                    variant=variant_name,
+                )
+                for variant_name, variant in saved.variants.items()
+            ]
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        _cleanup_product_media(new_keys)
+        raise
+    _cleanup_product_media(old_keys)
+    return _promotion_out(promotion, db)
+
+
+@app.delete(
+    "/api/companies/{companyId}/promotions/{promotionId}/image",
+    response_model=schemas.PromotionOut,
+    tags=["promotions"],
+    dependencies=[Depends(require_content_staff)],
+)
+def delete_promotion_image(
+    promotion: Promotion = Depends(get_company_promotion),
+    db: Session = Depends(get_db),
+) -> schemas.PromotionOut:
+    rows = db.scalars(
+        select(MediaFile).where(
+            MediaFile.tenant_id == promotion.company_id,
+            MediaFile.entity_type == "promotion_image",
+            MediaFile.entity_id == promotion.id,
+        )
+    ).all()
+    old_keys = [row.storage_key for row in rows]
+    for row in rows:
+        db.delete(row)
+    db.commit()
+    _cleanup_product_media(old_keys)
+    return _promotion_out(promotion, db)
 
 
 @app.delete(
@@ -1456,6 +1757,17 @@ def delete_promotion(
     promotion: Promotion = Depends(get_company_promotion),
     db: Session = Depends(get_db),
 ) -> Response:
+    rows = db.scalars(
+        select(MediaFile).where(
+            MediaFile.tenant_id == promotion.company_id,
+            MediaFile.entity_type == "promotion_image",
+            MediaFile.entity_id == promotion.id,
+        )
+    ).all()
+    old_keys = [row.storage_key for row in rows]
+    for row in rows:
+        db.delete(row)
     db.delete(promotion)
     db.commit()
+    _cleanup_product_media(old_keys)
     return Response(status_code=204)

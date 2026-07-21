@@ -412,7 +412,13 @@ function mapProduct(companyId: string, p: ApiProduct): Product {
     id: String(p.id),
     companyId,
     name: displayText(p.name),
+    nameLocalized:
+      typeof p.name === "string" ? { ru: p.name } : mapLocalized(p.name),
     description: displayText(p.description),
+    descriptionLocalized:
+      typeof p.description === "string"
+        ? { ru: p.description }
+        : mapLocalized(p.description ?? { ru: "" }),
     imageUrl: p.imageUrl ?? null,
     categoryId: p.categoryId ?? null,
     category: p.category,
@@ -454,8 +460,12 @@ function serializeProductPatch(
   patch: Partial<Omit<Product, "id" | "companyId">>
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {};
-  if (patch.name !== undefined) body.name = patch.name;
-  if (patch.description !== undefined) body.description = patch.description;
+  if (patch.nameLocalized !== undefined)
+    body.name = serializeLocalized(patch.nameLocalized);
+  else if (patch.name !== undefined) body.name = patch.name;
+  if (patch.descriptionLocalized !== undefined)
+    body.description = serializeLocalized(patch.descriptionLocalized);
+  else if (patch.description !== undefined) body.description = patch.description;
   if (patch.imageUrl !== undefined) body.imageUrl = patch.imageUrl;
   if (patch.categoryId !== undefined && patch.categoryId !== null)
     body.categoryId = patch.categoryId;
@@ -495,10 +505,57 @@ export async function apiPatchConfig(
   companyId: string,
   patch: Partial<Omit<Company, "id">>
 ): Promise<Company> {
+  const background = patch.background
+    ? {
+        kind: patch.background.kind,
+        preset: patch.background.preset,
+        lightBase: patch.background.lightBase,
+        darkBase: patch.background.darkBase,
+        patternOpacity: patch.background.patternOpacity
+      }
+    : undefined;
   const config = await request<Company>(`/api/companies/${companyId}/config`, {
     method: "PATCH",
-    body: JSON.stringify(patch)
+    body: JSON.stringify({ ...patch, background })
   });
+  return { ...config, id: companyId };
+}
+
+async function uploadBrandImage(
+  companyId: string,
+  kind: "logo" | "background",
+  file: File
+): Promise<Company> {
+  const form = new FormData();
+  form.append("file", file);
+  const config = await request<Company>(
+    `/api/companies/${companyId}/branding/${kind}`,
+    { method: "PUT", body: form }
+  );
+  return { ...config, id: companyId };
+}
+
+export function apiPutCompanyLogo(companyId: string, file: File) {
+  return uploadBrandImage(companyId, "logo", file);
+}
+
+export function apiPutCompanyBackground(companyId: string, file: File) {
+  return uploadBrandImage(companyId, "background", file);
+}
+
+export async function apiDeleteCompanyLogo(companyId: string): Promise<Company> {
+  const config = await request<Company>(
+    `/api/companies/${companyId}/branding/logo`,
+    { method: "DELETE" }
+  );
+  return { ...config, id: companyId };
+}
+
+export async function apiDeleteCompanyBackground(companyId: string): Promise<Company> {
+  const config = await request<Company>(
+    `/api/companies/${companyId}/branding/background`,
+    { method: "DELETE" }
+  );
   return { ...config, id: companyId };
 }
 
@@ -1187,6 +1244,8 @@ interface ApiPromotion {
   description: ApiLocalized;
   code: string | null;
   accentColor: string;
+  imageUrl?: string | null;
+  thumbnailUrl?: string | null;
 }
 
 function mapPromotion(companyId: string, p: ApiPromotion): Promotion {
@@ -1198,7 +1257,9 @@ function mapPromotion(companyId: string, p: ApiPromotion): Promotion {
     title: mapLocalized(p.title),
     description: mapLocalized(p.description),
     code: p.code ?? null,
-    accentColor: p.accentColor
+    accentColor: p.accentColor,
+    imageUrl: p.imageUrl ?? null,
+    thumbnailUrl: p.thumbnailUrl ?? null
   };
 }
 
@@ -1253,4 +1314,29 @@ export async function apiDeletePromotion(
   promotionId: string
 ): Promise<void> {
   await requestVoid(`/api/companies/${companyId}/promotions/${promotionId}`);
+}
+
+export async function apiPutPromotionImage(
+  companyId: string,
+  promotionId: string,
+  file: File
+): Promise<Promotion> {
+  const form = new FormData();
+  form.set("file", file, file.name);
+  const updated = await request<ApiPromotion>(
+    `/api/companies/${companyId}/promotions/${encodeURIComponent(promotionId)}/image`,
+    { method: "PUT", body: form }
+  );
+  return mapPromotion(companyId, updated);
+}
+
+export async function apiDeletePromotionImage(
+  companyId: string,
+  promotionId: string
+): Promise<Promotion> {
+  const updated = await request<ApiPromotion>(
+    `/api/companies/${companyId}/promotions/${encodeURIComponent(promotionId)}/image`,
+    { method: "DELETE" }
+  );
+  return mapPromotion(companyId, updated);
 }

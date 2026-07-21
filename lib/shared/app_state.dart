@@ -8,16 +8,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/api_client.dart';
 import '../core/auth_store.dart';
 import '../core/cart_store.dart';
+import '../core/branding_store.dart';
 import '../core/google_identity.dart';
 import '../core/order_history_store.dart';
+import '../core/story_view_store.dart';
 import '../core/theme/app_theme.dart';
 import 'app_models.dart';
 import 'demo_data.dart';
 
+final initialBrandingProvider = Provider<CompanyConfig?>((ref) => null);
+
 final appStateProvider = StateNotifierProvider<AppStateController, AppState>((
   ref,
 ) {
-  return AppStateController();
+  return AppStateController(
+    initialBranding: ref.watch(initialBrandingProvider),
+  );
 });
 
 /// Разрешённые точки возврата после входа.
@@ -69,6 +75,8 @@ abstract interface class LanguagePreferenceStore {
   Future<void> writeLanguageCode(String code);
   Future<String?> readThemeMode();
   Future<void> writeThemeMode(String value);
+  Future<String?> readBackgroundOverride();
+  Future<void> writeBackgroundOverride(String? value);
 }
 
 class SharedPreferencesLanguagePreferenceStore
@@ -93,6 +101,20 @@ class SharedPreferencesLanguagePreferenceStore
   @override
   Future<void> writeThemeMode(String value) =>
       _instance.setString(AppStateController.themePreferenceKey, value);
+
+  @override
+  Future<String?> readBackgroundOverride() =>
+      _instance.getString(AppStateController.backgroundOverridePreferenceKey);
+
+  @override
+  Future<void> writeBackgroundOverride(String? value) async {
+    final key = AppStateController.backgroundOverridePreferenceKey;
+    if (value == null) {
+      await _instance.remove(key);
+    } else {
+      await _instance.setString(key, value);
+    }
+  }
 }
 
 @immutable
@@ -102,6 +124,10 @@ class AppState {
     required this.catalogAuthoritative,
     required this.appName,
     required this.accentColor,
+    required this.logoUrl,
+    required this.logoThumbnailUrl,
+    required this.backgroundTheme,
+    this.backgroundOverride,
     required this.loyaltyEarnRate,
     required this.loyaltyMaxSpendShare,
     required this.themeMode,
@@ -126,6 +152,7 @@ class AppState {
     required this.newsStories,
     required this.storyCollections,
     required this.newsPosts,
+    required this.viewedStoryIds,
     required this.favoriteIds,
     required this.cart,
     required this.useBonus,
@@ -148,6 +175,18 @@ class AppState {
   /// Брендинг компании из API (или дефолт SweetTime, если офлайн).
   final String appName;
   final Color accentColor;
+  final String? logoUrl;
+  final String? logoThumbnailUrl;
+
+  /// Фон компании из админки (сервер) — общий для всех клиентов.
+  final BrandBackgroundTheme backgroundTheme;
+
+  /// Локальный выбор фона юзером — перекрывает серверный (как тема/язык):
+  /// `null` — «как в приложении» (следует за админкой, меняется вместе с ней);
+  /// `'off'` — фон выключен совсем (только базовая заливка);
+  /// `'plain'|'bubbles'|'coffee'` — свой узор.
+  /// Если юзер выбрал своё или выключил, смена фона в админке его не трогает.
+  final String? backgroundOverride;
 
   /// Правила лояльности: дефолты из [Loyalty], могут прийти из конфига API.
   final double loyaltyEarnRate;
@@ -184,6 +223,7 @@ class AppState {
   final List<NewsStory> newsStories;
   final List<StoryCollection> storyCollections;
   final List<NewsPost> newsPosts;
+  final Set<String> viewedStoryIds;
   final List<String> favoriteIds;
   final List<CartItem> cart;
   final bool useBonus;
@@ -232,6 +272,11 @@ class AppState {
     bool? catalogAuthoritative,
     String? appName,
     Color? accentColor,
+    String? logoUrl,
+    String? logoThumbnailUrl,
+    BrandBackgroundTheme? backgroundTheme,
+    String? backgroundOverride,
+    bool clearBackgroundOverride = false,
     double? loyaltyEarnRate,
     double? loyaltyMaxSpendShare,
     ThemeMode? themeMode,
@@ -245,6 +290,7 @@ class AppState {
     String? avatarUrl,
     String? userContact,
     bool? phoneVerified,
+    String? userCode,
     String? invitedByCode,
     int? points,
     List<Branch>? branches,
@@ -255,6 +301,7 @@ class AppState {
     List<NewsStory>? newsStories,
     List<StoryCollection>? storyCollections,
     List<NewsPost>? newsPosts,
+    Set<String>? viewedStoryIds,
     List<String>? favoriteIds,
     List<CartItem>? cart,
     bool? useBonus,
@@ -271,12 +318,21 @@ class AppState {
     bool clearPendingAuthReturn = false,
     bool clearRecurring = false,
     bool clearPromoCode = false,
+    bool clearLogo = false,
   }) {
     return AppState(
       apiConnected: apiConnected ?? this.apiConnected,
       catalogAuthoritative: catalogAuthoritative ?? this.catalogAuthoritative,
       appName: appName ?? this.appName,
       accentColor: accentColor ?? this.accentColor,
+      logoUrl: clearLogo ? null : (logoUrl ?? this.logoUrl),
+      logoThumbnailUrl: clearLogo
+          ? null
+          : (logoThumbnailUrl ?? this.logoThumbnailUrl),
+      backgroundTheme: backgroundTheme ?? this.backgroundTheme,
+      backgroundOverride: clearBackgroundOverride
+          ? null
+          : (backgroundOverride ?? this.backgroundOverride),
       loyaltyEarnRate: loyaltyEarnRate ?? this.loyaltyEarnRate,
       loyaltyMaxSpendShare: loyaltyMaxSpendShare ?? this.loyaltyMaxSpendShare,
       themeMode: themeMode ?? this.themeMode,
@@ -292,7 +348,7 @@ class AppState {
       avatarUrl: clearAvatarUrl ? null : (avatarUrl ?? this.avatarUrl),
       userContact: userContact ?? this.userContact,
       phoneVerified: phoneVerified ?? this.phoneVerified,
-      userCode: userCode,
+      userCode: userCode ?? this.userCode,
       invitedByCode: clearInvitedByCode
           ? null
           : (invitedByCode ?? this.invitedByCode),
@@ -305,6 +361,7 @@ class AppState {
       newsStories: newsStories ?? this.newsStories,
       storyCollections: storyCollections ?? this.storyCollections,
       newsPosts: newsPosts ?? this.newsPosts,
+      viewedStoryIds: viewedStoryIds ?? this.viewedStoryIds,
       favoriteIds: favoriteIds ?? this.favoriteIds,
       cart: cart ?? this.cart,
       useBonus: useBonus ?? this.useBonus,
@@ -324,8 +381,11 @@ class AppStateController extends StateNotifier<AppState> {
     AuthStore? authStore,
     CartStore? cartStore,
     OrderHistoryVisibilityStore? orderHistoryVisibilityStore,
+    StoryViewStore? storyViewStore,
     ApiClient? api,
     GoogleIdentityProvider? googleIdentity,
+    CompanyConfig? initialBranding,
+    BrandingStore? brandingStore,
   }) : _languagePreferences =
            languagePreferences ?? SharedPreferencesLanguagePreferenceStore(),
        _authStore = authStore ?? SecureAuthStore(),
@@ -337,14 +397,28 @@ class AppStateController extends StateNotifier<AppState> {
            SharedPreferencesOrderHistoryVisibilityStore(
              companyId: api?.companyId ?? 'sweettime',
            ),
+       _storyViewStore =
+           storyViewStore ??
+           SharedPreferencesStoryViewStore(
+             companyId: api?.companyId ?? 'sweettime',
+           ),
        _api = api ?? ApiClient(),
        _googleIdentity = googleIdentity ?? PluginGoogleIdentityProvider(),
+       _brandingStore =
+           brandingStore ??
+           SharedPreferencesBrandingStore(
+             companyId: api?.companyId ?? 'sweettime',
+           ),
        super(
          AppState(
            apiConnected: false,
            catalogAuthoritative: false,
-           appName: 'SweetTime',
-           accentColor: AppColors.candy500,
+           appName: initialBranding?.appName ?? 'SweetTime',
+           accentColor: initialBranding?.accentColor ?? AppColors.candy500,
+           logoUrl: initialBranding?.logoUrl,
+           logoThumbnailUrl: initialBranding?.logoThumbnailUrl,
+           backgroundTheme:
+               initialBranding?.backgroundTheme ?? const BrandBackgroundTheme(),
            loyaltyEarnRate: Loyalty.earnRate,
            loyaltyMaxSpendShare: Loyalty.maxSpendShare,
            themeMode: ThemeMode.light,
@@ -369,6 +443,7 @@ class AppStateController extends StateNotifier<AppState> {
            newsStories: DemoData.newsStories,
            storyCollections: DemoData.storyCollections,
            newsPosts: DemoData.newsPosts,
+           viewedStoryIds: const {},
            favoriteIds: DemoData.favoriteIds,
            cart: const [],
            useBonus: false,
@@ -386,11 +461,14 @@ class AppStateController extends StateNotifier<AppState> {
   final LanguagePreferenceStore _languagePreferences;
   final CartStore _cartStore;
   final OrderHistoryVisibilityStore _orderHistoryVisibilityStore;
+  final StoryViewStore _storyViewStore;
+  final BrandingStore _brandingStore;
 
   /// Токены сессии на устройстве: вход переживает перезапуск приложения.
   final AuthStore _authStore;
   static const languagePreferenceKey = 'app_language';
   static const themePreferenceKey = 'app_theme_mode';
+  static const backgroundOverridePreferenceKey = 'app_background_override';
   bool _bootstrapped = false;
   int _accountEpoch = 0;
   bool _authInProgress = false;
@@ -419,6 +497,7 @@ class AppStateController extends StateNotifier<AppState> {
     final cartRevision = _cartRevision;
     final cartDraftFuture = _readCartDraft();
     final hiddenOrderIdsFuture = _readHiddenOrderIds();
+    final viewedStoryIdsFuture = _readViewedStoryIds();
     try {
       final savedLanguage = await _languagePreferences.readLanguageCode();
       final language = AppLanguage.values.where(
@@ -434,13 +513,24 @@ class AppStateController extends StateNotifier<AppState> {
           themeMode: savedTheme == 'dark' ? ThemeMode.dark : ThemeMode.light,
         );
       }
+      // Личный выбор фона (перекрывает админский). Отсутствие ключа = «как в
+      // приложении», поэтому смена фона в админке подхватится автоматически.
+      final savedBackground = await _languagePreferences
+          .readBackgroundOverride();
+      if (savedBackground != null && savedBackground.isNotEmpty) {
+        state = state.copyWith(backgroundOverride: savedBackground);
+      }
     } catch (_) {
-      // Настройки языка/темы не должны блокировать автономный запуск приложения.
+      // Настройки языка/темы/фона не должны блокировать автономный запуск.
     }
     await refreshCompanyData(force: true);
     await _restoreCart(cartDraftFuture, cartRevision);
     final hiddenOrderIds = await hiddenOrderIdsFuture;
-    state = state.copyWith(hiddenOrderIds: hiddenOrderIds);
+    final viewedStoryIds = await viewedStoryIdsFuture;
+    state = state.copyWith(
+      hiddenOrderIds: hiddenOrderIds,
+      viewedStoryIds: viewedStoryIds,
+    );
     await _restoreSession();
   }
 
@@ -449,6 +539,28 @@ class AppStateController extends StateNotifier<AppState> {
       return await _orderHistoryVisibilityStore.readHiddenOrderIds();
     } catch (_) {
       return const {};
+    }
+  }
+
+  Future<Set<String>> _readViewedStoryIds() async {
+    try {
+      return await _storyViewStore.readViewedStoryIds();
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// Records a story as viewed as soon as it becomes the active full-screen
+  /// story. The ring is device-local UI state and does not require a login.
+  Future<void> markStoryViewed(String storyId) async {
+    final normalized = storyId.trim();
+    if (normalized.isEmpty || state.viewedStoryIds.contains(normalized)) return;
+    final viewed = Set<String>.of(state.viewedStoryIds)..add(normalized);
+    state = state.copyWith(viewedStoryIds: Set.unmodifiable(viewed));
+    try {
+      await _storyViewStore.writeViewedStoryIds(viewed);
+    } catch (_) {
+      // A preferences failure must not interrupt story playback.
     }
   }
 
@@ -596,6 +708,10 @@ class AppStateController extends StateNotifier<AppState> {
         catalogAuthoritative: catalogAuthoritative,
         appName: config.appName,
         accentColor: config.accentColor,
+        logoUrl: config.logoUrl,
+        logoThumbnailUrl: config.logoThumbnailUrl,
+        backgroundTheme: config.backgroundTheme,
+        clearLogo: config.logoUrl == null && config.logoThumbnailUrl == null,
         loyaltyEarnRate: config.earnRate,
         loyaltyMaxSpendShare: config.maxSpendShare,
         products: nextProducts,
@@ -615,6 +731,11 @@ class AppStateController extends StateNotifier<AppState> {
         promotions: nextPromotions,
         clearPromoCode: !promoStillActive,
       );
+      try {
+        await _brandingStore.write(config);
+      } catch (_) {
+        // A failed cache write must never turn a successful refresh into an error.
+      }
       return true;
     } catch (_) {
       // Любая неожиданная ошибка не должна ронять запуск приложения.
@@ -757,6 +878,12 @@ class AppStateController extends StateNotifier<AppState> {
       points: profile.points,
       avatarUrl: profile.avatarUrl,
       clearAvatarUrl: profile.avatarUrl == null,
+      // Own invite code is server-issued and permanent (see auth.py
+      // _new_referral_code); it must never fall back to the shared demo
+      // placeholder once a real profile has loaded.
+      userCode: (profile.referralCode?.isNotEmpty ?? false)
+          ? profile.referralCode
+          : null,
     );
   }
 
@@ -1049,6 +1176,25 @@ class AppStateController extends StateNotifier<AppState> {
       );
     } catch (_) {
       // UI уже переключён; ошибка локального хранилища не должна ломать приложение.
+    }
+  }
+
+  /// Личный выбор фона. `null` — «как в приложении» (следовать за админкой);
+  /// `'off'` — выключить; `'plain'|'bubbles'|'coffee'` — свой узор.
+  void setBackgroundOverride(String? value) {
+    if (state.backgroundOverride == value) return;
+    state = state.copyWith(
+      backgroundOverride: value,
+      clearBackgroundOverride: value == null,
+    );
+    unawaited(_persistBackgroundOverride(value));
+  }
+
+  Future<void> _persistBackgroundOverride(String? value) async {
+    try {
+      await _languagePreferences.writeBackgroundOverride(value);
+    } catch (_) {
+      // Выбор уже применён в UI; ошибка хранилища не критична.
     }
   }
 
@@ -1441,6 +1587,69 @@ class AppStateController extends StateNotifier<AppState> {
       total: currentProduct.basePrice + (size?.priceDelta ?? 0) + toppingPrice,
     );
     state = state.copyWith(cart: [...state.cart, item]);
+    _cartRevision++;
+    await _queueCartPersist();
+    return true;
+  }
+
+  /// Replaces exactly one cart row while preserving its quantity.
+  ///
+  /// The index and product ID are both checked because two independently
+  /// configured rows may contain the same product. Editing must never merge
+  /// them or append a duplicate.
+  Future<bool> replaceConfiguredAt(
+    int index,
+    Product product, {
+    required String? sizeId,
+    required int sugarPercent,
+    required IceLevel ice,
+    required List<String> toppingIds,
+  }) async {
+    if (index < 0 || index >= state.cart.length) return false;
+    final original = state.cart[index];
+    final currentProduct = state.products
+        .where((candidate) => candidate.id == product.id)
+        .firstOrNull;
+    if (currentProduct == null ||
+        original.product.id != currentProduct.id ||
+        !currentProduct.availableIn(state.selectedBranch) ||
+        !DemoData.sugarLevels.contains(sugarPercent) ||
+        toppingIds.length != toppingIds.toSet().length) {
+      return false;
+    }
+
+    final size = currentProduct.sizes.isEmpty
+        ? null
+        : currentProduct.sizes
+              .where((candidate) => candidate.id == sizeId)
+              .firstOrNull;
+    if ((currentProduct.sizes.isEmpty && sizeId != null) ||
+        (currentProduct.sizes.isNotEmpty && size == null)) {
+      return false;
+    }
+
+    var toppingPrice = 0;
+    for (final toppingId in toppingIds) {
+      final topping = currentProduct.toppings
+          .where((candidate) => candidate.id == toppingId)
+          .firstOrNull;
+      if (topping == null) return false;
+      toppingPrice += topping.priceDelta;
+    }
+
+    final unitPrice =
+        currentProduct.basePrice + (size?.priceDelta ?? 0) + toppingPrice;
+    final cart = [...state.cart];
+    cart[index] = CartItem(
+      product: currentProduct,
+      quantity: original.quantity,
+      sizeId: size?.id,
+      sugarPercent: sugarPercent,
+      ice: ice,
+      toppingIds: List.unmodifiable(toppingIds),
+      total: unitPrice * original.quantity,
+    );
+    state = state.copyWith(cart: cart);
     _cartRevision++;
     await _queueCartPersist();
     return true;

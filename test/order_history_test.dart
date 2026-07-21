@@ -243,6 +243,12 @@ class _MemoryPreferences implements LanguagePreferenceStore {
 
   @override
   Future<void> writeThemeMode(String value) async {}
+
+  @override
+  Future<String?> readBackgroundOverride() async => null;
+
+  @override
+  Future<void> writeBackgroundOverride(String? value) async {}
 }
 
 class _MemoryAuthStore implements AuthStore {

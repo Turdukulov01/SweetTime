@@ -11,9 +11,10 @@ import '../../shared/widgets/drink_art.dart';
 import '../../shared/widgets/top_notice.dart';
 
 class ProductPage extends ConsumerStatefulWidget {
-  const ProductPage({super.key, required this.productId});
+  const ProductPage({super.key, required this.productId, this.editCartIndex});
 
   final String productId;
+  final int? editCartIndex;
 
   @override
   ConsumerState<ProductPage> createState() => _ProductPageState();
@@ -24,13 +25,24 @@ class _ProductPageState extends ConsumerState<ProductPage> {
   int _sugarPercent = 50;
   IceLevel _ice = IceLevel.regular;
   final Set<String> _toppingIds = {};
-  String? _configuredProductId;
+  String? _configuredSelectionKey;
 
-  void _syncSelections(Product product) {
-    final isNewProduct = _configuredProductId != product.id;
-    _configuredProductId = product.id;
+  void _syncSelections(Product product, CartItem? editingItem) {
+    final selectionKey = '${product.id}:${widget.editCartIndex ?? 'new'}';
+    final isNewConfiguration = _configuredSelectionKey != selectionKey;
+    _configuredSelectionKey = selectionKey;
 
-    if (isNewProduct || !product.sizes.any((size) => size.id == _sizeId)) {
+    if (isNewConfiguration && editingItem != null) {
+      _sizeId = editingItem.sizeId;
+      _sugarPercent = editingItem.sugarPercent;
+      _ice = editingItem.ice;
+      _toppingIds
+        ..clear()
+        ..addAll(editingItem.toppingIds);
+    }
+
+    if (isNewConfiguration && editingItem == null ||
+        !product.sizes.any((size) => size.id == _sizeId)) {
       if (product.sizes.isEmpty) {
         _sizeId = null;
       } else {
@@ -43,7 +55,7 @@ class _ProductPageState extends ConsumerState<ProductPage> {
     final availableToppingIds = product.toppings
         .map((topping) => topping.id)
         .toSet();
-    if (isNewProduct) {
+    if (isNewConfiguration && editingItem == null) {
       // Paid extras must always be an explicit customer choice. Previously
       // tapioca was selected automatically and silently increased the price
       // as soon as the product page opened.
@@ -67,8 +79,17 @@ class _ProductPageState extends ConsumerState<ProductPage> {
             .clamp(1, 1024)
             .toInt();
     final product = state.products.firstWhere((p) => p.id == widget.productId);
+    final editIndex = widget.editCartIndex;
+    final editingItem =
+        editIndex != null &&
+            editIndex >= 0 &&
+            editIndex < state.cart.length &&
+            state.cart[editIndex].product.id == product.id
+        ? state.cart[editIndex]
+        : null;
+    final isEditing = editingItem != null;
     final isFavorite = state.favoriteIds.contains(product.id);
-    _syncSelections(product);
+    _syncSelections(product, editingItem);
 
     final available = product.availableIn(state.selectedBranch);
     final selectedSize = product.sizes.isEmpty
@@ -80,6 +101,7 @@ class _ProductPageState extends ConsumerState<ProductPage> {
         .fold(0, (sum, t) => sum + t.priceDelta);
     final total = product.basePrice + sizeDelta + toppingsDelta;
     final canAdd = available && (product.sizes.isEmpty || selectedSize != null);
+    final actionTotal = total * (editingItem?.quantity ?? 1);
 
     return Scaffold(
       appBar: AppBar(
@@ -231,14 +253,27 @@ class _ProductPageState extends ConsumerState<ProductPage> {
           child: FilledButton(
             onPressed: canAdd
                 ? () async {
-                    final added = await controller.addConfigured(
-                      product,
-                      sizeId: selectedSize?.id,
-                      sugarPercent: _sugarPercent,
-                      ice: _ice,
-                      toppingIds: _toppingIds.toList(),
-                    );
-                    if (!context.mounted || !added) return;
+                    final saved = isEditing
+                        ? await controller.replaceConfiguredAt(
+                            editIndex!,
+                            product,
+                            sizeId: selectedSize?.id,
+                            sugarPercent: _sugarPercent,
+                            ice: _ice,
+                            toppingIds: _toppingIds.toList(),
+                          )
+                        : await controller.addConfigured(
+                            product,
+                            sizeId: selectedSize?.id,
+                            sugarPercent: _sugarPercent,
+                            ice: _ice,
+                            toppingIds: _toppingIds.toList(),
+                          );
+                    if (!context.mounted || !saved) return;
+                    if (isEditing) {
+                      context.canPop() ? context.pop() : context.go('/cart');
+                      return;
+                    }
                     showTopNotice(
                       context,
                       message: strings.productAdded(
@@ -251,8 +286,14 @@ class _ProductPageState extends ConsumerState<ProductPage> {
                   }
                 : null,
             child: Text(
-              available && selectedSize != null
-                  ? strings.addToCartWithPrice(formatSom(total, language))
+              canAdd
+                  ? isEditing
+                        ? strings.saveCartChangesWithPrice(
+                            formatSom(actionTotal, language),
+                          )
+                        : strings.addToCartWithPrice(
+                            formatSom(actionTotal, language),
+                          )
                   : strings.productUnavailableAction,
             ),
           ),

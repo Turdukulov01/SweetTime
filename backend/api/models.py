@@ -41,6 +41,20 @@ class Company(Base):
     name: Mapped[str]
     app_name: Mapped[str]
     accent_color: Mapped[str]
+    logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    logo_thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    background: Mapped[dict] = mapped_column(
+        JSON,
+        default=lambda: {
+            "kind": "plain",
+            "preset": "none",
+            "lightBase": "#FFFAF0",
+            "darkBase": "#161215",
+            "patternOpacity": 0.12,
+            "imageUrl": None,
+            "thumbnailUrl": None,
+        },
+    )
     currency: Mapped[str]
     # {"earnRate": 0.05, "maxSpendShare": 0.3, "expiryMonths": 12}
     loyalty: Mapped[dict] = mapped_column(JSON)

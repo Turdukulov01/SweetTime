@@ -37,10 +37,23 @@ export interface Company {
   appName: string;
   /** Акцентный цвет бренда, HEX (#RRGGBB) */
   accentColor: string;
+  logoUrl: string | null;
+  logoThumbnailUrl: string | null;
+  background: BackgroundTheme;
   /** Код валюты для отображения, например "сом" */
   currency: string;
   loyalty: LoyaltyConfig;
   referral: ReferralConfig;
+}
+
+export interface BackgroundTheme {
+  kind: "plain" | "pattern" | "image";
+  preset: "none" | "bubbles" | "doodles" | "coffee";
+  lightBase: string;
+  darkBase: string;
+  patternOpacity: number;
+  imageUrl: string | null;
+  thumbnailUrl: string | null;
 }
 
 export interface AdminUser {
@@ -78,8 +91,11 @@ export interface Product {
   id: string;
   companyId: string;
   name: string;
+  /** Full storefront translations. Legacy records may contain only RU. */
+  nameLocalized?: LocalizedText;
   /** Описание товара, которое возвращает и принимает product API. */
   description: string;
+  descriptionLocalized?: LocalizedText;
   /** Серверный URL фото или null; произвольный локальный файл здесь не хранится. */
   imageUrl: string | null;
   categoryId?: string | null;
@@ -216,6 +232,8 @@ export interface Promotion {
   code: string | null;
   /** Акцентный цвет карточки, HEX (#RRGGBB) */
   accentColor: string;
+  imageUrl: string | null;
+  thumbnailUrl: string | null;
 }
 
 export type RecurringPlan = "week" | "month";
