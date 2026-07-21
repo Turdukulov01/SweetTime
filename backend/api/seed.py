@@ -25,6 +25,7 @@ from .models import (
     Order,
     Product,
     Promotion,
+    RecurringOrder,
     StoryCollection,
 )
 from .security import hash_password
@@ -1215,3 +1216,118 @@ def bootstrap_production_sweettime(
     except Exception:
         db.rollback()
         raise
+
+
+def bootstrap_production_demo_company(
+    db: Session,
+    *,
+    owner_email: str,
+    owner_name: str,
+    owner_password: str,
+) -> bool:
+    """Add the isolated CoffeeGo showcase tenant beside production SweetTime.
+
+    The operation is one transaction and never updates SweetTime rows. Re-running
+    it is a safe no-op once CoffeeGo exists. A strong, operator-supplied owner
+    password is required; the well-known development password is never used.
+
+    Returns ``True`` when CoffeeGo was created and ``False`` when it already
+    existed.
+    """
+
+    email, name, password = _validate_bootstrap_input(
+        owner_email, owner_name, owner_password
+    )
+    if db.get(Company, "sweettime") is None:
+        raise ProductionBootstrapError(
+            "Demo bootstrap refused: production SweetTime company is missing"
+        )
+    if db.get(Company, "coffeego") is not None:
+        return False
+    if db.scalar(select(AdminUser.id).where(AdminUser.email == email)) is not None:
+        raise ProductionBootstrapError(
+            "Demo bootstrap refused: owner email already exists"
+        )
+
+    company = _fresh_rows([_COMPANIES[1]], Company)[0]
+    # These branding fields were added after the original demo fixtures.
+    company.logo_url = None
+    company.logo_thumbnail_url = None
+    company.background = {
+        "kind": "plain",
+        "preset": "none",
+        "lightBase": "#FFF9F2",
+        "darkBase": "#171310",
+        "patternOpacity": 0.12,
+        "imageUrl": None,
+        "thumbnailUrl": None,
+    }
+    branches = _fresh_rows(_COFFEEGO_BRANCHES, Branch)
+    products = _fresh_rows(_COFFEEGO_PRODUCTS, Product)
+    collections = _fresh_rows([_STORY_COLLECTIONS[1]], StoryCollection)
+    news = _fresh_rows(_COFFEEGO_NEWS, News)
+    promotions = _fresh_rows(_COFFEEGO_PROMOTIONS, Promotion)
+    customer = Customer(
+        id="c-cg-eldar",
+        company_id="coffeego",
+        phone="+996700000001",
+        phone_verified_at=None,
+        name="Эльдар",
+        first_name="Эльдар",
+        last_name="Демо",
+        birth_date=None,
+        points=860,
+        referral_code="COFFEE-DEMO01",
+        invited_by_code=None,
+        inviter_rewarded=False,
+        favorite_product_ids=["cg-p3", "cg-p4", "cg-p7"],
+        avatar_storage_key=None,
+    )
+    orders = [
+        *_build_history(
+            "coffeego", "CG", _COFFEEGO_HISTORY_START, _COFFEEGO_HISTORY
+        ),
+        *_build_orders("coffeego", _COFFEEGO_ORDERS),
+    ]
+    _link_demo_customer_orders(orders, customer)
+    recurring = RecurringOrder(
+        id="recurring-cg-eldar",
+        company_id="coffeego",
+        customer_id=customer.id,
+        product_ids=["cg-p3", "cg-p7"],
+        time="09:30",
+        branch_id="cg-b1",
+        plan="month",
+        paid_until=datetime.now(timezone.utc) + timedelta(days=30),
+        active=True,
+    )
+
+    try:
+        db.add(company)
+        db.flush()
+        db.add_all(branches)
+        db.flush()
+        db.add(
+            AdminUser(
+                id="u-cg-owner",
+                company_id="coffeego",
+                email=email,
+                hashed_password=hash_password(password),
+                name=name,
+                role="owner",
+                branch_id=None,
+            )
+        )
+        db.add(customer)
+        db.add_all(products)
+        db.add_all(collections)
+        db.flush()
+        db.add_all(news)
+        db.add_all(promotions)
+        db.add_all(orders)
+        db.add(recurring)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return True

@@ -1467,3 +1467,31 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
 - Добавлены callback `NewsMediaView.onVideoAspectRatio`, параметр `controlsBottomInset`, widget regression
   раскрытия caption и unit regression расчёта высоты. Flutter: 84/84 tests, analyze clean, release APK собрана.
   Установка не завершилась только потому, что Redmi отключился от ADB сразу после сборки; APK готова локально.
+## 2026-07-21 — Claude handoff `56fd1c1`: проверка перед production rollout
+
+- Прочитан handoff Claude: реальное погашение referral-кода, движение баланса баллов и
+  миграция `c19f6b4a8e21` поверх `b84c1a7e2d90`.
+- Локальная приёмка: backend `83 passed`, Flutter `84 passed`, `flutter analyze` — без
+  замечаний; Alembic имеет единственный head `c19f6b4a8e21`; рабочее дерево чистое.
+- У локального репозитория нет настроенного Git remote, поэтому публикация выполняется
+  проверенным production-архивом на `/srv/projects/sweetime`, а не `git push`.
+- Production rollout обязан идти в порядке: verified backup -> extract с сохранением `.env`
+  -> build -> `alembic upgrade head` при работающем старом backend -> recreate backend/nginx
+  -> smoke-check. Старый backend нельзя останавливать до успешной миграции.
+- Отдельная demo-компания пока не создана. Нельзя повторно запускать
+  `bootstrap_production_sweettime`: он корректно откажется при существующей SweetTime.
+  Нужен отдельный tenant-safe идемпотентный bootstrap CoffeeGo; он не должен изменять
+  `sweettime` и не должен использовать известный пароль `demo`.
+
+### Demo tenant implementation
+
+- Добавлен `bootstrap_production_demo_company` и CLI `python -m api.bootstrap_demo` с
+  production overlay `docker-compose.demo-bootstrap.yml`. Пароль владельца читается только
+  из mode-600 файла вне репозитория.
+- Bootstrap одной транзакцией добавляет CoffeeGo: 2 филиала, 7 товаров, stories/promotions,
+  25 заказов, отдельного клиента с 860 баллами/избранным/историей и активный постоянный заказ.
+- Повторный запуск — безопасный no-op; существующий email владельца отклоняется; отсутствие
+  боевой SweetTime также приводит к отказу.
+- Regression доказывает неизменность количества Branch/Product/News/Promotion/Customer/Order
+  для `sweettime`, полноту CoffeeGo и отсутствие дублей после повторного запуска. Полный backend:
+  `84 passed`; compose overlay проходит `config --quiet`.

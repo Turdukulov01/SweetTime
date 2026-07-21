@@ -1,0 +1,22 @@
+services:
+  demo-bootstrap:
+    image: sweettime-backend:${SWEETIME_IMAGE_TAG:-local}
+    pull_policy: never
+    restart: "no"
+    user: "${SWEETIME_UID:-1000}:${SWEETIME_GID:-1000}"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set an URL-encoded DATABASE_URL in deploy/production/.env}
+      ENVIRONMENT: production
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in deploy/production/.env}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set HTTPS CORS_ORIGINS in deploy/production/.env}
+      OTP_MODE: disabled
+      SEED_MODE: none
+      DEMO_OWNER_EMAIL: ${DEMO_OWNER_EMAIL:?Set the demo owner email}
+      DEMO_OWNER_NAME: ${DEMO_OWNER_NAME:?Set the demo owner name}
+      DEMO_OWNER_PASSWORD_FILE: /run/secrets/demo_owner_password
+    volumes:
+      - ${DEMO_OWNER_PASSWORD_FILE:?Set an absolute host path to the demo owner password file}:/run/secrets/demo_owner_password:ro
+    command: ["python", "-m", "api.bootstrap_demo"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
