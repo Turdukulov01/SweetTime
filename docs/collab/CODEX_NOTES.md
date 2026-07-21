@@ -1511,3 +1511,17 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
   `51:DC:A2:E5:1D:37:6E:BB:B1:B7:E8:A8:A8:77:8A:2D:D4:92:16:54`; APK SHA-256
   `ec3e08905dc24bcc5ba55b0567672bcd96990e39263e8e365699a0dc89bb0d3f`. Установка
   `adb install -r` прошла успешно без удаления данных, приложение запущено на устройстве.
+
+### Critical APK configuration hotfix
+
+- После установки владелец не смог войти и приложение не получало admin-config. Причина доказана:
+  финальная APK была собрана generic-командой без `--dart-define=API_BASE=...`, а старый default
+  указывал на `http://127.0.0.1:8010` — localhost самого телефона. Google account chooser при этом
+  успешно открывался, но backend login/config были недоступны.
+- `api_client.dart` теперь fail-safe по режиму: release без override использует
+  `https://lnp-corporation.duckdns.org`, debug без override сохраняет локальный `127.0.0.1:8010`;
+  явный `API_BASE` по-прежнему поддерживается. Добавлены 3 regression-теста resolver.
+- Flutter `87/87`, analyze clean. Новая APK собрана также с явными production API и Google Web
+  audience; production hostname найден внутри release `libapp.so`, телефон напрямую получает
+  `/ready` = 200, release SHA-1 сохранён, `adb install -r` = Success. APK SHA-256:
+  `247da42678fce132773bb8d386bb739a85f208c60ca5a8203d5d3d3d03dfd411`.

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
@@ -8,13 +9,24 @@ import 'package:http_parser/http_parser.dart';
 import '../shared/app_models.dart';
 import '../shared/demo_data.dart';
 
+const String productionApiBase = 'https://lnp-corporation.duckdns.org';
+const String localApiBase = 'http://127.0.0.1:8010';
+
+/// Resolve the API origin without allowing a generic release build to silently
+/// point at localhost on the customer's phone.
+String resolveApiBase({required String configured, required bool releaseMode}) {
+  final override = configured.trim();
+  if (override.isNotEmpty) return override;
+  return releaseMode ? productionApiBase : localApiBase;
+}
+
 /// Базовый URL API. Для локальной разработки backend обычно слушает порт 8010;
-/// production-сборка должна явно указывать HTTPS-домен:
+/// production без dart-define безопасно использует HTTPS. Явное переопределение:
 /// `flutter build apk --dart-define=API_BASE=http://10.0.2.2:8010` (эмулятор) или
 /// `--dart-define=API_BASE=https://lnp-corporation.duckdns.org` (телефон/релиз).
-const String apiBase = String.fromEnvironment(
-  'API_BASE',
-  defaultValue: 'http://127.0.0.1:8010',
+final String apiBase = resolveApiBase(
+  configured: const String.fromEnvironment('API_BASE'),
+  releaseMode: kReleaseMode,
 );
 
 String? _resolvePublicUrl(dynamic raw) {
