@@ -137,10 +137,19 @@ class BrandBackgroundTheme {
 
 /// Ответ сервера на `POST /orders` — то, что показываем в диалоге успеха.
 class CreatedOrder {
-  const CreatedOrder({required this.number, required this.pointsEarned});
+  const CreatedOrder({
+    required this.number,
+    required this.pointsEarned,
+    this.historyEntry,
+  });
 
   final String number;
   final int pointsEarned;
+
+  /// The same committed server snapshot returned by POST /orders.
+  /// Keeping it lets the UI show the order immediately, without depending on
+  /// a second network round trip to the history endpoint.
+  final OrderHistoryEntry? historyEntry;
 }
 
 /// Чем закончился запрос к auth-API.
@@ -1368,6 +1377,7 @@ class ApiClient {
         CreatedOrder(
           number: number.toString(),
           pointsEarned: (json['pointsEarned'] as num?)?.toInt() ?? 0,
+          historyEntry: parseCustomerOrderHistoryEntry(json),
         ),
       );
     } catch (_) {

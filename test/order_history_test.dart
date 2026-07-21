@@ -15,9 +15,10 @@ import 'package:sweettime/shared/app_models.dart';
 import 'package:sweettime/shared/app_state.dart';
 
 void main() {
-  test('hidden order ids persist locally and survive sign-out', () async {
+  test('hidden order ids are cleared from memory on sign-out', () async {
     final visibilityStore = _MemoryOrderHistoryStore();
-    final controller = _controller(visibilityStore)..seedDemo(history: true);
+    final controller = _controller(visibilityStore)
+      ..seedDemo(auth: true, history: true);
     final hiddenId = controller.state.orders.first.id;
 
     await controller.hideOrdersOnDevice([hiddenId]);
@@ -28,15 +29,7 @@ void main() {
     expect(visibilityStore.ids, contains(hiddenId));
 
     controller.logout();
-    expect(controller.state.hiddenOrderIds, contains(hiddenId));
-
-    final restored = _controller(visibilityStore);
-    await restored.bootstrap();
-    restored.seedDemo(history: true);
-    expect(
-      restored.state.visibleOrders.map((order) => order.id),
-      isNot(contains(hiddenId)),
-    );
+    expect(controller.state.hiddenOrderIds, isEmpty);
   });
 
   test('account deletion clears locally hidden order ids', () async {
@@ -213,21 +206,24 @@ Future<void> _pump(
 }
 
 class _MemoryOrderHistoryStore implements OrderHistoryVisibilityStore {
-  Set<String> ids = {};
+  final Map<String, Set<String>> _idsByAccount = {};
   int clearCalls = 0;
 
+  Set<String> get ids => _idsByAccount.values.expand((ids) => ids).toSet();
+
   @override
-  Future<void> clear() async {
+  Future<void> clear(String accountId) async {
     clearCalls++;
-    ids.clear();
+    _idsByAccount.remove(accountId);
   }
 
   @override
-  Future<Set<String>> readHiddenOrderIds() async => Set.unmodifiable(ids);
+  Future<Set<String>> readHiddenOrderIds(String accountId) async =>
+      Set.unmodifiable(_idsByAccount[accountId] ?? const {});
 
   @override
-  Future<void> writeHiddenOrderIds(Set<String> ids) async {
-    this.ids = Set.of(ids);
+  Future<void> writeHiddenOrderIds(String accountId, Set<String> ids) async {
+    _idsByAccount[accountId] = Set.of(ids);
   }
 }
 

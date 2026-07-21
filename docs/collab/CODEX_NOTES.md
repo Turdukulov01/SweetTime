@@ -1525,3 +1525,27 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
   audience; production hostname найден внутри release `libapp.so`, телефон напрямую получает
   `/ready` = 200, release SHA-1 сохранён, `adb install -r` = Success. APK SHA-256:
   `247da42678fce132773bb8d386bb739a85f208c60ca5a8203d5d3d3d03dfd411`.
+
+## 2026-07-21 — CX-034: current admin preview and customer history hydration
+
+- Owner reported two connected defects: Settings still showed an obsolete miniature app and its dark shell
+  stretched below the rounded phone; orders were present/processed in admin but Profile history rendered empty.
+- The preview tail was a CSS layout bug, not media: the phone was a flex child with a dark background and default
+  cross-axis stretch. It now uses `self-start`, `h-fit` and clipped shell geometry. Preview content mirrors the
+  current mobile structure: logo, RU/theme controls, branch selector, branded hero, promotions, stories with media,
+  product images and the five Home/Catalog/QR/Cart/Profile tabs. Unsaved logo/background/accent drafts stay inside
+  preview and still reach API/phone only after Save.
+- Mobile order history no longer relies exclusively on a second request after checkout: `POST /orders` already
+  returns the committed `OrderOut`, so `CreatedOrder` carries its parsed immutable snapshot and state inserts it
+  immediately before server reconciliation. The dedicated history route refreshes on first frame in addition to
+  its existing 10-second polling, resume refresh and pull-to-refresh.
+- Local hidden history was incorrectly company/device scoped. It is now keyed by tenant + customer ID and cleared
+  from memory on logout, preventing one account's hidden IDs from suppressing another account's orders.
+- Checks: Flutter analyze clean; full Flutter tests 88/88 (new immediate-history regression); admin typecheck and
+  14/14 content tests pass. Next production compilation reaches completed page generation locally; final standalone
+  copy still hits the known Windows symlink EPERM only. Signed APK built with explicit production API + Google Web
+  audience and installed via `adb install -r` on `f3bff2a5`; SHA-256
+  `e0de305874be8bad041d66f7fe109d45f0473bfba6c3400ac3257f2ac4c6fc01`.
+- Remaining: deploy/rebuild admin container, then owner verifies Settings preview and opens Profile → Order history.
+  If legacy server orders still fail to hydrate, capture authenticated `/auth/customer/me/orders` status/body and
+  backend log for that request; do not infer order ownership from customer name.

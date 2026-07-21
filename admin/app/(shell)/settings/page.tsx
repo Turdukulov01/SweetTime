@@ -5,13 +5,17 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
-  Bell,
   Check,
+  ChevronDown,
   Home,
   ImageIcon,
   LayoutGrid,
+  Moon,
   Plus,
+  QrCode,
   ShoppingCart,
+  Sparkles,
+  Store,
   User
 } from "lucide-react";
 import { RoleGate } from "@/components/role-gate";
@@ -44,17 +48,31 @@ function PreviewDrinkCard({
   currency: string;
 }) {
   return (
-    <div className="rounded-xl border border-coffee-900/10 bg-white p-2.5">
-      <span
-        className="block h-10 w-10 rounded-full"
-        style={{ backgroundColor: drink.color }}
-        aria-hidden="true"
-      />
-      <p className="mt-1.5 truncate text-[10px] font-semibold text-coffee-900">
+    <div className="overflow-hidden rounded-[14px] border border-coffee-900/10 bg-white">
+      <div className="relative h-[72px] bg-coffee-900/5">
+        {drink.imageUrl ? (
+          <img src={drink.imageUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center">
+            <span
+              className="block h-12 w-12 rounded-full"
+              style={{ backgroundColor: drink.color }}
+              aria-hidden="true"
+            />
+          </span>
+        )}
+        {drink.isBestSeller && (
+          <span className="absolute left-2 top-2 rounded-full bg-mint-100 px-2 py-0.5 text-[7px] font-semibold text-coffee-800">
+            Хит
+          </span>
+        )}
+      </div>
+      <div className="p-2.5">
+      <p className="truncate text-[9px] font-semibold text-coffee-900">
         {drink.name}
       </p>
-      <div className="mt-0.5 flex items-center justify-between">
-        <p className="text-[10px] font-semibold" style={{ color: accent }}>
+      <div className="mt-1.5 flex items-center justify-between">
+        <p className="text-[9px] font-semibold" style={{ color: accent }}>
           {formatCurrency(drink.price, currency)}
         </p>
         <span
@@ -63,6 +81,7 @@ function PreviewDrinkCard({
         >
           <Plus className="h-3 w-3" />
         </span>
+      </div>
       </div>
     </div>
   );
@@ -86,19 +105,20 @@ function PhonePreview({
     .filter((n) => n.isPublished)
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .slice(0, 4);
-  const promo = [...promotions]
+  const activePromotions = [...promotions]
     .filter((p) => p.active)
-    .sort((a, b) => a.sortOrder - b.sortOrder)[0];
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .slice(0, 2);
   const bestSellers = products
     .filter((p) => p.active && p.isBestSeller)
     .slice(0, 2);
-  const newItems = products.filter((p) => p.active && p.isNew).slice(0, 2);
   // fallback, чтобы блоки не были пустыми, если флаги ещё не проставлены
   const hits = bestSellers.length ? bestSellers : products.filter((p) => p.active).slice(0, 2);
 
   const tabs = [
     { label: "Главная", icon: Home, active: true },
     { label: "Каталог", icon: LayoutGrid, active: false },
+    { label: "QR", icon: QrCode, active: false },
     { label: "Корзина", icon: ShoppingCart, active: false },
     { label: "Профиль", icon: User, active: false }
   ];
@@ -108,10 +128,10 @@ function PhonePreview({
     // (исключается из dark-ремапа coffee-утилит в globals.css)
     <div
       data-light
-      className="w-[280px] shrink-0 rounded-[2.75rem] bg-coffee-900 p-2.5 shadow-soft"
+      className="h-fit w-[300px] shrink-0 self-start overflow-hidden rounded-[2.75rem] bg-coffee-900 p-2.5 shadow-soft"
     >
       <div
-        className="flex h-[560px] flex-col overflow-hidden rounded-[2.25rem] bg-cream-50 bg-cover bg-center"
+        className="flex h-[612px] flex-col overflow-hidden rounded-[2.25rem] bg-cream-50 bg-cover bg-center"
         style={{
           backgroundColor: company.background.lightBase,
           backgroundImage:
@@ -121,7 +141,7 @@ function PhonePreview({
         }}
       >
         {/* Статус-бар */}
-        <div className="flex items-center justify-between px-6 pt-3 text-[10px] font-semibold text-coffee-900">
+        <div className="flex items-center justify-between px-6 pb-1 pt-3 text-[10px] font-semibold text-coffee-900">
           <span>9:41</span>
           <span className="flex items-center gap-1">
             <span className="h-1.5 w-1.5 rounded-full bg-coffee-900/60" />
@@ -131,9 +151,9 @@ function PhonePreview({
         </div>
 
         {/* Шапка приложения */}
-        <div className="flex items-center justify-between px-5 pb-1 pt-3">
+        <div className="flex items-center justify-between px-4 pb-2 pt-2">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-coffee-900/5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-coffee-900/5">
               {company.logoThumbnailUrl || company.logoUrl ? (
                 <img src={company.logoThumbnailUrl || company.logoUrl || ""} alt="" className="h-full w-full object-cover" />
               ) : (
@@ -144,17 +164,59 @@ function PhonePreview({
               <p className="truncate text-[13px] font-semibold leading-tight text-coffee-900">
                 {appName}
               </p>
-              <p className="text-[10px] text-coffee-500">Привет, Айгерим!</p>
             </div>
           </div>
-          <Bell className="h-4 w-4 shrink-0 text-coffee-500" />
+          <div className="flex items-center gap-2">
+            <span className="rounded-full border border-coffee-900/10 bg-white/70 px-2.5 py-1.5 text-[9px] font-semibold text-coffee-900">RU</span>
+            <Moon className="h-4 w-4 shrink-0 text-coffee-700" />
+          </div>
         </div>
 
-        {/* Прокручиваемое содержимое главного экрана */}
-        <div className="flex-1 overflow-y-auto pb-2">
-          {/* Лента сторис (новости) */}
+        <div className="flex items-center gap-2 px-4 pb-3 text-[9px] text-coffee-700">
+          <Store className="h-3.5 w-3.5" style={{ color: accent }} />
+          <span className="truncate">Филиал: SweetTime на Чуй</span>
+          <ChevronDown className="ml-auto h-3.5 w-3.5" />
+        </div>
+
+        {/* Содержимое без браузерных scrollbar-декораций: это визуальное превью. */}
+        <div className="min-h-0 flex-1 overflow-hidden pb-2">
+          <div className="mx-4 rounded-[18px] p-4 text-white" style={{ background: `linear-gradient(135deg, ${accent}, ${accent}B5)` }}>
+            <span className="inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-1 text-[8px] font-semibold">
+              <Sparkles className="h-2.5 w-2.5" /> Баллы за каждый заказ
+            </span>
+            <p className="mt-3 text-[15px] font-semibold">Соберите напиток под себя</p>
+            <p className="mt-1 text-[8px] text-white/80">Заберите в кафе или закажите по QR со столика.</p>
+            <span className="mt-3 inline-flex rounded-full bg-white px-3 py-1.5 text-[8px] font-semibold" style={{ color: accent }}>Заказать напитки</span>
+          </div>
+
+          {activePromotions.length > 0 && (
+            <>
+              <div className="flex items-end justify-between px-4 pb-2 pt-4">
+                <div><p className="text-[7px] font-semibold uppercase tracking-wide" style={{ color: accent }}>Сегодня</p><p className="text-[13px] font-semibold text-coffee-900">Сезонные акции</p></div>
+                <span className="text-[8px] font-medium" style={{ color: accent }}>Все</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 px-4">
+                {activePromotions.map((promotion) => (
+                  <div key={promotion.id} className="relative h-[72px] overflow-hidden rounded-[14px] border border-coffee-900/10 bg-white p-2.5">
+                    {promotion.imageUrl && <img src={promotion.imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}
+                    {promotion.imageUrl && <span className="absolute inset-0 bg-black/35" />}
+                    <div className="relative flex h-full flex-col justify-end">
+                      <p className={cn("truncate text-[9px] font-semibold", promotion.imageUrl ? "text-white" : "text-coffee-900")}>{promotion.title.ru}</p>
+                      {promotion.code && <span className={cn("mt-1 w-fit rounded-full px-2 py-0.5 text-[7px]", promotion.imageUrl ? "bg-white/25 text-white" : "bg-cream-100 text-coffee-700")}>{promotion.code}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
           {stories.length > 0 && (
-            <div className="flex gap-3 overflow-x-auto px-5 py-3">
+            <>
+              <div className="flex items-end justify-between px-4 pb-2 pt-4">
+                <div><p className="text-[7px] font-semibold uppercase tracking-wide" style={{ color: accent }}>Новости</p><p className="text-[13px] font-semibold text-coffee-900">Узнайте, что у нас нового</p></div>
+                <span className="text-[13px]" style={{ color: accent }}>→</span>
+              </div>
+              <div className="flex gap-3 overflow-hidden px-4">
               {stories.map((story) => (
                 <span
                   key={story.id}
@@ -164,8 +226,8 @@ function PhonePreview({
                     className="flex h-12 w-12 items-center justify-center rounded-full p-[2px]"
                     style={{ background: `linear-gradient(135deg, ${story.accentColor}, ${story.accentColor}80)` }}
                   >
-                    <span className="flex h-full w-full items-center justify-center rounded-full bg-cream-50 text-[9px] font-bold" style={{ color: story.accentColor }}>
-                      {(story.badge.ru || story.title.ru || "•").charAt(0)}
+                    <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-cream-50 text-[9px] font-bold" style={{ color: accent }}>
+                      {story.imageUrl ? <img src={story.imageUrl} alt="" className="h-full w-full object-cover" /> : company.logoThumbnailUrl || company.logoUrl ? <img src={company.logoThumbnailUrl || company.logoUrl || ""} alt="" className="h-full w-full object-cover" /> : <Sparkles className="h-4 w-4" />}
                     </span>
                   </span>
                   <span className="w-full truncate text-center text-[8px] text-coffee-700">
@@ -173,33 +235,12 @@ function PhonePreview({
                   </span>
                 </span>
               ))}
-            </div>
-          )}
-
-          {/* Сезонная акция */}
-          {promo && (
-            <div
-              className="mx-4 mt-1 rounded-2xl p-4 text-white"
-              style={{ background: `linear-gradient(135deg, ${promo.accentColor}, ${promo.accentColor}B3)` }}
-            >
-              <p className="text-[9px] font-semibold uppercase tracking-wide text-white/80">
-                Сезонная акция
-              </p>
-              <p className="mt-0.5 text-[13px] font-semibold leading-snug">
-                {promo.title.ru}
-              </p>
-              {promo.code && (
-                <span className="mt-2 inline-block rounded-full bg-white/25 px-3 py-1 font-mono text-[10px] font-bold">
-                  {promo.code}
-                </span>
-              )}
-            </div>
+              </div>
+            </>
           )}
 
           {/* Хиты продаж */}
-          <p className="px-5 pb-2 pt-4 text-[11px] font-semibold text-coffee-900">
-            Хиты продаж
-          </p>
+          <div className="flex items-end justify-between px-4 pb-2 pt-4"><div><p className="text-[7px] font-semibold uppercase tracking-wide" style={{ color: accent }}>Популярное</p><p className="text-[13px] font-semibold text-coffee-900">Хиты продаж</p></div><span className="text-[8px] font-medium" style={{ color: accent }}>Все</span></div>
           <div className="grid grid-cols-2 gap-2 px-4">
             {hits.map((drink) => (
               <PreviewDrinkCard
@@ -211,28 +252,10 @@ function PhonePreview({
             ))}
           </div>
 
-          {/* Новое в меню */}
-          {newItems.length > 0 && (
-            <>
-              <p className="px-5 pb-2 pt-4 text-[11px] font-semibold text-coffee-900">
-                Новое в меню
-              </p>
-              <div className="grid grid-cols-2 gap-2 px-4">
-                {newItems.map((drink) => (
-                  <PreviewDrinkCard
-                    key={drink.id}
-                    drink={drink}
-                    accent={accent}
-                    currency={company.currency}
-                  />
-                ))}
-              </div>
-            </>
-          )}
         </div>
 
         {/* Нижняя таб-навигация */}
-        <div className="mt-auto border-t border-coffee-900/10 bg-white/85 px-5 pb-4 pt-2.5">
+        <div className="mt-auto border-t border-coffee-900/10 bg-white/90 px-4 pb-3 pt-2.5 backdrop-blur">
           <div className="flex items-start justify-between">
             {tabs.map((tab) => {
               const Icon = tab.icon;
@@ -374,7 +397,23 @@ function SettingsContent() {
     }
   }
 
-  const previewCompany: Company = { ...company, ...brandingDraft };
+  const previewCompany: Company = {
+    ...company,
+    ...brandingDraft,
+    logoUrl: removeLogo ? null : logoPreview || company.logoUrl,
+    logoThumbnailUrl: removeLogo
+      ? null
+      : logoPreview || company.logoThumbnailUrl,
+    background: {
+      ...brandingDraft.background,
+      imageUrl: removeBackground
+        ? null
+        : backgroundPreview || brandingDraft.background.imageUrl,
+      thumbnailUrl: removeBackground
+        ? null
+        : backgroundPreview || brandingDraft.background.thumbnailUrl
+    }
+  };
 
   const numberField = (
     label: string,

@@ -33,6 +33,9 @@ class _OrderHistoryPageState extends ConsumerState<OrderHistoryPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _startPolling();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_refreshHistory(showErrors: false));
+    });
   }
 
   @override

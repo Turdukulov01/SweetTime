@@ -389,6 +389,15 @@ below remains authoritative; this section records the current execution order.
   succeeds from an empty PostgreSQL database through `f27a4d9c8b11`. Production now exposes the new
   product image contract; the signed release APK is installed on Redmi Note 9 Pro with existing app data preserved.
 - [ ] Add end-to-end contract tests for Flutter -> API -> admin order processing and status refresh.
+- [ ] **[implemented locally and installed 2026-07-21; owner phone acceptance pending]
+  Repair mobile order-history hydration and refresh the admin phone preview.** A committed order is inserted
+  into mobile history directly from the authoritative `POST /orders` response, then reconciled with
+  `/auth/customer/me/orders`; the history page also refreshes immediately on open and keeps polling/pull refresh.
+  Device-only hidden IDs are now scoped by `customer_id` instead of leaking between accounts on the same phone.
+  Admin Settings no longer stretches the dark phone shell below the preview and now mirrors the current five-tab
+  app structure, branch selector, hero, promotions, stories, product images, logo/background draft and accent.
+  Flutter analyze is clean, full Flutter tests 88/88, admin typecheck and content tests 14/14 pass. The signed
+  production APK is installed; admin deployment and physical history/preview acceptance remain.
 - [ ] **[implemented locally 2026-07-16; production rollout and phone acceptance pending]
   Catalog editing, rolling sessions, order refresh, promo codes and partial loyalty spend.** Admin menu
   exposes an explicit edit action, editable product data, real image upload/delete with photo preview,

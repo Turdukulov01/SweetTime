@@ -364,11 +364,11 @@ class _MemoryGoogleIdentity implements GoogleIdentityProvider {
 
 class _MemoryOrderHistoryStore implements OrderHistoryVisibilityStore {
   @override
-  Future<void> clear() async {}
+  Future<void> clear(String accountId) async {}
 
   @override
-  Future<Set<String>> readHiddenOrderIds() async => const {};
+  Future<Set<String>> readHiddenOrderIds(String accountId) async => const {};
 
   @override
-  Future<void> writeHiddenOrderIds(Set<String> ids) async {}
+  Future<void> writeHiddenOrderIds(String accountId, Set<String> ids) async {}
 }

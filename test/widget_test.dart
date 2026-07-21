@@ -339,6 +339,41 @@ void main() {
     },
   );
 
+  test('committed order appears in history before a follow-up fetch', () async {
+    final historyEntry = parseCustomerOrderHistoryEntry(_v2OrderJson())!;
+    final api = _CapturingOrderApiClient(
+      orderResult: ApiResult<CreatedOrder>.ok(
+        CreatedOrder(
+          number: historyEntry.number,
+          pointsEarned: historyEntry.pointsEarned,
+          historyEntry: historyEntry,
+        ),
+      ),
+    );
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(accessToken: 'good'),
+      cartStore: _MemoryCartStore(),
+      api: api,
+    );
+    await controller.bootstrap();
+    controller.login('+996700123456');
+    await controller.quickAdd(controller.state.products.first);
+
+    final result = await controller.submitOrder(
+      clientRequestId: 'immediate-history-request',
+      type: OrderType.pickup,
+      readyTime: 'asap',
+      items: controller.state.cart,
+      branch: controller.state.selectedBranch,
+      pointsUsed: 0,
+    );
+
+    expect(result.isOk, isTrue);
+    expect(controller.state.orders, hasLength(1));
+    expect(controller.state.orders.single.id, historyEntry.id);
+  });
+
   test(
     'expired access token refreshes before the committed order clears cart',
     () async {

@@ -496,7 +496,6 @@ class AppStateController extends StateNotifier<AppState> {
     _bootstrapped = true;
     final cartRevision = _cartRevision;
     final cartDraftFuture = _readCartDraft();
-    final hiddenOrderIdsFuture = _readHiddenOrderIds();
     final viewedStoryIdsFuture = _readViewedStoryIds();
     try {
       final savedLanguage = await _languagePreferences.readLanguageCode();
@@ -525,21 +524,30 @@ class AppStateController extends StateNotifier<AppState> {
     }
     await refreshCompanyData(force: true);
     await _restoreCart(cartDraftFuture, cartRevision);
-    final hiddenOrderIds = await hiddenOrderIdsFuture;
     final viewedStoryIds = await viewedStoryIdsFuture;
-    state = state.copyWith(
-      hiddenOrderIds: hiddenOrderIds,
-      viewedStoryIds: viewedStoryIds,
-    );
+    state = state.copyWith(viewedStoryIds: viewedStoryIds);
     await _restoreSession();
   }
 
-  Future<Set<String>> _readHiddenOrderIds() async {
+  Future<Set<String>> _readHiddenOrderIds(String accountId) async {
     try {
-      return await _orderHistoryVisibilityStore.readHiddenOrderIds();
+      return await _orderHistoryVisibilityStore.readHiddenOrderIds(accountId);
     } catch (_) {
       return const {};
     }
+  }
+
+  Future<void> _loadHiddenOrderIdsForCurrentCustomer() async {
+    final epoch = _accountEpoch;
+    final customerId = state.customerId;
+    if (state.isGuest || customerId == null) return;
+    final hidden = await _readHiddenOrderIds(customerId);
+    if (epoch != _accountEpoch ||
+        state.isGuest ||
+        state.customerId != customerId) {
+      return;
+    }
+    state = state.copyWith(hiddenOrderIds: hidden);
   }
 
   Future<Set<String>> _readViewedStoryIds() async {
@@ -761,6 +769,7 @@ class AppStateController extends StateNotifier<AppState> {
       switch (result.status) {
         case ApiAuthStatus.ok:
           _applyCustomerProfile(result.value!);
+          await _loadHiddenOrderIdsForCurrentCustomer();
           await _loadCustomerFavorites();
           await _loadCustomerOrders();
           await _loadCustomerRecurring();
@@ -810,6 +819,7 @@ class AppStateController extends StateNotifier<AppState> {
           return CustomerSessionResumeResult.sessionExpired;
         }
         _applyCustomerProfile(result.value!);
+        await _loadHiddenOrderIdsForCurrentCustomer();
         await _loadCustomerOrders();
         return CustomerSessionResumeResult.active;
       case ApiAuthStatus.rejected:
@@ -1006,6 +1016,7 @@ class AppStateController extends StateNotifier<AppState> {
     }
     login(session.profile.phone ?? '');
     _applyCustomerProfile(session.profile);
+    await _loadHiddenOrderIdsForCurrentCustomer();
     await _loadCustomerFavorites();
     await _loadCustomerOrders();
     await _loadCustomerRecurring();
@@ -1147,11 +1158,18 @@ class AppStateController extends StateNotifier<AppState> {
     );
 
     if (result.isOk) {
+      final committedOrder = result.value!.historyEntry;
       state = state.copyWith(
         cart: const [],
         useBonus: false,
         bonusPointsToUse: 0,
         clearPromoCode: true,
+        orders: committedOrder == null
+            ? state.orders
+            : List.unmodifiable([
+                committedOrder,
+                ...state.orders.where((order) => order.id != committedOrder.id),
+              ]),
       );
       _cartRevision++;
       await _queueCartPersist();
@@ -1230,6 +1248,7 @@ class AppStateController extends StateNotifier<AppState> {
       points: 0,
       favoriteIds: const [],
       orders: const [],
+      hiddenOrderIds: const {},
       pointEvents: const [],
       clearRecurring: true,
     );
@@ -1386,6 +1405,7 @@ class AppStateController extends StateNotifier<AppState> {
       points: 0,
       favoriteIds: const [],
       orders: const [],
+      hiddenOrderIds: const {},
       pointEvents: const [],
       clearRecurring: true,
     );
@@ -1415,6 +1435,7 @@ class AppStateController extends StateNotifier<AppState> {
     // Preview/demo sessions have no server identity. Production identities
     // always carry a customer id and must be deleted remotely first.
     final serverCustomerId = state.customerId;
+    final localHistoryAccountId = serverCustomerId ?? 'local-preview';
     if (serverCustomerId != null) {
       _accountDeletionInProgress = true;
       try {
@@ -1435,7 +1456,7 @@ class AppStateController extends StateNotifier<AppState> {
       // Server deletion already succeeded; provider sign-out is best effort.
     }
     try {
-      await _orderHistoryVisibilityStore.clear();
+      await _orderHistoryVisibilityStore.clear(localHistoryAccountId);
     } catch (_) {
       // Account deletion still clears in-memory private state if local storage
       // is temporarily unavailable.
@@ -1740,7 +1761,14 @@ class AppStateController extends StateNotifier<AppState> {
     final snapshot = Set<String>.unmodifiable(next);
     state = state.copyWith(hiddenOrderIds: snapshot);
     try {
-      await _orderHistoryVisibilityStore.writeHiddenOrderIds(snapshot);
+      final customerId =
+          state.customerId ?? (state.isGuest ? null : 'local-preview');
+      if (customerId != null) {
+        await _orderHistoryVisibilityStore.writeHiddenOrderIds(
+          customerId,
+          snapshot,
+        );
+      }
     } catch (_) {
       // The current session remains consistent; persistence can recover on a
       // later hide operation without ever deleting the server-side order.
