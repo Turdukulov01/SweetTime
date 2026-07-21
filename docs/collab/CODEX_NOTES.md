@@ -1500,3 +1500,14 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
   идемпотентный bootstrap теперь конвергентно ремонтирует уже созданную строку без дублей и
   без изменения SweetTime. Regression валидирует каждый modifier через `ModifierOptionOut` и
   отдельно сценарий ремонта; полный backend снова `84 passed`.
+
+### Production result
+
+- Referral/loyalty rollout установлен на production: миграция `c19f6b4a8e21`, `/ready`,
+  SweetTime config и login = 200; referral endpoint без JWT = ожидаемый 401.
+- CoffeeGo создан отдельно: 2 филиала, 7 товаров, 25 заказов, 1 demo-клиент; config/news/login
+  и после modifier repair products = 200. SweetTime остался отдельным (`3/10/25/1`).
+- Финальная release APK собрана после backend rollout, подпись проверена: SHA-1 сертификата
+  `51:DC:A2:E5:1D:37:6E:BB:B1:B7:E8:A8:A8:77:8A:2D:D4:92:16:54`; APK SHA-256
+  `ec3e08905dc24bcc5ba55b0567672bcd96990e39263e8e365699a0dc89bb0d3f`. Установка
+  `adb install -r` прошла успешно без удаления данных, приложение запущено на устройстве.
