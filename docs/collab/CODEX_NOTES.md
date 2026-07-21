@@ -1549,3 +1549,6 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
 - Remaining: deploy/rebuild admin container, then owner verifies Settings preview and opens Profile → Order history.
   If legacy server orders still fail to hydrate, capture authenticated `/auth/customer/me/orders` status/body and
   backend log for that request; do not infer order ownership from customer name.
+- Production admin rollout completed from archive `sweettime-history-preview-766d2ec.tar.gz`: archive SHA-256
+  verified, `.env` preserved, admin/nginx recreated healthy. Public smoke: `/ready` 200, `/login` 200 and
+  SweetTime company config 200. No database migration or backend restart was required.
