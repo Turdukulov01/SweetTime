@@ -862,6 +862,69 @@ def customer_update_contact(
     return customer_out(customer)
 
 
+@router.post(
+    "/customer/me/referral",
+    response_model=schemas.CustomerOut,
+    summary="Погасить код пригласившего (привязка + бонус приглашённому)",
+    tags=["customer"],
+)
+def customer_redeem_referral(
+    body: schemas.ReferralRedeemIn,
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+) -> schemas.CustomerOut:
+    """Правила — docs/design/REFERRAL_LOGIC.md (подход A, «один родитель»):
+
+    - нельзя погасить свой код;
+    - привязка `invited_by` — один раз навсегда (повтор → 409);
+    - погасить может только новый клиент — без выполненных заказов (409);
+    - код должен принадлежать реальному клиенту ЭТОЙ компании (иначе 404).
+
+    Приглашённому сразу +invitedBonus. Пригласившему +inviterBonus начисляется
+    отдельно и только после первого выполненного заказа приглашённого — это
+    делает смену статуса заказа (см. main.patch_order_status), не эта ручка.
+    Машинный `detail` (self_code/already_invited/not_new_user/code_not_found)
+    приложение переводит в локализованное сообщение.
+    """
+    code = body.code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="empty_code")
+    if code == customer.referral_code.upper():
+        raise HTTPException(status_code=400, detail="self_code")
+    if customer.invited_by_code is not None:
+        raise HTTPException(status_code=409, detail="already_invited")
+
+    completed_orders = db.scalar(
+        select(func.count())
+        .select_from(Order)
+        .where(
+            Order.company_id == customer.company_id,
+            Order.customer_id == customer.id,
+            Order.status == "done",
+        )
+    )
+    if completed_orders and completed_orders > 0:
+        raise HTTPException(status_code=409, detail="not_new_user")
+
+    inviter = db.scalars(
+        select(Customer).where(
+            Customer.company_id == customer.company_id,
+            Customer.referral_code == code,
+        )
+    ).first()
+    if inviter is None or inviter.id == customer.id:
+        raise HTTPException(status_code=404, detail="code_not_found")
+
+    company = db.get(Company, customer.company_id)
+    invited_bonus = int((company.referral or {}).get("invitedBonus", 50))
+
+    customer.invited_by_code = code
+    customer.points += invited_bonus
+    db.commit()
+    db.refresh(customer)
+    return customer_out(customer)
+
+
 # ---------------------------------------------------------------------------
 # Аватар клиента (файл на server volume, storage_key в PostgreSQL)
 # ---------------------------------------------------------------------------

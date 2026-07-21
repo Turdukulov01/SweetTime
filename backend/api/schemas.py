@@ -820,6 +820,13 @@ class CustomerContactPatch(BaseModel):
     phone: str = Field(min_length=9, max_length=32)
 
 
+class ReferralRedeemIn(BaseModel):
+    """Погашение кода пригласившего. Код — постоянный referralCode друга
+    (напр. ``SWEETT-A1B2C3``); нормализуется к upper на сервере."""
+
+    code: str = Field(min_length=3, max_length=64)
+
+
 class CustomerLoginOut(TokenPair):
     user: CustomerOut
 

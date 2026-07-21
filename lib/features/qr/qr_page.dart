@@ -365,7 +365,13 @@ class _ScanTabState extends ConsumerState<_ScanTab>
     final payload = raw.startsWith(_qrPrefix)
         ? raw.substring(_qrPrefix.length)
         : raw;
-    final result = ref.read(appStateProvider.notifier).applyReferral(payload);
+    final result = await ref
+        .read(appStateProvider.notifier)
+        .applyReferral(payload);
+    if (!mounted) {
+      _handling = false;
+      return;
+    }
     final strings = AppLocalizations.of(context);
     await showDialog<void>(
       context: context,
@@ -455,12 +461,15 @@ class _ScanTabState extends ConsumerState<_ScanTab>
             Expanded(
               child: TextField(
                 controller: _codeController,
-                keyboardType: TextInputType.number,
+                // Код теперь буквенно-цифровой с дефисом (SWEETT-XXXXXX), а не
+                // 6 цифр: разрешаем A–Z, 0–9 и «-», приводим к верхнему регистру.
+                textCapitalization: TextCapitalization.characters,
                 inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(6),
+                  FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9-]')),
+                  LengthLimitingTextInputFormatter(24),
+                  _UpperCaseFormatter(),
                 ],
-                decoration: const InputDecoration(hintText: '512 347'),
+                decoration: const InputDecoration(hintText: 'SWEETT-AB12CD'),
               ),
             ),
             const SizedBox(width: 10),
@@ -499,5 +508,16 @@ class _ScanTabState extends ConsumerState<_ScanTab>
         ),
       ],
     );
+  }
+}
+
+/// Приводит вводимый код к верхнему регистру, сохраняя позицию курсора.
+class _UpperCaseFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    return newValue.copyWith(text: newValue.text.toUpperCase());
   }
 }

@@ -1108,6 +1108,38 @@ def _is_valid_transition(current: str, new: str) -> bool:
     return False
 
 
+def _apply_loyalty_on_completion(order: Order, db: Session) -> None:
+    """Заказ выполнен (done) — двигаем баллы. До этого баланс не меняется,
+    поэтому баллы начисляются только за реально выполненный заказ.
+
+    Владельцу заказа: +earned −used (нетто, не ниже нуля). Плюс реферальный
+    бонус пригласившему — один раз, после первого выполненного заказа этого
+    клиента (флаг inviter_rewarded защищает от повторной выплаты).
+    Demo-заказ без customer_id баллы не двигает.
+    """
+    if order.customer_id is None:
+        return
+    customer = db.get(Customer, order.customer_id)
+    if customer is None:
+        return
+    delta = (order.points_earned or 0) - (order.points_used or 0)
+    customer.points = max(0, customer.points + delta)
+
+    if customer.invited_by_code and not customer.inviter_rewarded:
+        inviter = db.scalars(
+            select(Customer).where(
+                Customer.company_id == customer.company_id,
+                Customer.referral_code == customer.invited_by_code,
+            )
+        ).first()
+        if inviter is not None and inviter.id != customer.id:
+            company = db.get(Company, customer.company_id)
+            inviter_bonus = int((company.referral or {}).get("inviterBonus", 100))
+            inviter.points += inviter_bonus
+        # Помечаем всегда: повторно пытаться платить не нужно.
+        customer.inviter_rewarded = True
+
+
 def _next_order_number(db: Session, company: Company) -> tuple[str, int]:
     numbers = db.scalars(
         select(Order.number).where(Order.company_id == company.id)
@@ -1442,6 +1474,9 @@ def patch_order_status(
             ),
         )
     order.status = body.status
+    # Баллы двигаются в момент выполнения заказа (и реферальный бонус тоже).
+    if body.status == "done":
+        _apply_loyalty_on_completion(order, db)
     db.add(order)
     db.commit()
     order_event_hub.publish(

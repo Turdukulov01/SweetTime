@@ -221,6 +221,17 @@ class CustomerProfile {
   }
 }
 
+/// Итог погашения реферального кода. На успехе — обновлённый [profile]
+/// (баллы уже +invitedBonus); на бизнес-отказе — машинный [detail]
+/// (self_code / already_invited / not_new_user / code_not_found), который
+/// приложение переводит в локализованный [ReferralResult].
+class ReferralOutcome {
+  const ReferralOutcome({this.profile, this.detail});
+
+  final CustomerProfile? profile;
+  final String? detail;
+}
+
 /// Пара токенов; вместе с профилем — результат успешного входа по OTP.
 class TokenPair {
   const TokenPair({required this.accessToken, required this.refreshToken});
@@ -877,6 +888,52 @@ class ApiClient {
       return _parseProfileResponse(response);
     } catch (_) {
       return const ApiResult<CustomerProfile>.unavailable();
+    }
+  }
+
+  /// `POST /auth/customer/me/referral` — погасить код друга.
+  /// 200 -> [ReferralOutcome.profile]; 400/404/409 -> [ReferralOutcome.detail]
+  /// (бизнес-отказ, не сетевой); 401/403 -> rejected (нужен refresh).
+  Future<ApiResult<ReferralOutcome>> redeemReferral(
+    String accessToken,
+    String code,
+  ) async {
+    try {
+      final response = await http
+          .post(
+            _uri('/auth/customer/me/referral'),
+            headers: {..._bearer(accessToken), ..._jsonHeader},
+            body: jsonEncode({'code': code}),
+          )
+          .timeout(_timeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<ReferralOutcome>.rejected();
+      }
+      if (response.statusCode == 200) {
+        final profile = CustomerProfile.tryParse(
+          jsonDecode(utf8.decode(response.bodyBytes)),
+        );
+        return profile == null
+            ? const ApiResult<ReferralOutcome>.unavailable()
+            : ApiResult<ReferralOutcome>.ok(ReferralOutcome(profile: profile));
+      }
+      if (response.statusCode == 400 ||
+          response.statusCode == 404 ||
+          response.statusCode == 409) {
+        String? detail;
+        try {
+          final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+          if (decoded is Map && decoded['detail'] is String) {
+            detail = decoded['detail'] as String;
+          }
+        } catch (_) {
+          detail = null;
+        }
+        return ApiResult<ReferralOutcome>.ok(ReferralOutcome(detail: detail));
+      }
+      return const ApiResult<ReferralOutcome>.unavailable();
+    } catch (_) {
+      return const ApiResult<ReferralOutcome>.unavailable();
     }
   }
 

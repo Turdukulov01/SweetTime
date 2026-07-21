@@ -390,6 +390,11 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
       'Код таанылган жок',
       'Code not recognized',
     ),
+    ReferralResult.networkError => _pick(
+      'Нет связи с сервером',
+      'Сервер менен байланыш жок',
+      'No connection to the server',
+    ),
   };
 
   String referralResultMessage(ReferralResult value) => switch (value) {
@@ -414,9 +419,14 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
       'Invitation works only before your first completed order.',
     ),
     ReferralResult.invalidCode => _pick(
-      'Проверьте 6-значный код друга и попробуйте ещё раз.',
-      'Досуңуздун 6 орундуу кодун текшерип, кайра аракет кылыңыз.',
-      'Check your friend’s 6-digit code and try again.',
+      'Проверьте код друга и попробуйте ещё раз.',
+      'Досуңуздун кодун текшерип, кайра аракет кылыңыз.',
+      'Check your friend’s code and try again.',
+    ),
+    ReferralResult.networkError => _pick(
+      'Проверьте интернет и попробуйте ещё раз.',
+      'Интернетти текшерип, кайра аракет кылыңыз.',
+      'Check your connection and try again.',
     ),
   };
 

@@ -1926,33 +1926,38 @@ class AppStateController extends StateNotifier<AppState> {
     return true;
   }
 
-  /// Привязка по коду друга. Правила анти-накрутки — docs/design/REFERRAL_LOGIC.md:
-  /// один пригласивший навсегда; только новый клиент (без выполненных заказов);
-  /// нельзя пригласить себя; +100 пригласившему — после первого заказа.
-  ReferralResult applyReferral(String rawCode) {
-    final code = rawCode.replaceAll(RegExp(r'\D'), '');
-    if (code.length != 6) return ReferralResult.invalidCode;
-    if (code == state.userCode) return ReferralResult.selfCode;
-    if (state.invitedByCode != null) return ReferralResult.alreadyInvited;
-    if (state.orders.isNotEmpty) return ReferralResult.notNewUser;
+  /// Погашение кода друга — теперь на сервере (правила и защита от накрутки —
+  /// docs/design/REFERRAL_LOGIC.md, серверная ручка POST /customer/me/referral).
+  /// Локальная проверка формата убрана: код буквенно-цифровой (SWEETT-XXXXXX),
+  /// а привязку/бонус решает сервер. Возвращаемый профиль — источник истины.
+  Future<ReferralResult> applyReferral(String rawCode) async {
+    final code = rawCode.trim();
+    if (code.isEmpty) return ReferralResult.invalidCode;
+    if (state.isGuest) return ReferralResult.networkError;
 
-    state = state.copyWith(
-      invitedByCode: code,
-      points: state.points + Referral.invitedBonus,
-      pointEvents: [
-        PointEvent(
-          title: LocalizedText(
-            ru: 'Бонус за приглашение (код ${code.substring(0, 3)} ${code.substring(3)})',
-            ky: 'Чакыруу бонусу (код ${code.substring(0, 3)} ${code.substring(3)})',
-            en: 'Invitation bonus (code ${code.substring(0, 3)} ${code.substring(3)})',
-          ),
-          amount: Referral.invitedBonus,
-          date: const LocalizedText(ru: 'Сегодня', ky: 'Бүгүн', en: 'Today'),
-        ),
-        ...state.pointEvents,
-      ],
+    final epoch = _accountEpoch;
+    final result = await _withCustomerToken(
+      (token) => _api.redeemReferral(token, code),
     );
-    return ReferralResult.success;
+    if (epoch != _accountEpoch || state.isGuest) {
+      return ReferralResult.networkError;
+    }
+    if (!result.isOk || result.value == null) {
+      // rejected/invalid/unavailable — все трактуем как «нет связи/сессии».
+      return ReferralResult.networkError;
+    }
+    final outcome = result.value!;
+    if (outcome.profile != null) {
+      _applyCustomerProfile(outcome.profile!);
+      return ReferralResult.success;
+    }
+    // Бизнес-отказ: машинный detail сервера -> локализованный результат.
+    return switch (outcome.detail) {
+      'self_code' => ReferralResult.selfCode,
+      'already_invited' => ReferralResult.alreadyInvited,
+      'not_new_user' => ReferralResult.notNewUser,
+      _ => ReferralResult.invalidCode, // code_not_found / empty_code
+    };
   }
 
   /// Демо-наполнение для превью/скриншотов (по query-параметру `?seed=`), в проде не вызывается.

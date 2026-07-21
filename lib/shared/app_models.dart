@@ -610,7 +610,8 @@ enum ReferralResult {
   selfCode,
   alreadyInvited,
   notNewUser,
-  invalidCode;
+  invalidCode,
+  networkError;
 
   bool get isSuccess => this == ReferralResult.success;
 }

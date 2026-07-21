@@ -173,6 +173,11 @@ class Customer(Base):
     invited_by_code: Mapped[str | None] = mapped_column(
         String(64), nullable=True, default=None
     )
+    # Пригласившему начисляют +100 один раз — после первого выполненного заказа
+    # ЭТОГО клиента. Флаг защищает от повторной выплаты (см. REFERRAL_LOGIC).
+    inviter_rewarded: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     # Избранное — данные аккаунта, а не устройства (S5.3): ["p1", "p4", ...].
     # Список id товаров ЭТОЙ компании; целиком заменяется через PUT favorites.
     favorite_product_ids: Mapped[list] = mapped_column(JSON, default=list)
