@@ -1495,3 +1495,8 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
 - Regression доказывает неизменность количества Branch/Product/News/Promotion/Customer/Order
   для `sweettime`, полноту CoffeeGo и отсутствие дублей после повторного запуска. Полный backend:
   `84 passed`; compose overlay проходит `config --quiet`.
+- Первый production smoke выявил `GET /coffeego/products` = 500: у legacy-опций размеров
+  `cg-p5` отсутствовали обязательные stable IDs. Fixture исправлен (`s`/`m`), а повторный
+  идемпотентный bootstrap теперь конвергентно ремонтирует уже созданную строку без дублей и
+  без изменения SweetTime. Regression валидирует каждый modifier через `ModifierOptionOut` и
+  отдельно сценарий ремонта; полный backend снова `84 passed`.

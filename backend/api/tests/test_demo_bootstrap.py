@@ -18,6 +18,7 @@ from api.seed import (
     bootstrap_production_demo_company,
     bootstrap_production_sweettime,
 )
+from api.schemas import ModifierOptionOut
 
 
 def _count(db: Session, model: type, company_id: str) -> int:
@@ -61,6 +62,12 @@ def test_demo_bootstrap_is_isolated_complete_and_idempotent() -> None:
         assert _count(db, Promotion, "coffeego") == 2
         assert _count(db, Order, "coffeego") == 25
 
+        for product in db.scalars(
+            select(Product).where(Product.company_id == "coffeego")
+        ).all():
+            for option in [*product.sizes, *product.toppings]:
+                ModifierOptionOut.model_validate(option)
+
         customer = db.get(Customer, "c-cg-eldar")
         assert customer is not None
         assert customer.points == 860
@@ -87,6 +94,16 @@ def test_demo_bootstrap_is_isolated_complete_and_idempotent() -> None:
         }
         assert sweettime_after == sweettime_before
 
+        # Re-running also repairs the one legacy CoffeeGo fixture version which
+        # reached production without stable IDs on cg-p5 sizes.
+        flat_white = db.get(Product, "cg-p5")
+        assert flat_white is not None
+        flat_white.sizes = [
+            {"name": "S (250 мл)", "priceDelta": 0},
+            {"name": "M (350 мл)", "priceDelta": 40},
+        ]
+        db.commit()
+
         assert (
             bootstrap_production_demo_company(
                 db,
@@ -97,4 +114,4 @@ def test_demo_bootstrap_is_isolated_complete_and_idempotent() -> None:
             is False
         )
         assert _count(db, Order, "coffeego") == 25
-
+        assert [option["id"] for option in flat_white.sizes] == ["s", "m"]

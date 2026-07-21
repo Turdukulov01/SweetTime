@@ -36,7 +36,11 @@ def main() -> int:
             owner_name=name,
             owner_password=password,
         )
-    outcome = "created" if created else "already exists; no changes applied"
+    outcome = (
+        "created"
+        if created
+        else "already exists; state verified/repaired without duplicates"
+    )
     print(f"Production CoffeeGo demo tenant {outcome}")
     return 0
 

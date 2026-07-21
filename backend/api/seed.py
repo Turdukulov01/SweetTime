@@ -584,8 +584,8 @@ _COFFEEGO_PRODUCTS = [
         price=270,
         color="#c69c7b",
         sizes=[
-            {"name": "S (250 мл)", "priceDelta": 0},
-            {"name": "M (350 мл)", "priceDelta": 40},
+            {"id": "s", "name": "S (250 мл)", "priceDelta": 0},
+            {"id": "m", "name": "M (350 мл)", "priceDelta": 40},
         ],
         toppings=[_CT_ALT_MILK],
         available_branch_ids=["cg-b1"],
@@ -1243,6 +1243,19 @@ def bootstrap_production_demo_company(
             "Demo bootstrap refused: production SweetTime company is missing"
         )
     if db.get(Company, "coffeego") is not None:
+        # Converge an early CoffeeGo bootstrap which used legacy modifier JSON
+        # without stable IDs. The public ProductOut contract requires IDs.
+        product = db.get(Product, "cg-p5")
+        if product is not None and product.company_id == "coffeego":
+            sizes = deepcopy(product.sizes or [])
+            changed = False
+            for index, option in enumerate(sizes):
+                if not option.get("id"):
+                    option["id"] = "s" if index == 0 else "m" if index == 1 else f"size-{index + 1}"
+                    changed = True
+            if changed:
+                product.sizes = sizes
+                db.commit()
         return False
     if db.scalar(select(AdminUser.id).where(AdminUser.email == email)) is not None:
         raise ProductionBootstrapError(
