@@ -24,13 +24,15 @@ company_id всегда берётся из токена и сверяется �
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from hashlib import sha256
+from html import escape
 import json
+import re
 from uuid import uuid4
 
 import anyio
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -118,6 +120,119 @@ if settings.environment.lower() != "production":
 # статусы заказов (см. ADMIN_PANEL.md).
 require_content_staff = require_role("owner", "manager")
 require_queue_staff = require_role("owner", "manager", "barista")
+
+
+_INVITE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9-]{2,64}$")
+_ANDROID_APP_LINK_CERTIFICATES = (
+    # Release upload certificate used by the current signed APK.
+    "03:12:D7:D2:99:37:69:A8:16:9E:0C:E4:81:5D:4C:9B:96:E9:00:8C:4B:95:FE:8E:D6:6D:2A:87:3F:CC:D0:44",
+)
+
+
+@app.get(
+    "/.well-known/assetlinks.json",
+    response_class=JSONResponse,
+    include_in_schema=False,
+)
+def android_asset_links() -> list[dict[str, object]]:
+    """Proof that the public domain owns the Android application links."""
+
+    return [
+        {
+            "relation": ["delegate_permission/common.handle_all_urls"],
+            "target": {
+                "namespace": "android_app",
+                "package_name": "kg.sweettime.app",
+                "sha256_cert_fingerprints": list(
+                    _ANDROID_APP_LINK_CERTIFICATES
+                ),
+            },
+        }
+    ]
+
+
+@app.get(
+    "/invite/{company_id}/{referral_code}",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+def referral_invite_landing(company_id: str, referral_code: str) -> HTMLResponse:
+    """Fallback for invite links when SweetTime is not installed yet.
+
+    Installed Android clients intercept the same verified HTTPS URL before the
+    browser. Until the Play listing is live, the fallback serves the signed APK
+    from our own HTTPS domain and tells the user to return to this page once.
+    """
+
+    if not _INVITE_SEGMENT_RE.fullmatch(company_id) or not _INVITE_SEGMENT_RE.fullmatch(
+        referral_code
+    ):
+        raise HTTPException(status_code=404, detail="invite_not_found")
+    company = company_id.lower()
+    code = referral_code.upper()
+    if company != "sweettime":
+        raise HTTPException(status_code=404, detail="invite_not_found")
+
+    safe_code = escape(code)
+    invite_path = f"invite/{company}/{code}"
+    open_app = (
+        "intent://lnp-corporation.duckdns.org/"
+        f"{invite_path}#Intent;scheme=https;package=kg.sweettime.app;end"
+    )
+    document = f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#FF5C9A">
+  <title>Приглашение в SweetTime</title>
+  <style>
+    :root {{ color-scheme: light; font-family: Inter, system-ui, sans-serif; }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; min-height: 100vh; display: grid; place-items: center;
+      padding: 24px; color: #251713; background: #fffaf0; }}
+    main {{ width: min(100%, 440px); padding: 28px; border: 1px solid #eadfd8;
+      border-radius: 28px; background: white; box-shadow: 0 18px 50px #59321a18; }}
+    .logo {{ width: 64px; height: 64px; display: grid; place-items: center;
+      border-radius: 50%; color: white; background: #ff5c9a; font-size: 26px;
+      font-weight: 800; }}
+    .eyebrow {{ margin: 24px 0 6px; color: #c9326d; font-size: 12px;
+      font-weight: 800; letter-spacing: .12em; }}
+    h1 {{ margin: 0; font-size: 30px; line-height: 1.12; }}
+    p {{ color: #6f5b53; line-height: 1.55; }}
+    .code {{ margin: 20px 0; padding: 12px; border-radius: 14px; text-align: center;
+      background: #fff0f6; color: #9d2453; font-weight: 800; letter-spacing: .12em; }}
+    a {{ display: block; margin-top: 10px; padding: 14px 18px; border-radius: 999px;
+      text-align: center; text-decoration: none; font-weight: 750; }}
+    .primary {{ color: white; background: #ff5c9a; }}
+    .secondary {{ color: #9d2453; border: 1px solid #efb4ca; }}
+    small {{ display: block; margin-top: 18px; color: #8b756c; line-height: 1.45; }}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="logo">S</div>
+    <div class="eyebrow">ПРИГЛАШЕНИЕ</div>
+    <h1>Вам подарили приветственные баллы SweetTime</h1>
+    <p>Точная сумма берётся из действующих настроек компании и появится в приложении после входа.</p>
+    <div class="code">{safe_code}</div>
+    <a class="primary" href="{escape(open_app, quote=True)}">Открыть SweetTime</a>
+    <a class="secondary" href="/download/android">Скачать для Android</a>
+    <small>Если приложение ещё не установлено: скачайте его, затем вернитесь на эту страницу и нажмите «Открыть SweetTime».</small>
+  </main>
+</body>
+</html>"""
+    return HTMLResponse(
+        document,
+        headers={
+            "Cache-Control": "no-store",
+            "X-Robots-Tag": "noindex, nofollow",
+            "Content-Security-Policy": (
+                "default-src 'none'; style-src 'unsafe-inline'; "
+                "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+            ),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

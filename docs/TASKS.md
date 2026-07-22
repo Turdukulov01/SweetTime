@@ -449,6 +449,20 @@ below remains authoritative; this section records the current execution order.
   video gradient; tapping it expands the localized description and date. Existing play/pause, sound toggle,
   close and Android Back behavior remains. Flutter analyze and 84/84 tests pass; release APK is built, but the
   target Redmi disconnected from ADB before installation.
+- [ ] **[mobile verified 2026-07-22; server rollout and two-account acceptance pending]
+  Referral invite links and purpose-specific QR codes.** The loyalty QR now has a barista-only payload;
+  a separate invitation tab creates a verified HTTPS App Link with native share/copy actions; scanning
+  still accepts legacy QR payloads, plain codes and the new URL. A pending invitation survives Google
+  sign-in, mandatory contact-phone completion and process restart, then is redeemed by the existing
+  server-owned anti-abuse flow. Android declares the verified domain; the prepared production config exposes an invite
+  landing page, `assetlinks.json` for the current release certificate and a pre-Play signed-APK
+  download endpoint. Flutter analyze and 95/95 tests pass; signed `1.0.1+2` was built, installed and
+  smoke-tested on the target Redmi. Device acceptance covers the three equal QR tabs, responsive QR,
+  code/link copy, Android share chooser, direct HTTPS routing and delayed-session auto-redemption.
+  Referral redemption is single-flight across competing auth/deep-link screens, and displayed bonuses
+  come from the company config rather than hard-coded UI values.
+  Remaining: run the added backend landing test in a prepared Python environment, copy the signed APK
+  to `/srv/sweetime/downloads/SweetTime.apk`, deploy backend/nginx and perform two-account acceptance.
 - [ ] **White-label platform hardening.** Keep one tenant-aware backend and one configurable admin
   runtime for all companies; map approved custom domains to `company_id` and require Host, URL scope
   and JWT `cid` to agree. Do not create one copied backend/admin and one port pair per company.

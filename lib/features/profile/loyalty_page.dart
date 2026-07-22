@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format.dart';
 import '../../core/localization/app_localizations.dart';
+import '../../core/referral_invite.dart';
+import '../../core/system_share.dart';
 import '../../shared/app_models.dart';
 import '../../shared/app_state.dart';
 
@@ -29,7 +31,12 @@ class LoyaltyPage extends ConsumerWidget {
               maxSpendShare: state.loyaltyMaxSpendShare,
             ),
             const SizedBox(height: 16),
-            _ReferralCard(code: formatUserCode(state.userCode)),
+            _ReferralCard(
+              code: state.userCode,
+              appName: state.appName,
+              invitedBonus: state.referralInvitedBonus,
+              inviterBonus: state.referralInviterBonus,
+            ),
           ],
         ),
       ),
@@ -163,14 +170,44 @@ class _LoyaltyRules extends StatelessWidget {
 }
 
 class _ReferralCard extends StatelessWidget {
-  const _ReferralCard({required this.code});
+  const _ReferralCard({
+    required this.code,
+    required this.appName,
+    required this.invitedBonus,
+    required this.inviterBonus,
+  });
 
   final String code;
+  final String appName;
+  final int invitedBonus;
+  final int inviterBonus;
+
+  Future<void> _copyLink(BuildContext context, String link) async {
+    await Clipboard.setData(ClipboardData(text: link));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(AppLocalizations.of(context).linkCopied)),
+    );
+  }
+
+  Future<void> _shareLink(
+    BuildContext context,
+    String appName,
+    String link,
+  ) async {
+    final strings = AppLocalizations.of(context);
+    final shared = await SystemShare.text(
+      strings.inviteShareText(appName, invitedBonus, link),
+      subject: strings.profileInviteFriend,
+    );
+    if (!shared && context.mounted) await _copyLink(context, link);
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final strings = AppLocalizations.of(context);
+    final link = referralInviteUrl(code);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -196,14 +233,8 @@ class _ReferralCard extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               strings.profileReferralDescription(
-                invitedPoints: formatPoints(
-                  Referral.invitedBonus,
-                  strings.language,
-                ),
-                inviterPoints: formatPoints(
-                  Referral.inviterBonus,
-                  strings.language,
-                ),
+                invitedPoints: formatPoints(invitedBonus, strings.language),
+                inviterPoints: formatPoints(inviterBonus, strings.language),
               ),
               style: theme.textTheme.bodyMedium,
             ),
@@ -222,20 +253,26 @@ class _ReferralCard extends StatelessWidget {
                     color: theme.colorScheme.tertiaryContainer,
                     borderRadius: BorderRadius.circular(999),
                   ),
-                  child: Text(code, style: theme.textTheme.titleSmall),
+                  child: Text(
+                    formatUserCode(code),
+                    style: theme.textTheme.titleSmall,
+                  ),
                 ),
                 OutlinedButton.icon(
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: code));
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text(strings.codeCopied)));
-                  },
+                  onPressed: () => _copyLink(context, link),
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size(44, 44),
                   ),
-                  icon: const Icon(Icons.copy, size: 18),
-                  label: Text(strings.copyCode),
+                  icon: const Icon(Icons.link, size: 18),
+                  label: Text(strings.copyLink),
+                ),
+                FilledButton.icon(
+                  onPressed: () => _shareLink(context, appName, link),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(44, 44),
+                  ),
+                  icon: const Icon(Icons.ios_share, size: 18),
+                  label: Text(strings.shareInvite),
                 ),
               ],
             ),

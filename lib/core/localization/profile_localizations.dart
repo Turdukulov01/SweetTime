@@ -119,9 +119,9 @@ extension ProfileLocalizations on AppLocalizations {
   );
 
   String get profileFaqQrAnswer => _pick(
-    'Покажите личный QR бариста для начисления или списания баллов. Через вкладку QR также можно привязать код пригласившего, если аккаунт новый.',
-    'Упай кошуу же колдонуу үчүн жеке QR кодуңузду баристага көрсөтүңүз. Аккаунт жаңы болсо, QR бөлүмү аркылуу чакырган адамдын кодун да байланыштыра аласыз.',
-    'Show your personal QR to the barista to earn or spend points. New accounts can also link an inviter code from the QR tab.',
+    'Во вкладке QR есть отдельная карта лояльности для бариста, ссылка для приглашения друга и сканер чужого кода.',
+    'QR бөлүмүндө бариста үчүн өзүнчө лоялдуулук картасы, дос чакыруу шилтемеси жана башка кодду окуу сканери бар.',
+    'The QR tab contains a separate loyalty card for the barista, a friend invitation link, and a scanner for another code.',
   );
 
   String get profileFaqEditQuestion => _pick(
@@ -246,15 +246,15 @@ extension ProfileLocalizations on AppLocalizations {
     required String invitedPoints,
     required String inviterPoints,
   }) => _pick(
-    'Другу — $invitedPoints после регистрации по вашему коду, '
+    'Другу — $invitedPoints после регистрации и активации вашей ссылки, '
         'вам — $inviterPoints после его первого завершённого заказа. '
-        'Ваш QR — во вкладке «QR» внизу.',
-    'Досуңуз сиздин кодуңуз менен катталгандан кийин $invitedPoints алат, '
+        'QR и ссылка — во вкладке «QR» внизу.',
+    'Досуңуз катталып, сиздин шилтемеңизди активдештиргенден кийин $invitedPoints алат, '
         'ал эми сиз анын биринчи аяктаган заказынан кийин $inviterPoints аласыз. '
-        'Сиздин QR кодуңуз төмөнкү «QR» бөлүмүндө.',
-    'Your friend gets $invitedPoints after signing up with your code, '
+        'QR жана шилтеме төмөнкү «QR» бөлүмүндө.',
+    'Your friend gets $invitedPoints after signing up and activating your link, '
         'and you get $inviterPoints after their first completed order. '
-        'Your QR is in the “QR” tab below.',
+        'The QR and link are in the “QR” tab below.',
   );
 
   String get profileOrderHistory =>

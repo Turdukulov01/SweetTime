@@ -32,6 +32,7 @@ printf 'directories:\n'
 for path in \
   /srv/sweetime \
   /srv/sweetime/media \
+  /srv/sweetime/downloads \
   /srv/sweetime/backups \
   /srv/sweetime/postgres \
   /srv/sweetime/secrets \

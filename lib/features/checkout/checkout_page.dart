@@ -401,6 +401,7 @@ class _CheckoutPageState extends ConsumerState<CheckoutPage> {
         serverNumber: created.number,
         serverPointsEarned: created.pointsEarned,
         inviterRewarded: inviterRewarded,
+        inviterBonus: state.referralInviterBonus,
       ),
     );
   }
@@ -493,6 +494,7 @@ class _SuccessDialog extends StatelessWidget {
     this.serverNumber,
     this.serverPointsEarned,
     this.inviterRewarded = false,
+    required this.inviterBonus,
   });
 
   final CustomerOrder order;
@@ -501,6 +503,7 @@ class _SuccessDialog extends StatelessWidget {
   final String? serverNumber;
   final int? serverPointsEarned;
   final bool inviterRewarded;
+  final int inviterBonus;
 
   @override
   Widget build(BuildContext context) {
@@ -546,7 +549,7 @@ class _SuccessDialog extends StatelessWidget {
             if (inviterRewarded) ...[
               const SizedBox(height: 6),
               Text(
-                strings.friendReferralRewarded(Referral.inviterBonus),
+                strings.friendReferralRewarded(inviterBonus),
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.secondary,

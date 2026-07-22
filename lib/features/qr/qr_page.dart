@@ -9,13 +9,15 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/format.dart';
 import '../../core/localization/app_localizations.dart';
-import '../../shared/app_models.dart';
+import '../../core/referral_invite.dart';
+import '../../core/system_share.dart';
 import '../../shared/app_state.dart';
 import '../../shared/widgets/common.dart';
 
-const _qrPrefix = 'SWEETTIME:REF:';
+const _loyaltyQrPrefix = 'SWEETTIME:LOYALTY:';
 
-/// Вкладка «QR»: личный QR (лояльность + рефералка) и сканер кода друга.
+/// Loyalty identity, a shareable referral link and friend-code activation are
+/// intentionally separate: each QR now has one clear purpose.
 class QrPage extends ConsumerWidget {
   const QrPage({super.key});
 
@@ -43,19 +45,27 @@ class QrPage extends ConsumerWidget {
     final tab = GoRouterState.of(context).uri.queryParameters['tab'];
 
     return DefaultTabController(
-      length: 2,
-      initialIndex: tab == 'scan' ? 1 : 0,
+      length: 3,
+      initialIndex: tab == 'scan' ? 2 : (tab == 'invite' ? 1 : 0),
       child: Scaffold(
         appBar: AppBar(
           title: Text(strings.qr),
           bottom: TabBar(
+            indicatorSize: TabBarIndicatorSize.label,
+            labelPadding: const EdgeInsets.symmetric(horizontal: 4),
             tabs: [
               Tab(icon: const Icon(Icons.qr_code_2), text: strings.myQr),
+              Tab(
+                icon: const Icon(Icons.group_add_outlined),
+                text: strings.invite,
+              ),
               Tab(icon: const Icon(Icons.qr_code_scanner), text: strings.scan),
             ],
           ),
         ),
-        body: const TabBarView(children: [_MyQrTab(), _ScanTab()]),
+        body: const TabBarView(
+          children: [_MyQrTab(), _InviteQrTab(), _ScanTab()],
+        ),
       ),
     );
   }
@@ -96,30 +106,7 @@ class _MyQrTab extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 20),
-        Center(
-          // Белая подложка — чтобы QR читался сканером и в тёмной теме.
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: theme.colorScheme.outlineVariant),
-            ),
-            child: QrImageView(
-              data: '$_qrPrefix${state.userCode}',
-              version: QrVersions.auto,
-              size: 230,
-              eyeStyle: const QrEyeStyle(
-                eyeShape: QrEyeShape.square,
-                color: Color(0xFF251713),
-              ),
-              dataModuleStyle: const QrDataModuleStyle(
-                dataModuleShape: QrDataModuleShape.circle,
-                color: Color(0xFF251713),
-              ),
-            ),
-          ),
-        ),
+        _ResponsiveQrCode(data: '$_loyaltyQrPrefix${state.userCode}'),
         const SizedBox(height: 16),
         Center(
           child: Row(
@@ -145,17 +132,192 @@ class _MyQrTab extends ConsumerWidget {
             ],
           ),
         ),
-        const SizedBox(height: 8),
+      ],
+    );
+  }
+}
+
+class _InviteQrTab extends ConsumerWidget {
+  const _InviteQrTab();
+
+  Future<void> _copyCode(BuildContext context, String code) async {
+    await Clipboard.setData(ClipboardData(text: code));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(AppLocalizations.of(context).codeCopied)),
+    );
+  }
+
+  Future<void> _copy(BuildContext context, String link) async {
+    await Clipboard.setData(ClipboardData(text: link));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(AppLocalizations.of(context).linkCopied)),
+    );
+  }
+
+  Future<void> _share(
+    BuildContext context,
+    String appName,
+    int invitedBonus,
+    String link,
+  ) async {
+    final strings = AppLocalizations.of(context);
+    final message = strings.inviteShareText(appName, invitedBonus, link);
+    final shared = await SystemShare.text(message, subject: strings.invite);
+    if (!shared && context.mounted) await _copy(context, link);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(appStateProvider);
+    final theme = Theme.of(context);
+    final strings = AppLocalizations.of(context);
+    final link = referralInviteUrl(state.userCode);
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
+      children: [
+        Text(
+          strings.inviteFriendTitle(state.appName),
+          textAlign: TextAlign.center,
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 6),
         Center(
-          child: Text(
-            strings.referralBonus(Referral.invitedBonus, Referral.inviterBonus),
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                child: Text(
+                  strings.inviteQrDescription(state.appName),
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    height: 1.35,
+                  ),
+                ),
+              ),
             ),
           ),
         ),
+        const SizedBox(height: 14),
+        _ResponsiveQrCode(data: link),
+        const SizedBox(height: 12),
+        Center(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SelectableText(
+                formatUserCode(state.userCode),
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 3,
+                ),
+              ),
+              const SizedBox(width: 2),
+              IconButton(
+                tooltip: strings.copyCode,
+                onPressed: () => _copyCode(context, state.userCode),
+                icon: const Icon(Icons.content_copy_rounded, size: 20),
+              ),
+            ],
+          ),
+        ),
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Text(
+              strings.referralBonus(
+                state.referralInvitedBonus,
+                state.referralInviterBonus,
+              ),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Center(
+          child: FilledButton.icon(
+            onPressed: () => _share(
+              context,
+              state.appName,
+              state.referralInvitedBonus,
+              link,
+            ),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 48),
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+            ),
+            icon: const Icon(Icons.ios_share_rounded, size: 20),
+            label: Text(strings.shareInvite),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Center(
+          child: TextButton.icon(
+            onPressed: () => _copy(context, link),
+            icon: const Icon(Icons.link_rounded, size: 18),
+            label: Text(strings.copyLink),
+          ),
+        ),
       ],
+    );
+  }
+}
+
+class _ResponsiveQrCode extends StatelessWidget {
+  const _ResponsiveQrCode({required this.data});
+
+  final String data;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final qrSize = (constraints.maxWidth - 32)
+            .clamp(248.0, 304.0)
+            .toDouble();
+        return Center(
+          // Белая подложка обязательна для стабильного считывания QR в обеих
+          // темах. Размер адаптируется к ширине, но не раздувается на планшете.
+          child: RepaintBoundary(
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: theme.colorScheme.outlineVariant),
+              ),
+              child: QrImageView(
+                data: data,
+                version: QrVersions.auto,
+                size: qrSize,
+                eyeStyle: const QrEyeStyle(
+                  eyeShape: QrEyeShape.square,
+                  color: Color(0xFF251713),
+                ),
+                dataModuleStyle: const QrDataModuleStyle(
+                  dataModuleShape: QrDataModuleShape.circle,
+                  color: Color(0xFF251713),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -220,7 +382,7 @@ class _ScanTabState extends ConsumerState<_ScanTab>
       !_disposing &&
       _lifecycleState == AppLifecycleState.resumed &&
       _branchActive &&
-      _tabController?.index == 1;
+      _tabController?.index == 2;
 
   void _requestScannerSync() {
     if (_disposing) return;
@@ -362,17 +524,13 @@ class _ScanTabState extends ConsumerState<_ScanTab>
   Future<void> _apply(String raw) async {
     if (_handling) return;
     _handling = true;
-    final payload = raw.startsWith(_qrPrefix)
-        ? raw.substring(_qrPrefix.length)
-        : raw;
-    final result = await ref
-        .read(appStateProvider.notifier)
-        .applyReferral(payload);
+    final result = await ref.read(appStateProvider.notifier).applyReferral(raw);
     if (!mounted) {
       _handling = false;
       return;
     }
     final strings = AppLocalizations.of(context);
+    final state = ref.read(appStateProvider);
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -383,8 +541,18 @@ class _ScanTabState extends ConsumerState<_ScanTab>
               : Theme.of(context).colorScheme.primary,
           size: 40,
         ),
-        title: Text(strings.referralResultTitle(result)),
-        content: Text(strings.referralResultMessage(result)),
+        title: Text(
+          strings.referralResultTitle(
+            result,
+            invitedBonus: state.referralInvitedBonus,
+          ),
+        ),
+        content: Text(
+          strings.referralResultMessage(
+            result,
+            inviterBonus: state.referralInviterBonus,
+          ),
+        ),
         actions: [
           FilledButton(
             onPressed: () => Navigator.pop(context),

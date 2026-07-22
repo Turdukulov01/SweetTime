@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/localization/app_localizations.dart';
+import '../../core/referral_invite.dart';
 import '../../shared/app_state.dart';
 import '../../shared/widgets/common.dart';
 
@@ -54,7 +55,7 @@ class _AuthPageState extends ConsumerState<AuthPage> {
     if (!mounted) return;
     switch (result) {
       case GoogleLoginResult.success:
-        _finishAuthentication();
+        await _finishAuthentication();
       case GoogleLoginResult.needsContact:
         setState(() {
           _step = _AuthStep.contactPhone;
@@ -100,7 +101,7 @@ class _AuthPageState extends ConsumerState<AuthPage> {
         .saveContactPhone(_normalizedPhone);
     if (!mounted) return;
     if (result == ContactSaveResult.success) {
-      _finishAuthentication();
+      await _finishAuthentication();
       return;
     }
     setState(() {
@@ -111,10 +112,17 @@ class _AuthPageState extends ConsumerState<AuthPage> {
     });
   }
 
-  void _finishAuthentication() {
+  Future<void> _finishAuthentication() async {
     final controller = ref.read(appStateProvider.notifier);
     final destination = controller.takePendingAuthReturn();
+    final referralCode = await controller.pendingReferralInvite();
     if (!mounted) return;
+    if (referralCode != null) {
+      context.go(
+        '/invite/$referralCompanyId/${Uri.encodeComponent(referralCode)}',
+      );
+      return;
+    }
     context.go(destination?.location ?? '/profile');
   }
 

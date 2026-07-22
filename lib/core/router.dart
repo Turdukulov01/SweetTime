@@ -17,6 +17,7 @@ import '../features/profile/profile_edit_page.dart';
 import '../features/profile/profile_page.dart';
 import '../features/profile/support_page.dart';
 import '../features/qr/qr_page.dart';
+import '../features/qr/referral_invite_page.dart';
 import '../features/shell/app_shell.dart';
 import '../shared/app_state.dart';
 
@@ -76,6 +77,14 @@ final appRouter = GoRouter(
           ],
         ),
       ],
+    ),
+    GoRoute(
+      path: '/invite/:companyId/:code',
+      parentNavigatorKey: _rootKey,
+      builder: (context, state) => ReferralInvitePage(
+        companyId: state.pathParameters['companyId'] ?? '',
+        rawCode: state.pathParameters['code'] ?? '',
+      ),
     ),
     GoRoute(
       path: '/news',

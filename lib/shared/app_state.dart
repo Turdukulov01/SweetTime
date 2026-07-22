@@ -11,6 +11,7 @@ import '../core/cart_store.dart';
 import '../core/branding_store.dart';
 import '../core/google_identity.dart';
 import '../core/order_history_store.dart';
+import '../core/referral_invite.dart';
 import '../core/story_view_store.dart';
 import '../core/theme/app_theme.dart';
 import 'app_models.dart';
@@ -130,6 +131,8 @@ class AppState {
     this.backgroundOverride,
     required this.loyaltyEarnRate,
     required this.loyaltyMaxSpendShare,
+    required this.referralInvitedBonus,
+    required this.referralInviterBonus,
     required this.themeMode,
     required this.language,
     required this.isGuest,
@@ -191,6 +194,8 @@ class AppState {
   /// Правила лояльности: дефолты из [Loyalty], могут прийти из конфига API.
   final double loyaltyEarnRate;
   final double loyaltyMaxSpendShare;
+  final int referralInvitedBonus;
+  final int referralInviterBonus;
 
   final ThemeMode themeMode;
   final AppLanguage language;
@@ -279,6 +284,8 @@ class AppState {
     bool clearBackgroundOverride = false,
     double? loyaltyEarnRate,
     double? loyaltyMaxSpendShare,
+    int? referralInvitedBonus,
+    int? referralInviterBonus,
     ThemeMode? themeMode,
     AppLanguage? language,
     bool? isGuest,
@@ -335,6 +342,8 @@ class AppState {
           : (backgroundOverride ?? this.backgroundOverride),
       loyaltyEarnRate: loyaltyEarnRate ?? this.loyaltyEarnRate,
       loyaltyMaxSpendShare: loyaltyMaxSpendShare ?? this.loyaltyMaxSpendShare,
+      referralInvitedBonus: referralInvitedBonus ?? this.referralInvitedBonus,
+      referralInviterBonus: referralInviterBonus ?? this.referralInviterBonus,
       themeMode: themeMode ?? this.themeMode,
       language: language ?? this.language,
       isGuest: isGuest ?? this.isGuest,
@@ -382,6 +391,7 @@ class AppStateController extends StateNotifier<AppState> {
     CartStore? cartStore,
     OrderHistoryVisibilityStore? orderHistoryVisibilityStore,
     StoryViewStore? storyViewStore,
+    ReferralInviteStore? referralInviteStore,
     ApiClient? api,
     GoogleIdentityProvider? googleIdentity,
     CompanyConfig? initialBranding,
@@ -402,6 +412,8 @@ class AppStateController extends StateNotifier<AppState> {
            SharedPreferencesStoryViewStore(
              companyId: api?.companyId ?? 'sweettime',
            ),
+       _referralInviteStore =
+           referralInviteStore ?? SharedPreferencesReferralInviteStore(),
        _api = api ?? ApiClient(),
        _googleIdentity = googleIdentity ?? PluginGoogleIdentityProvider(),
        _brandingStore =
@@ -421,6 +433,10 @@ class AppStateController extends StateNotifier<AppState> {
                initialBranding?.backgroundTheme ?? const BrandBackgroundTheme(),
            loyaltyEarnRate: Loyalty.earnRate,
            loyaltyMaxSpendShare: Loyalty.maxSpendShare,
+           referralInvitedBonus:
+               initialBranding?.invitedBonus ?? Referral.invitedBonus,
+           referralInviterBonus:
+               initialBranding?.inviterBonus ?? Referral.inviterBonus,
            themeMode: ThemeMode.light,
            language: AppLanguage.ru,
            isGuest: true,
@@ -462,6 +478,7 @@ class AppStateController extends StateNotifier<AppState> {
   final CartStore _cartStore;
   final OrderHistoryVisibilityStore _orderHistoryVisibilityStore;
   final StoryViewStore _storyViewStore;
+  final ReferralInviteStore _referralInviteStore;
   final BrandingStore _brandingStore;
 
   /// Токены сессии на устройстве: вход переживает перезапуск приложения.
@@ -478,6 +495,11 @@ class AppStateController extends StateNotifier<AppState> {
   bool _favoritesSyncDirty = false;
   Completer<void>? _favoritesSyncCompleter;
   Future<ApiResult<String>>? _tokenRefreshInFlight;
+  Future<ReferralResult>? _referralApplyInFlight;
+  String? _referralApplyInFlightCode;
+  String? _lastReferralApplyCode;
+  String? _lastReferralApplyCustomerId;
+  ReferralResult? _lastReferralApplyResult;
   Future<CustomerSessionResumeResult>? _sessionResumeInFlight;
   Future<void>? _companyRefreshInFlight;
   DateTime? _lastCompanyRefreshAt;
@@ -722,6 +744,8 @@ class AppStateController extends StateNotifier<AppState> {
         clearLogo: config.logoUrl == null && config.logoThumbnailUrl == null,
         loyaltyEarnRate: config.earnRate,
         loyaltyMaxSpendShare: config.maxSpendShare,
+        referralInvitedBonus: config.invitedBonus,
+        referralInviterBonus: config.inviterBonus,
         products: nextProducts,
         branches: nextBranches,
         selectedBranch: selected,
@@ -894,6 +918,8 @@ class AppStateController extends StateNotifier<AppState> {
       userCode: (profile.referralCode?.isNotEmpty ?? false)
           ? profile.referralCode
           : null,
+      invitedByCode: profile.invitedByCode,
+      clearInvitedByCode: profile.invitedByCode == null,
     );
   }
 
@@ -1954,15 +1980,83 @@ class AppStateController extends StateNotifier<AppState> {
     return true;
   }
 
+  /// Keeps an invitation through Google sign-in, contact-phone completion and
+  /// an Android process restart. The backend still performs every business
+  /// validation before any points move.
+  Future<bool> rememberReferralInvite(String rawCode) async {
+    final code = normalizeReferralCode(rawCode);
+    if (code == null) return false;
+    try {
+      await _referralInviteStore.write(code);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<String?> pendingReferralInvite() async {
+    try {
+      return await _referralInviteStore.read();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> clearPendingReferralInvite() async {
+    try {
+      await _referralInviteStore.clear();
+    } catch (_) {
+      // The server may already have accepted the referral. Local cleanup must
+      // never turn that success into an error shown to the customer.
+    }
+  }
+
   /// Погашение кода друга — теперь на сервере (правила и защита от накрутки —
   /// docs/design/REFERRAL_LOGIC.md, серверная ручка POST /customer/me/referral).
-  /// Локальная проверка формата убрана: код буквенно-цифровой (SWEETT-XXXXXX),
-  /// а привязку/бонус решает сервер. Возвращаемый профиль — источник истины.
-  Future<ReferralResult> applyReferral(String rawCode) async {
-    final code = rawCode.trim();
-    if (code.isEmpty) return ReferralResult.invalidCode;
-    if (state.isGuest) return ReferralResult.networkError;
+  /// Принимаем код, старый QR payload или новый HTTPS invite-link. Привязку и
+  /// бонус решает сервер; возвращаемый профиль — источник истины.
+  Future<ReferralResult> applyReferral(String rawCode) {
+    final code = normalizeReferralCode(rawCode);
+    if (code == null) return Future.value(ReferralResult.invalidCode);
+    if (state.isGuest) return Future.value(ReferralResult.networkError);
 
+    final customerId = state.customerId;
+    if (customerId != null &&
+        _lastReferralApplyCustomerId == customerId &&
+        _lastReferralApplyCode == code &&
+        _lastReferralApplyResult != null) {
+      return Future.value(_lastReferralApplyResult);
+    }
+
+    final active = _referralApplyInFlight;
+    if (active != null) {
+      if (_referralApplyInFlightCode == code) return active;
+      return active.then((_) => applyReferral(code));
+    }
+
+    late final Future<ReferralResult> operation;
+    operation = _applyReferralOnce(code)
+        .then((result) {
+          if (result != ReferralResult.networkError &&
+              state.customerId != null) {
+            _lastReferralApplyCustomerId = state.customerId;
+            _lastReferralApplyCode = code;
+            _lastReferralApplyResult = result;
+          }
+          return result;
+        })
+        .whenComplete(() {
+          if (identical(_referralApplyInFlight, operation)) {
+            _referralApplyInFlight = null;
+            _referralApplyInFlightCode = null;
+          }
+        });
+    _referralApplyInFlight = operation;
+    _referralApplyInFlightCode = code;
+    return operation;
+  }
+
+  Future<ReferralResult> _applyReferralOnce(String code) async {
     final epoch = _accountEpoch;
     final result = await _withCustomerToken(
       (token) => _api.redeemReferral(token, code),
@@ -1977,15 +2071,18 @@ class AppStateController extends StateNotifier<AppState> {
     final outcome = result.value!;
     if (outcome.profile != null) {
       _applyCustomerProfile(outcome.profile!);
+      await clearPendingReferralInvite();
       return ReferralResult.success;
     }
     // Бизнес-отказ: машинный detail сервера -> локализованный результат.
-    return switch (outcome.detail) {
+    final referralResult = switch (outcome.detail) {
       'self_code' => ReferralResult.selfCode,
       'already_invited' => ReferralResult.alreadyInvited,
       'not_new_user' => ReferralResult.notNewUser,
       _ => ReferralResult.invalidCode, // code_not_found / empty_code
     };
+    await clearPendingReferralInvite();
+    return referralResult;
   }
 
   /// Демо-наполнение для превью/скриншотов (по query-параметру `?seed=`), в проде не вызывается.

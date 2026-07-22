@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/router.dart';
 import 'core/localization/app_localizations.dart';
 import 'core/branding_store.dart';
+import 'core/referral_invite.dart';
 import 'core/theme/app_theme.dart';
 import 'shared/app_state.dart';
 import 'shared/app_models.dart';
@@ -46,7 +47,7 @@ class _SweetTimeAppState extends ConsumerState<SweetTimeApp>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // Загружаем production-контент; офлайн сохраняем последний доступный UI.
-    ref.read(appStateProvider.notifier).bootstrap();
+    unawaited(_bootstrapAndResumeInvite());
     final seeds = _demoSeeds();
     if (seeds.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -60,6 +61,15 @@ class _SweetTimeAppState extends ConsumerState<SweetTimeApp>
             );
       });
     }
+  }
+
+  Future<void> _bootstrapAndResumeInvite() async {
+    final controller = ref.read(appStateProvider.notifier);
+    await controller.bootstrap();
+    if (!mounted || ref.read(appStateProvider).isGuest) return;
+    final code = await controller.pendingReferralInvite();
+    if (!mounted || code == null) return;
+    appRouter.go('/invite/$referralCompanyId/${Uri.encodeComponent(code)}');
   }
 
   @override

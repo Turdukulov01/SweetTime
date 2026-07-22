@@ -127,6 +127,7 @@ class AppLocalizations {
   String get understood => _pick('Понятно', 'Түшүнүктүү', 'Got it');
   String get login => _pick('Войти', 'Кирүү', 'Sign in');
   String get myQr => _pick('Мой QR', 'Менин QR кодум', 'My QR');
+  String get invite => _pick('Пригласить', 'Чакыруу', 'Invite');
   String get scan => _pick('Сканировать', 'Сканерлөө', 'Scan');
   String get qrGuestTitle => _pick(
     'QR доступен после входа',
@@ -134,9 +135,9 @@ class AppLocalizations {
     'QR is available after sign-in',
   );
   String get qrGuestMessage => _pick(
-    'Личный QR — это ваша карта лояльности и код для приглашения друзей.',
-    'Жеке QR — лоялдуулук картаңыз жана досторду чакыруу кодуңуз.',
-    'Your personal QR is your loyalty card and friend invitation code.',
+    'После входа вы сможете показать карту лояльности и пригласить друга отдельной ссылкой.',
+    'Киргенден кийин лоялдуулук картаңызды көрсөтүп, досуңузду өзүнчө шилтеме менен чакыра аласыз.',
+    'After signing in, you can show your loyalty card and invite a friend with a separate link.',
   );
   String points(int value) => switch (language) {
     AppLanguage.ru => '$value ${_russianPointWord(value)}',
@@ -144,10 +145,61 @@ class AppLocalizations {
     AppLanguage.en => '$value ${value.abs() == 1 ? 'point' : 'points'}',
   };
   String get myQrDescription => _pick(
-    'Покажите QR бариста для начисления или списания баллов — или другу, чтобы пригласить его в SweetTime.',
-    'Упай кошуу же колдонуу үчүн QR кодду баристага, ал эми досуңузду чакыруу үчүн ага көрсөтүңүз.',
-    'Show this QR to a barista to earn or spend points, or to a friend as your invite code.',
+    'Покажите этот QR бариста для начисления или списания баллов.',
+    'Упай кошуу же колдонуу үчүн бул QR кодду баристага көрсөтүңүз.',
+    'Show this QR to a barista to earn or spend points.',
   );
+  String inviteQrDescription(String appName) => _pick(
+    'Покажите этот QR другу или отправьте ссылку. Она откроет $appName сразу на экране приглашения.',
+    'Бул QR кодду досуңузга көрсөтүңүз же шилтемени жөнөтүңүз. Ал $appName колдонмосунда чакыруу экранын дароо ачат.',
+    'Show this QR to a friend or send the link. It opens $appName directly on the invitation screen.',
+  );
+  String get shareInvite =>
+      _pick('Поделиться приглашением', 'Чакырууну бөлүшүү', 'Share invitation');
+  String get copyLink =>
+      _pick('Копировать ссылку', 'Шилтемени көчүрүү', 'Copy link');
+  String get linkCopied => _pick(
+    'Ссылка приглашения скопирована',
+    'Чакыруу шилтемеси көчүрүлдү',
+    'Invitation link copied',
+  );
+  String inviteShareText(String appName, int points, String link) => _pick(
+    'Установи $appName по моей ссылке и получи $points баллов на первый заказ: $link',
+    '$appName колдонмосун менин шилтемем аркылуу орнотуп, биринчи заказга $points упай ал: $link',
+    'Join $appName with my link and get $points points toward your first order: $link',
+  );
+  String get activateFriendCode => _pick(
+    'Активировать код друга',
+    'Достун кодун активдештирүү',
+    'Activate a friend’s code',
+  );
+  String get invitedEyebrow => _pick('ПРИГЛАШЕНИЕ', 'ЧАКЫРУУ', 'INVITATION');
+  String invitedTitle(String appName) => _pick(
+    'Вас пригласили в $appName',
+    'Сизди $appName колдонмосуна чакырышты',
+    'You were invited to $appName',
+  );
+  String inviteFriendTitle(String appName) => _pick(
+    'Пригласите друга в $appName',
+    'Досуңузду $appName колдонмосуна чакырыңыз',
+    'Invite a friend to $appName',
+  );
+  String invitedMessage(int points) => _pick(
+    'Войдите или зарегистрируйтесь — после активации приглашения вы получите $points баллов. Ими можно оплатить часть первого заказа.',
+    'Кириңиз же катталыңыз — чакыруу активдешкенден кийин $points упай аласыз. Аларды биринчи заказдын бир бөлүгүн төлөөгө колдонсоңуз болот.',
+    'Sign in or create an account. After the invitation is activated, you will receive $points points toward your first order.',
+  );
+  String get signInAndGetPoints => _pick(
+    'Войти и получить баллы',
+    'Кирип, упай алуу',
+    'Sign in and get points',
+  );
+  String get activatingInvite => _pick(
+    'Активируем приглашение…',
+    'Чакырууну активдештирип жатабыз…',
+    'Activating invitation…',
+  );
+  String get goToHome => _pick('На главную', 'Башкы бетке', 'Go home');
   String get codeCopied =>
       _pick('Код скопирован', 'Код көчүрүлдү', 'Code copied');
   String referralBonus(int invited, int inviter) => _pick(
@@ -166,9 +218,9 @@ class AppLocalizations {
     'Camera unavailable.\nEnter your friend’s code manually below.',
   );
   String get enterFriendCode => _pick(
-    'Или введите 6-значный код друга',
-    'Же досуңуздун 6 орундуу кодун жазыңыз',
-    'Or enter your friend’s 6-digit code',
+    'Введите код друга вручную',
+    'Досуңуздун кодун кол менен жазыңыз',
+    'Enter your friend’s code manually',
   );
   String get apply => _pick('Применить', 'Колдонуу', 'Apply');
   String get torchOn =>

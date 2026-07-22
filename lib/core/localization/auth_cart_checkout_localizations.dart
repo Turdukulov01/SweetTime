@@ -364,11 +364,14 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
     OrderStatus.cancelled => _pick('Отменен', 'Жокко чыгарылды', 'Cancelled'),
   };
 
-  String referralResultTitle(ReferralResult value) => switch (value) {
+  String referralResultTitle(
+    ReferralResult value, {
+    int invitedBonus = Referral.invitedBonus,
+  }) => switch (value) {
     ReferralResult.success => _pick(
-      'Код принят! +${Referral.invitedBonus} баллов',
-      'Код кабыл алынды! +${Referral.invitedBonus} упай',
-      'Code accepted! +${Referral.invitedBonus} points',
+      'Код принят! +$invitedBonus баллов',
+      'Код кабыл алынды! +$invitedBonus упай',
+      'Code accepted! +$invitedBonus points',
     ),
     ReferralResult.selfCode => _pick(
       'Это ваш код',
@@ -397,11 +400,14 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
     ),
   };
 
-  String referralResultMessage(ReferralResult value) => switch (value) {
+  String referralResultMessage(
+    ReferralResult value, {
+    int inviterBonus = Referral.inviterBonus,
+  }) => switch (value) {
     ReferralResult.success => _pick(
-      'Ваш друг получит ${Referral.inviterBonus} баллов после вашего первого выполненного заказа.',
-      'Биринчи аяктаган заказыңыздан кийин досуңуз ${Referral.inviterBonus} упай алат.',
-      'Your friend will receive ${Referral.inviterBonus} points after your first completed order.',
+      'Ваш друг получит $inviterBonus баллов после вашего первого выполненного заказа.',
+      'Биринчи аяктаган заказыңыздан кийин досуңуз $inviterBonus упай алат.',
+      'Your friend will receive $inviterBonus points after your first completed order.',
     ),
     ReferralResult.selfCode => _pick(
       'Пригласить самого себя нельзя.',

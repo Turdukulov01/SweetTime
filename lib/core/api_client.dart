@@ -48,6 +48,8 @@ class CompanyConfig {
     required this.accentColor,
     required this.earnRate,
     required this.maxSpendShare,
+    this.invitedBonus,
+    this.inviterBonus,
     this.logoUrl,
     this.logoThumbnailUrl,
     this.backgroundTheme = const BrandBackgroundTheme(),
@@ -57,6 +59,8 @@ class CompanyConfig {
   final Color? accentColor;
   final double? earnRate;
   final double? maxSpendShare;
+  final int? invitedBonus;
+  final int? inviterBonus;
   final String? logoUrl;
   final String? logoThumbnailUrl;
   final BrandBackgroundTheme backgroundTheme;
@@ -68,20 +72,29 @@ class CompanyConfig {
         : '#${accentColor!.toARGB32().toRadixString(16).substring(2).toUpperCase()}',
     'earnRate': earnRate,
     'maxSpendShare': maxSpendShare,
+    'referral': {'invitedBonus': invitedBonus, 'inviterBonus': inviterBonus},
     'logoUrl': logoUrl,
     'logoThumbnailUrl': logoThumbnailUrl,
     'background': backgroundTheme.toJson(),
   };
 
-  factory CompanyConfig.fromJson(Map<String, dynamic> json) => CompanyConfig(
-    appName: json['appName'] as String?,
-    accentColor: parseHexColor(json['accentColor'] as String?),
-    earnRate: (json['earnRate'] as num?)?.toDouble(),
-    maxSpendShare: (json['maxSpendShare'] as num?)?.toDouble(),
-    logoUrl: _resolvePublicUrl(json['logoUrl']),
-    logoThumbnailUrl: _resolvePublicUrl(json['logoThumbnailUrl']),
-    backgroundTheme: BrandBackgroundTheme.fromJson(json['background']),
-  );
+  factory CompanyConfig.fromJson(Map<String, dynamic> json) {
+    final referral = json['referral'];
+    final referralMap = referral is Map<String, dynamic>
+        ? referral
+        : const <String, dynamic>{};
+    return CompanyConfig(
+      appName: json['appName'] as String?,
+      accentColor: parseHexColor(json['accentColor'] as String?),
+      earnRate: (json['earnRate'] as num?)?.toDouble(),
+      maxSpendShare: (json['maxSpendShare'] as num?)?.toDouble(),
+      invitedBonus: (referralMap['invitedBonus'] as num?)?.toInt(),
+      inviterBonus: (referralMap['inviterBonus'] as num?)?.toInt(),
+      logoUrl: _resolvePublicUrl(json['logoUrl']),
+      logoThumbnailUrl: _resolvePublicUrl(json['logoThumbnailUrl']),
+      backgroundTheme: BrandBackgroundTheme.fromJson(json['background']),
+    );
+  }
 }
 
 @immutable
@@ -629,11 +642,17 @@ class ApiClient {
       final loyaltyMap = loyalty is Map<String, dynamic>
           ? loyalty
           : const <String, dynamic>{};
+      final referral = json['referral'];
+      final referralMap = referral is Map<String, dynamic>
+          ? referral
+          : const <String, dynamic>{};
       return CompanyConfig(
         appName: (json['appName'] ?? json['name']) as String?,
         accentColor: parseHexColor(json['accentColor'] as String?),
         earnRate: (loyaltyMap['earnRate'] as num?)?.toDouble(),
         maxSpendShare: (loyaltyMap['maxSpendShare'] as num?)?.toDouble(),
+        invitedBonus: (referralMap['invitedBonus'] as num?)?.toInt(),
+        inviterBonus: (referralMap['inviterBonus'] as num?)?.toInt(),
         logoUrl: _resolvePublicUrl(json['logoUrl']),
         logoThumbnailUrl: _resolvePublicUrl(json['logoThumbnailUrl']),
         backgroundTheme: BrandBackgroundTheme.fromJson(json['background']),

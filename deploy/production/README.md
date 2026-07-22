@@ -22,7 +22,10 @@ and inode capacity. The script makes no server changes and does not print contai
 ## Required preflight
 
 1. Copy `.env.example` to `.env` on the server and replace every placeholder. Never commit `.env`.
-2. Pre-create `/srv/sweetime/postgres`, `/srv/sweetime/media` and `/srv/sweetime/backups/snapshots`
+2. Pre-create `/srv/sweetime/postgres`, `/srv/sweetime/media`,
+   `/srv/sweetime/downloads` and `/srv/sweetime/backups/snapshots`. Copy the
+   current signed Android artifact to `/srv/sweetime/downloads/SweetTime.apk`;
+   this powers the pre-Google-Play fallback on referral landing pages.
    with the UID/GID declared in `.env`; verify free bytes and inodes.
 3. Provide a real company/first-owner bootstrap before public traffic. Production deliberately uses
    `SEED_MODE=none` and `OTP_MODE=disabled`; known demo credentials are never created.

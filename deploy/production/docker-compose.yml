@@ -111,6 +111,7 @@ services:
       - "${SWEETIME_HTTP_BIND:-127.0.0.1}:${SWEETIME_HTTP_PORT:-8080}:80"
     volumes:
       - /srv/sweetime/media:/srv/sweetime/media:ro
+      - /srv/sweetime/downloads:/srv/sweetime/downloads:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       backend:

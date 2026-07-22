@@ -1572,3 +1572,70 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
 - Copied the single-file Android installer to `dist/SweetTime-Android-test-2026-07-22.apk` for tester distribution.
 - Artifact: version `1.0.0+1`, 81,789,794 bytes (~78 MiB), SHA-256 `F8E43A97C9452E1C3D7580B7069CB92D914E9DC06D01A92929DD0802A1177B22`.
 - This is a direct-install APK; recipients should receive it as a document/file and allow installation from the chosen messenger/file manager when Android prompts them.
+
+## 2026-07-22 — referral acquisition flow (local implementation, rollout pending)
+
+- Baseline before this work is committed at `8e3cea0` (`Prepare SweetTime for IOS`); only the old
+  `.codex-phone-install.png` was untracked. Current referral changes are intentionally still uncommitted
+  until tests/build/device acceptance complete, so rollback remains unambiguous against that baseline.
+- Split the overloaded customer QR into three explicit tabs: loyalty QR (`SWEETTIME:LOYALTY:*`),
+  invitation HTTPS QR/share/copy, and scanner/manual activation. New canonical links are
+  `https://lnp-corporation.duckdns.org/invite/sweettime/<code>`; the parser remains backward-compatible
+  with `SWEETTIME:REF:*` and plain codes.
+- Added `/invite/:companyId/:code` mobile flow. The code is persisted in SharedPreferences before auth,
+  survives Google account selection/contact-phone completion/process restart, and is automatically
+  redeemed only when the account is ready. Business validation and point movement remain entirely on
+  the existing backend endpoint; network failure keeps the pending invite for retry, final business
+  outcomes clear it.
+- Added a dependency-free Android native share bridge, Android verified App Link manifest entry,
+  backend invite landing page and `/.well-known/assetlinks.json`. Production assetlinks exposes only the
+  current release signing certificate. Production nginx routes these endpoints and serves the signed pre-Play
+  APK from `/srv/sweetime/downloads/SweetTime.apk`; compose and preflight now include that directory.
+- Added Flutter pure/parser/persistence regression tests and backend landing/assetlinks tests; updated
+  RU/KY/EN copy and `REFERRAL_LOGIC.md`. Version bumped to `1.0.1+2`.
+- Verification blocker is environmental, not an observed code failure: Codex sandbox cannot read the
+  user's Pub Cache or write the Flutter SDK lockfile; Computer Use helper is unavailable. `dart format`
+  and `git diff --check` pass, but analyze/tests/release build must be launched once from the user's normal
+  PowerShell. After that Codex can install with ADB and perform route/UI smoke checks on `f3bff2a5`.
+- Further isolation confirmed the same boundary: direct `flutter_tools.snapshot` reaches the build command
+  but cannot update SDK cache stamps, while direct Gradle reaches the cached 9.1 distribution but cannot
+  create the native-library lock in the user's read-only Gradle home. The device remains connected. No
+  generated `.tool-home` telemetry files were kept in the worktree.
+- First user-side compile exposed one duplicate `AppLocalizations.retry` getter introduced with the invite
+  copy. Removed the later duplicate and retained the original shared RU/KY/EN getter. The reported test and
+  release-build failures all had this single compile cause; the `mobile_scanner` KGP message is only a future
+  migration warning. A pre-existing APK left in `build/` after the failed build must not be treated as fresh.
+- User-side release build then succeeded (`1.0.1+2`, 81,872,578 bytes, SHA-256
+  `28B884A0EE594951156623FD7AEB00C2423248AD943725EDBF0FCFF96D3DD551`) and Codex installed it with
+  `adb install -r` on `f3bff2a5`; the production signer fingerprint matches assetlinks. Device smoke verified
+  app startup, three QR tabs, invite QR/code/bonus copy, Android share chooser, copy action, and direct HTTPS
+  routing into the invitation screen. Smoke also caught and locally fixed two UX/state issues for the next
+  build: inviter-tab title now says “Invite a friend” (RU/KY/EN), and the invite page listens for delayed
+  `accountReady` hydration so cold-start links auto-redeem after session restoration. Rebuild/reinstall and
+  final cold-start verification remain pending for these last two fixes.
+
+### Final mobile verification and QR UX pass
+
+- Reworked the QR surface after comparing the previous and current device layouts: all three tabs now share
+  the width equally, both QR codes use a larger responsive white scan target, the invitation explanation is a
+  compact readable card, the referral code has its own copy action, and share/copy-link actions no longer form
+  two oversized competing buttons. The inviter tab uses the correct RU/KY/EN title.
+- Fixed the cold-start hydration race by listening for `accountReady`: an invitation opened before the stored
+  session finishes restoring is now applied immediately after the account becomes ready instead of being lost.
+- A final review caught and fixed a competing-screen race after Google auth: referral redemption is now
+  single-flight and memoized per customer/code, so auth, bootstrap and the original invite screen cannot send
+  duplicate POSTs or replace a successful result with `already_invited`. A regression starts concurrent calls
+  and proves that the API receives exactly one request. Referral bonuses are parsed/cached from company config
+  and used by QR, loyalty, activation-result and first-order UI instead of hard-coded values. The public landing
+  avoids stating a stale amount, and production `assetlinks.json` no longer authorizes the debug certificate.
+- Verification completed: `flutter analyze --no-pub` is clean, Flutter tests pass 95/95, and the production
+  `1.0.1+2` APK was built with the production API and Google Web audience, installed with `adb install -r` on
+  `f3bff2a5`, and exercised on-device. Direct HTTPS invitation routing, delayed-session auto-redemption, code
+  copy, link copy and Android native share chooser (Telegram/WhatsApp/Messages) all pass.
+- Final APK after the race/config fix: `build/app/outputs/flutter-apk/app-release.apk`, 81,889,190 bytes,
+  SHA-256 `CFEBCB8023B4858B04D9E7259DB90A87C2A1732DE5F65E6ED4291C714175AF43`; signer SHA-256
+  `0312D7D2993769A8169E0CE4815D4C9B96E9008C4B95FE8ED66D2A873FCCD044`.
+- The added backend landing/assetlinks test could not be executed in this Windows session because neither a
+  Python runtime nor Docker daemon is available. Flutter/mobile acceptance is complete; production deployment
+  of the new landing, `assetlinks.json`, nginx routes and APK download plus a real two-account referral test
+  remains separate rollout work.
