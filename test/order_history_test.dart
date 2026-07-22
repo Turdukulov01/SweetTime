@@ -96,6 +96,63 @@ void main() {
     expect(order?.items.single.toppings?.single.priceDelta, 50);
   });
 
+  test('order parser accepts backend snapshots with pending translations', () {
+    final order = parseCustomerOrderHistoryEntry({
+      'id': 'o-partial-locales',
+      'number': 'SW-3002',
+      'branchId': 'b1',
+      'type': 'pickup',
+      'status': 'new',
+      'readyTime': 'asap',
+      'itemsVersion': 2,
+      'items': [
+        {
+          'productId': 'strawberry-jam',
+          'productName': {
+            'ru': 'Клубничный джем',
+            'ky': null,
+            'en': '',
+          },
+          'productDescription': null,
+          'sizeId': 's',
+          'size': {'ru': 'Маленький', 'ky': null, 'en': null},
+          'toppingIds': ['pearls'],
+          'toppings': [
+            {
+              'id': 'pearls',
+              'name': {'ru': 'Тапиока', 'ky': null, 'en': null},
+              'priceDelta': 40,
+            },
+          ],
+          'sugarPercent': 50,
+          'ice': 'regular',
+          'unitPrice': 3000,
+          'quantity': 1,
+          'total': 3000,
+        },
+      ],
+      'total': 3000,
+      'paymentMethod': 'mock',
+      'pointsUsed': 0,
+      'pointsEarned': 150,
+      'createdAt': '2026-07-21T09:30:00Z',
+    });
+
+    expect(order, isNotNull);
+    expect(
+      order!.items.single.productName.resolve(AppLanguage.ky),
+      'Клубничный джем',
+    );
+    expect(
+      order.items.single.productName.resolve(AppLanguage.en),
+      'Клубничный джем',
+    );
+    expect(
+      order.items.single.toppings!.single.name.resolve(AppLanguage.en),
+      'Тапиока',
+    );
+  });
+
   testWidgets('profile shows one compact order-history entry', (tester) async {
     final controller = _controller(_MemoryOrderHistoryStore())
       ..seedDemo(auth: true, history: true)

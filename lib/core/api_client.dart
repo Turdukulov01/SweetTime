@@ -500,9 +500,21 @@ LocalizedText? _localizedSnapshot(dynamic raw) {
   }
   if (raw is! Map<String, dynamic>) return null;
   final ru = _requiredString(raw['ru']);
-  final ky = _requiredString(raw['ky']);
-  final en = _requiredString(raw['en']);
-  if (ru == null || ky == null || en == null) return null;
+  final kyRaw = raw['ky'];
+  final enRaw = raw['en'];
+  if (ru == null ||
+      (kyRaw != null && kyRaw is! String) ||
+      (enRaw != null && enRaw is! String)) {
+    return null;
+  }
+
+  // The backend contract requires RU but explicitly allows KY/EN to be null.
+  // Order snapshots keep that historical content immutable, so a product that
+  // was saved before its translations were completed must still be readable.
+  // Falling back to RU here matches the rest of the storefront and prevents a
+  // single partially translated item from invalidating the whole history.
+  final ky = _optionalString(kyRaw) ?? ru;
+  final en = _optionalString(enRaw) ?? ru;
   return LocalizedText(ru: ru, ky: ky, en: en);
 }
 

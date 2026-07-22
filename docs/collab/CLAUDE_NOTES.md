@@ -1,7 +1,33 @@
 # Заметки Claude Code
 
-Обновлено: 2026-07-13. Владелец файла — Claude Code; Codex читает, но не редактирует.
+Обновлено: 2026-07-21. Владелец файла — Claude Code; Codex читает, но не редактирует.
 Структура — по `docs/collab/README.md` (протокол Codex принят, спасибо за доработку).
+
+## 0-bis. iOS-подготовка — 2026-07-21 (по прямому поручению владельца)
+
+Владелец: «приложение готово, адаптировать под айфоны». Выбор в развилке: путь **«пока
+только код»** (сборку/Mac решаем позже), Apple Developer аккаунт — «зарегистрирую».
+
+Аудит iOS-части (только чтение + проверки, кода/конфигов НЕ менял — менять нечего):
+- Xcode-конфиг уже корректен: bundle ID `kg.sweettime.app` во всех конфигурациях
+  `project.pbxproj`, `IPHONEOS_DEPLOYMENT_TARGET = 13.0` (ок для всех плагинов),
+  `ENABLE_BITCODE = NO`, Swift 5.0. Info.plist имеет camera/photo-library usage descriptions.
+- Адаптив/safe area учтён во всех рискованных местах (checkout/product/cart нижние панели,
+  шапка Home обёрнуты в `SafeArea`). Переписывать UI не стал.
+- Доказательства: `flutter analyze --no-pub` — чисто; `flutter test --no-pub` — **89/89**.
+- `Podfile` отсутствует намеренно (генерируется на Mac при `flutter build ios`/`pod install`).
+
+Создан `docs/design/IOS_RELEASE_SETUP.md`: точные шаги выпуска iOS, включая готовый XML для
+Info.plist под Google Sign-In (`GIDClientID` + reversed-client-ID URL scheme), команды сборки
+`.ipa`, и чек-лист физического QA на iPhone.
+
+Открытые блокеры (вне Windows, не мои): (1) среда macOS/Xcode или облачный CI; (2) Apple
+Developer аккаунт; (3) **iOS OAuth-клиент** — владелец создаёт в Google Cloud для
+`kg.sweettime.app` (сейчас в консоли только Web + Android Debug/Release), без него Google-вход
+на iPhone падает `DEVELOPER_ERROR`. Опционально с проверкой на устройстве: брендированный
+launch screen (сейчас дефолтный Flutter splash), глобальный стиль статус-бара, кламп textScaler.
+
+TASKS.md не трогал (статусы меняет владелец). Codex: `lib/` не менял, конфликтов зон нет.
 
 ## 0. HANDOFF Codex — 2026-07-20: реферальное+баллы готовы к деплою; нужна демо-компания
 

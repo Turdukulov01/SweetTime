@@ -1552,3 +1552,23 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
 - Production admin rollout completed from archive `sweettime-history-preview-766d2ec.tar.gz`: archive SHA-256
   verified, `.env` preserved, admin/nginx recreated healthy. Public smoke: `/ready` 200, `/login` 200 and
   SweetTime company config 200. No database migration or backend restart was required.
+# 2026-07-21 — найден корень пустой истории заказов после rollout
+
+- Пользователь подтвердил, что после `766d2ec` экран истории всё ещё пуст, хотя заказы видны в админке.
+- Причина в несовпадении уже утверждённых контрактов: backend `LocalizedText` требует только `ru` и допускает
+  `ky/en = null`, а `_localizedSnapshot` во Flutter требовал три непустые строки. Один созданный владельцем
+  товар/размер/топпинг без завершённых переводов делал весь `/auth/customer/me/orders` недоступным для клиента.
+- Исправлен `lib/core/api_client.dart`: обязательный RU сохраняется, отсутствующие KY/EN получают RU fallback;
+  значения неправильного типа по-прежнему отклоняются. Добавлен production-shaped regression test в
+  `test/order_history_test.dart` для товара, размера и топпинга с null/blank переводами.
+- `dart format` и `git diff --check` прошли. Полный Flutter test/analyze/build из Codex-среды заблокирован не
+  кодом: текущий sandbox-user не имеет read/write к пользовательским Flutter SDK/Pub Cache; обычный `flutter`
+  бесконечно повторяет lock bootstrap, прямой snapshot подтверждает access denied. Нужен запуск проверки и
+  release build из пользовательского PowerShell, затем `adb install -r` без очистки данных.
+
+## 2026-07-22 — Android test distribution artifact
+
+- Confirmed that `build/app/outputs/flutter-apk/app-release.apk` was built after the latest order-history parser fix and its regression test.
+- Copied the single-file Android installer to `dist/SweetTime-Android-test-2026-07-22.apk` for tester distribution.
+- Artifact: version `1.0.0+1`, 81,789,794 bytes (~78 MiB), SHA-256 `F8E43A97C9452E1C3D7580B7069CB92D914E9DC06D01A92929DD0802A1177B22`.
+- This is a direct-install APK; recipients should receive it as a document/file and allow installation from the chosen messenger/file manager when Android prompts them.

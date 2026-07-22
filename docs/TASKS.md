@@ -398,6 +398,11 @@ below remains authoritative; this section records the current execution order.
   app structure, branch selector, hero, promotions, stories, product images, logo/background draft and accent.
   Flutter analyze is clean, full Flutter tests 88/88, admin typecheck and content tests 14/14 pass. The signed
   production APK is installed and the admin container is deployed; physical history/preview acceptance remains.
+  **Follow-up 2026-07-21:** production order snapshots legitimately allow untranslated `ky`/`en` values to be
+  null, but Flutter treated either missing translation as corruption and rejected the entire history response.
+  The parser now keeps the required RU snapshot and uses it as the display fallback for pending translations;
+  a regression test covers product, size and topping snapshots. A replacement APK still needs to be built and
+  installed before owner acceptance.
 - [ ] **[implemented locally 2026-07-16; production rollout and phone acceptance pending]
   Catalog editing, rolling sessions, order refresh, promo codes and partial loyalty spend.** Admin menu
   exposes an explicit edit action, editable product data, real image upload/delete with photo preview,
