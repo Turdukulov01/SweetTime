@@ -42,10 +42,14 @@ class SweetTimeApp extends ConsumerStatefulWidget {
 
 class _SweetTimeAppState extends ConsumerState<SweetTimeApp>
     with WidgetsBindingObserver {
+  static const _scheduledContentRefreshInterval = Duration(seconds: 30);
+  Timer? _scheduledContentRefreshTimer;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _startScheduledContentRefresh();
     // Загружаем production-контент; офлайн сохраняем последний доступный UI.
     unawaited(_bootstrapAndResumeInvite());
     final seeds = _demoSeeds();
@@ -78,11 +82,29 @@ class _SweetTimeAppState extends ConsumerState<SweetTimeApp>
       final controller = ref.read(appStateProvider.notifier);
       unawaited(controller.refreshCompanyData());
       unawaited(controller.resumeCustomerSession());
+      _startScheduledContentRefresh();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      _scheduledContentRefreshTimer?.cancel();
+      _scheduledContentRefreshTimer = null;
     }
+  }
+
+  void _startScheduledContentRefresh() {
+    _scheduledContentRefreshTimer?.cancel();
+    _scheduledContentRefreshTimer = Timer.periodic(
+      _scheduledContentRefreshInterval,
+      (_) => unawaited(
+        ref.read(appStateProvider.notifier).refreshPublishedContent(),
+      ),
+    );
   }
 
   @override
   void dispose() {
+    _scheduledContentRefreshTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }

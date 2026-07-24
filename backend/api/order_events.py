@@ -105,11 +105,17 @@ def encode_sse(
     return "\n".join(lines) + "\n\n"
 
 
-def event_payload(order_id: str, number: str, status: str) -> dict[str, str]:
+def event_payload(
+    order_id: str,
+    number: str,
+    status: str,
+    branch_id: str,
+) -> dict[str, str]:
     return {
         "orderId": order_id,
         "number": number,
         "status": status,
+        "branchId": branch_id,
         "occurredAt": datetime.now(timezone.utc)
         .isoformat(timespec="milliseconds")
         .replace("+00:00", "Z"),

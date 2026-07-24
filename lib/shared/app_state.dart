@@ -502,6 +502,7 @@ class AppStateController extends StateNotifier<AppState> {
   ReferralResult? _lastReferralApplyResult;
   Future<CustomerSessionResumeResult>? _sessionResumeInFlight;
   Future<void>? _companyRefreshInFlight;
+  Future<void>? _publishedContentRefreshInFlight;
   DateTime? _lastCompanyRefreshAt;
   int _cartRevision = 0;
   bool _cartPersistRunning = false;
@@ -693,6 +694,54 @@ class AppStateController extends StateNotifier<AppState> {
         });
     _companyRefreshInFlight = operation;
     return operation;
+  }
+
+  /// Refreshes only the public story/news endpoints.
+  ///
+  /// The app calls this lightweight path while it remains in the foreground so
+  /// a scheduled publication appears without reopening the app or reloading the
+  /// catalog, branches and branding. Concurrent ticks are coalesced.
+  Future<void> refreshPublishedContent() {
+    final fullRefresh = _companyRefreshInFlight;
+    if (fullRefresh != null) return fullRefresh;
+    final active = _publishedContentRefreshInFlight;
+    if (active != null) return active;
+
+    late final Future<void> operation;
+    operation = _loadPublishedContent().whenComplete(() {
+      if (identical(_publishedContentRefreshInFlight, operation)) {
+        _publishedContentRefreshInFlight = null;
+      }
+    });
+    _publishedContentRefreshInFlight = operation;
+    return operation;
+  }
+
+  Future<void> _loadPublishedContent() async {
+    final homeStories = await _api.fetchHomeStories();
+    final legacyNews = homeStories == null ? await _api.fetchNews() : null;
+    final collections = await _api.fetchStoryCollections();
+    final newsPosts = await _api.fetchNewsPosts();
+
+    // A failed endpoint keeps its last successful value. An empty list is a
+    // valid server response and removes content that expired or was unpublished.
+    if (homeStories == null &&
+        legacyNews == null &&
+        collections == null &&
+        newsPosts == null) {
+      return;
+    }
+    state = state.copyWith(
+      newsStories: homeStories != null
+          ? selectHomeStories(homeStories)
+          : legacyNews != null
+          ? selectHomeStories(legacyNews)
+          : state.newsStories,
+      storyCollections:
+          collections ??
+          (legacyNews != null ? const [] : state.storyCollections),
+      newsPosts: newsPosts ?? (legacyNews != null ? const [] : state.newsPosts),
+    );
   }
 
   Future<bool> _loadCompanyData() async {

@@ -1,14 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { CalendarClock, FileText, Pencil, Plus, RefreshCw } from "lucide-react";
+import { FileText, Pencil, Plus, RefreshCw } from "lucide-react";
 import { LocalizedField } from "@/components/localized-field";
 import { Toggle } from "@/components/toggle";
 import {
   ContentDrawer,
   DeleteButton,
   MediaPicker,
-  PublicationBadge
+  PublicationBadge,
+  PublicationTimingPicker,
+  type PublicationMode
 } from "@/components/news/content-shared";
 import { describeApiError, type NewsPostWrite } from "@/lib/api";
 import { useContentManager } from "@/lib/content-store";
@@ -26,6 +28,7 @@ interface PostDraft {
   summary: LocalizedText;
   body: LocalizedText;
   isPublished: boolean;
+  publicationMode: PublicationMode;
   publishedAt: string;
 }
 
@@ -39,12 +42,15 @@ function PostEditor({ post, onClose }: { post: NewsPost | null; onClose: () => v
     summary: { ...post.summary },
     body: { ...post.body },
     isPublished: post.isPublished,
+    publicationMode:
+      Date.parse(post.publishedAt) > Date.now() ? "scheduled" : "now",
     publishedAt: toDateTimeLocal(post.publishedAt)
   } : {
     title: emptyLocalized(),
     summary: emptyLocalized(),
     body: emptyLocalized(),
     isPublished: false,
+    publicationMode: "now",
     publishedAt: toDateTimeLocal(new Date().toISOString())
   });
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -53,10 +59,30 @@ function PostEditor({ post, onClose }: { post: NewsPost | null; onClose: () => v
   const [error, setError] = useState<string | null>(null);
   const currentMedia = persisted?.media ?? EMPTY_MEDIA;
 
+  function resolvedPublishedAt(): string | null {
+    if (draft.publicationMode === "scheduled") {
+      return fromDateTimeLocal(draft.publishedAt);
+    }
+    if (
+      post?.isPublished &&
+      Date.parse(post.publishedAt) <= Date.now()
+    ) {
+      return post.publishedAt;
+    }
+    return new Date().toISOString();
+  }
+
   function validate(): string | null {
     const titleError = localizedPublishError(draft.title);
     if (titleError) return `Заголовок обязателен на трёх языках. ${titleError}`;
-    if (!fromDateTimeLocal(draft.publishedAt)) return "Укажите корректную дату публикации.";
+    const publishedAt = resolvedPublishedAt();
+    if (!publishedAt) return "Укажите корректную дату публикации.";
+    if (
+      draft.publicationMode === "scheduled" &&
+      Date.parse(publishedAt) <= Date.now()
+    ) {
+      return "Для публикации по расписанию выберите будущее время.";
+    }
     if (draft.isPublished) {
       const summaryError = localizedPublishError(draft.summary);
       if (summaryError) return `Анонс: ${summaryError}`;
@@ -77,7 +103,7 @@ function PostEditor({ post, onClose }: { post: NewsPost | null; onClose: () => v
       summary: draft.summary,
       body: draft.body,
       isPublished: draft.isPublished,
-      publishedAt: fromDateTimeLocal(draft.publishedAt) as string
+      publishedAt: resolvedPublishedAt() as string
     };
     setBusy(true);
     setError(null);
@@ -122,7 +148,23 @@ function PostEditor({ post, onClose }: { post: NewsPost | null; onClose: () => v
       <LocalizedField label="Заголовок" required requiredAll alwaysExpanded value={draft.title} onChange={(title) => setDraft({ ...draft, title })} maxLength={120} />
       <LocalizedField label="Краткий анонс" required={draft.isPublished} requiredAll={draft.isPublished} alwaysExpanded multiline value={draft.summary} onChange={(summary) => setDraft({ ...draft, summary })} maxLength={280} />
       <LocalizedField label="Полный текст" required={draft.isPublished} requiredAll={draft.isPublished} alwaysExpanded multiline value={draft.body} onChange={(body) => setDraft({ ...draft, body })} maxLength={20000} />
-      <label className="block"><span className="mb-1.5 block text-sm font-medium text-coffee-700">Дата публикации</span><input type="datetime-local" value={draft.publishedAt} onChange={(event) => setDraft({ ...draft, publishedAt: event.target.value })} className="input" /><span className="mt-1.5 flex items-center gap-1 text-xs text-coffee-500"><CalendarClock className="h-3.5 w-3.5" />Для новой публикации подставляется автоматически; при необходимости дату можно изменить.</span></label>
+      <PublicationTimingPicker
+        mode={draft.publicationMode}
+        value={draft.publishedAt}
+        onModeChange={(publicationMode) =>
+          setDraft((current) => ({
+            ...current,
+            publicationMode,
+            isPublished:
+              publicationMode === "scheduled"
+                ? true
+                : current.isPublished
+          }))
+        }
+        onValueChange={(publishedAt) =>
+          setDraft((current) => ({ ...current, publishedAt }))
+        }
+      />
       <div className="flex items-center justify-between rounded-2xl border border-coffee-900/10 p-4"><div><p className="text-sm font-medium text-coffee-700">Опубликовать</p><p className="text-xs text-coffee-500">Будущая дата оставит запись запланированной до указанного времени.</p></div><Toggle checked={draft.isPublished} onChange={(isPublished) => setDraft({ ...draft, isPublished })} label="Опубликовать запись" /></div>
     </ContentDrawer>
   );

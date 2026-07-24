@@ -66,6 +66,39 @@ export interface AdminUser {
   branchId?: string;
 }
 
+/** Управляемая owner-ом учётная запись сотрудника компании. */
+export interface StaffMember extends AdminUser {
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Роли, которые можно выдать обычным приглашением. Owner создаётся отдельно. */
+export type StaffAssignableRole = Exclude<Role, "owner">;
+
+export interface StaffInvitation {
+  id: string;
+  companyId: string;
+  email: string;
+  role: StaffAssignableRole;
+  branchId?: string;
+  status: string;
+  deliveryStatus: string;
+  expiresAt: string;
+  createdAt: string;
+  sentAt?: string;
+  acceptedAt?: string;
+}
+
+export interface StaffInvitationPreview {
+  email: string;
+  companyId: string;
+  companyName: string;
+  role: StaffAssignableRole;
+  branchName?: string;
+  expiresAt: string;
+}
+
 export interface Branch {
   id: string;
   companyId: string;

@@ -42,6 +42,7 @@ services:
       GOOGLE_AUTH_ENABLED: ${GOOGLE_AUTH_ENABLED:-false}
       GOOGLE_OAUTH_WEB_CLIENT_ID: ${GOOGLE_OAUTH_WEB_CLIENT_ID:-}
       GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS: ${GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS:-[]}
+      STAFF_INVITE_PUBLIC_URL: ${ADMIN_PUBLIC_API_URL:?Set the public HTTPS admin origin in deploy/production/.env}
       SEED_MODE: none
     command: ["alembic", "-c", "/app/api/alembic.ini", "upgrade", "head"]
     depends_on:
@@ -64,6 +65,15 @@ services:
       GOOGLE_AUTH_ENABLED: ${GOOGLE_AUTH_ENABLED:-false}
       GOOGLE_OAUTH_WEB_CLIENT_ID: ${GOOGLE_OAUTH_WEB_CLIENT_ID:-}
       GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS: ${GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS:-[]}
+      STAFF_INVITE_PUBLIC_URL: ${ADMIN_PUBLIC_API_URL:?Set the public HTTPS admin origin in deploy/production/.env}
+      STAFF_INVITE_EXPIRY_HOURS: ${STAFF_INVITE_EXPIRY_HOURS:-72}
+      STAFF_INVITE_DELIVERY_MODE: ${STAFF_INVITE_DELIVERY_MODE:-manual}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
       SEED_MODE: none
       MEDIA_ROOT: /app/media
       MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:-/media}

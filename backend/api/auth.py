@@ -79,6 +79,9 @@ def staff_out(user: AdminUser) -> schemas.StaffUserOut:
         role=user.role,
         branchId=user.branch_id,
         companyId=user.company_id,
+        isActive=user.is_active,
+        createdAt=user.created_at,
+        updatedAt=user.updated_at,
     )
 
 
@@ -238,7 +241,11 @@ def staff_login(
     ).first()
     # Одинаковый ответ на «нет такого email» и «неверный пароль» — не
     # подсказываем, какие адреса заведены.
-    if user is None or not verify_password(body.password, user.hashed_password):
+    if (
+        user is None
+        or not user.is_active
+        or not verify_password(body.password, user.hashed_password)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -272,7 +279,11 @@ def staff_login_global(
             func.lower(AdminUser.email) == body.email.strip().lower()
         )
     ).first()
-    if user is None or not verify_password(body.password, user.hashed_password):
+    if (
+        user is None
+        or not user.is_active
+        or not verify_password(body.password, user.hashed_password)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -437,7 +448,11 @@ def refresh_tokens(
     typ = payload.get("typ")
     if typ == "staff":
         user = db.get(AdminUser, payload["sub"])
-        if user is None or user.company_id != company.id:
+        if (
+            user is None
+            or user.company_id != company.id
+            or not user.is_active
+        ):
             raise unauthorized
         access, refresh = create_token_pair(
             subject=user.id,

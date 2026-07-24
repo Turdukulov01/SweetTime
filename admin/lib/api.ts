@@ -43,7 +43,11 @@ import type {
   Category,
   ToppingCatalogItem,
   Promotion,
-  Role
+  Role,
+  StaffAssignableRole,
+  StaffInvitation,
+  StaffInvitationPreview,
+  StaffMember
 } from "@/lib/types";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/+$/, "");
@@ -302,6 +306,7 @@ export interface StaffLoginResult {
 }
 
 const KNOWN_ROLES: Role[] = ["owner", "manager", "barista"];
+const ASSIGNABLE_ROLES: StaffAssignableRole[] = ["manager", "barista"];
 
 function mapStaffUser(u: ApiStaffUser): AdminUser {
   if (!KNOWN_ROLES.includes(u.role as Role)) {
@@ -314,6 +319,83 @@ function mapStaffUser(u: ApiStaffUser): AdminUser {
     role: u.role as Role,
     companyId: u.companyId,
     branchId: u.branchId ?? undefined
+  };
+}
+
+interface ApiStaffMember extends ApiStaffUser {
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ApiStaffInvitation {
+  id: string;
+  companyId: string;
+  email: string;
+  role: string;
+  branchId?: string | null;
+  status: string;
+  deliveryStatus: string;
+  expiresAt: string;
+  createdAt: string;
+  sentAt?: string | null;
+  acceptedAt?: string | null;
+}
+
+interface ApiStaffInvitationResult {
+  invitation: ApiStaffInvitation;
+  inviteUrl: string;
+}
+
+interface ApiStaffInvitationPreview {
+  email: string;
+  companyId: string;
+  companyName: string;
+  role: string;
+  branchName?: string | null;
+  expiresAt: string;
+}
+
+function mapAssignableRole(role: string): StaffAssignableRole {
+  if (!ASSIGNABLE_ROLES.includes(role as StaffAssignableRole)) {
+    throw new ApiError(0, `Нельзя назначить роль: ${role}`);
+  }
+  return role as StaffAssignableRole;
+}
+
+function mapStaffMember(u: ApiStaffMember): StaffMember {
+  return {
+    ...mapStaffUser(u),
+    isActive: u.isActive,
+    createdAt: u.createdAt,
+    updatedAt: u.updatedAt
+  };
+}
+
+function mapStaffInvitation(
+  invitation: ApiStaffInvitation
+): StaffInvitation {
+  return {
+    id: invitation.id,
+    companyId: invitation.companyId,
+    email: invitation.email,
+    role: mapAssignableRole(invitation.role),
+    branchId: invitation.branchId ?? undefined,
+    status: invitation.status,
+    deliveryStatus: invitation.deliveryStatus,
+    expiresAt: invitation.expiresAt,
+    createdAt: invitation.createdAt,
+    sentAt: invitation.sentAt ?? undefined,
+    acceptedAt: invitation.acceptedAt ?? undefined
+  };
+}
+
+function mapStaffInvitationResult(
+  result: ApiStaffInvitationResult
+): { invitation: StaffInvitation; inviteUrl: string } {
+  return {
+    invitation: mapStaffInvitation(result.invitation),
+    inviteUrl: result.inviteUrl
   };
 }
 
@@ -341,6 +423,134 @@ export async function apiStaffLogin(
     accessToken: body.accessToken,
     refreshToken: body.refreshToken,
     user: mapStaffUser(body.user)
+  };
+}
+
+export async function apiFetchStaff(
+  companyId: string
+): Promise<StaffMember[]> {
+  const users = await request<ApiStaffMember[]>(
+    `/api/companies/${encodeURIComponent(companyId)}/staff`
+  );
+  return users.map(mapStaffMember);
+}
+
+export interface StaffMemberPatch {
+  name?: string;
+  role?: StaffAssignableRole;
+  branchId?: string | null;
+  isActive?: boolean;
+}
+
+export async function apiPatchStaffMember(
+  companyId: string,
+  staffId: string,
+  patch: StaffMemberPatch
+): Promise<StaffMember> {
+  const user = await request<ApiStaffMember>(
+    `/api/companies/${encodeURIComponent(companyId)}/staff/${encodeURIComponent(staffId)}`,
+    { method: "PATCH", body: JSON.stringify(patch) }
+  );
+  return mapStaffMember(user);
+}
+
+export async function apiFetchStaffInvitations(
+  companyId: string
+): Promise<StaffInvitation[]> {
+  const invitations = await request<ApiStaffInvitation[]>(
+    `/api/companies/${encodeURIComponent(companyId)}/staff/invitations`
+  );
+  return invitations.map(mapStaffInvitation);
+}
+
+export async function apiCreateStaffInvitation(
+  companyId: string,
+  body: {
+    email: string;
+    role: StaffAssignableRole;
+    branchId?: string;
+  }
+): Promise<{ invitation: StaffInvitation; inviteUrl: string }> {
+  const result = await request<ApiStaffInvitationResult>(
+    `/api/companies/${encodeURIComponent(companyId)}/staff/invitations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        email: body.email.trim().toLowerCase(),
+        role: body.role,
+        ...(body.role === "barista" ? { branchId: body.branchId } : {})
+      })
+    }
+  );
+  return mapStaffInvitationResult(result);
+}
+
+export async function apiResendStaffInvitation(
+  companyId: string,
+  invitationId: string
+): Promise<{ invitation: StaffInvitation; inviteUrl: string }> {
+  const result = await request<ApiStaffInvitationResult>(
+    `/api/companies/${encodeURIComponent(companyId)}/staff/invitations/${encodeURIComponent(invitationId)}/resend`,
+    { method: "POST" }
+  );
+  return mapStaffInvitationResult(result);
+}
+
+export function apiRevokeStaffInvitation(
+  companyId: string,
+  invitationId: string
+): Promise<void> {
+  return requestVoid(
+    `/api/companies/${encodeURIComponent(companyId)}/staff/invitations/${encodeURIComponent(invitationId)}`
+  );
+}
+
+export async function apiPreviewStaffInvitation(
+  token: string
+): Promise<StaffInvitationPreview> {
+  if (!apiEnabled) {
+    throw new ApiError(0, "Адрес API не задан (NEXT_PUBLIC_API_URL)");
+  }
+  const response = await sendRaw("/api/auth/staff/invitations/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token })
+  });
+  if (!response.ok) throw await toApiError(response);
+  const preview = (await response.json()) as ApiStaffInvitationPreview;
+  return {
+    email: preview.email,
+    companyId: preview.companyId,
+    companyName: preview.companyName,
+    role: mapAssignableRole(preview.role),
+    branchName: preview.branchName ?? undefined,
+    expiresAt: preview.expiresAt
+  };
+}
+
+export async function apiAcceptStaffInvitation(body: {
+  token: string;
+  name: string;
+  password: string;
+}): Promise<StaffLoginResult> {
+  if (!apiEnabled) {
+    throw new ApiError(0, "Адрес API не задан (NEXT_PUBLIC_API_URL)");
+  }
+  const response = await sendRaw("/api/auth/staff/invitations/accept", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      token: body.token,
+      name: body.name.trim(),
+      password: body.password
+    })
+  });
+  if (!response.ok) throw await toApiError(response);
+  const result = (await response.json()) as ApiLoginResponse;
+  return {
+    accessToken: result.accessToken,
+    refreshToken: result.refreshToken,
+    user: mapStaffUser(result.user)
   };
 }
 

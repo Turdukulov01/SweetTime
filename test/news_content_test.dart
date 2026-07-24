@@ -61,6 +61,44 @@ void main() {
     expect(selected.map((story) => story.id), ['active']);
   });
 
+  test(
+    'lightweight refresh replaces scheduled story and news content',
+    () async {
+      final api = _ScheduledContentApi();
+      final controller = AppStateController(api: api);
+      final published = _story('scheduled-now', DateTime.utc(2026, 7, 24));
+      api.homeStories = [published];
+      api.collections = const [
+        StoryCollection(
+          id: 'scheduled-collection',
+          name: LocalizedText(ru: 'Подборка'),
+          sortOrder: 0,
+        ),
+      ];
+      api.posts = const [
+        NewsPost(
+          id: 'scheduled-post',
+          title: LocalizedText(ru: 'Новость'),
+          summary: LocalizedText(ru: ''),
+          body: LocalizedText(ru: ''),
+          publishedAt: '2026-07-24T00:00:00Z',
+        ),
+      ];
+
+      await controller.refreshPublishedContent();
+
+      expect(controller.state.newsStories.map((story) => story.id), [
+        'scheduled-now',
+      ]);
+      expect(controller.state.storyCollections.map((item) => item.id), [
+        'scheduled-collection',
+      ]);
+      expect(controller.state.newsPosts.map((post) => post.id), [
+        'scheduled-post',
+      ]);
+    },
+  );
+
   test('V2 mappers preserve stable IDs, localization and media', () {
     final story = ApiClient.mapNewsStory({
       'id': 'story-stable-42',
@@ -297,10 +335,7 @@ void main() {
     );
     // The video card is taller than the 600 px test viewport. Move its
     // centre, not only its leading edge, into the tappable area.
-    await tester.drag(
-      find.byType(CustomScrollView),
-      const Offset(0, -320),
-    );
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -320));
     await tester.pumpAndSettle();
     await tester.tap(videoCard);
     await tester.pumpAndSettle();
@@ -525,6 +560,25 @@ class _MemoryCartStore implements CartStore {
 
   @override
   Future<void> write(List<CartDraftItem> items) async {}
+}
+
+class _ScheduledContentApi extends ApiClient {
+  List<NewsStory>? homeStories = const [];
+  List<StoryCollection>? collections = const [];
+  List<NewsPost>? posts = const [];
+
+  @override
+  Future<List<NewsStory>?> fetchHomeStories({int limit = 30}) async =>
+      homeStories;
+
+  @override
+  Future<List<NewsStory>?> fetchNews() async => null;
+
+  @override
+  Future<List<StoryCollection>?> fetchStoryCollections() async => collections;
+
+  @override
+  Future<List<NewsPost>?> fetchNewsPosts() async => posts;
 }
 
 class _MemoryStoryViewStore implements StoryViewStore {

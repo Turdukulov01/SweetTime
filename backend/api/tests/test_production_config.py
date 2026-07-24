@@ -15,6 +15,7 @@ def _production_settings(**overrides) -> Settings:
         ),
         "jwt_secret": "a-secure-random-production-secret-1234567890",
         "cors_origins": ["https://admin.sweetime.kg"],
+        "staff_invite_public_url": "https://admin.sweetime.kg",
         "otp_mode": "disabled",
         "seed_mode": "none",
     }
@@ -41,6 +42,7 @@ def test_secure_production_settings_are_accepted() -> None:
         },
         {"cors_origins": ["*"]},
         {"cors_origins": ["http://admin.sweetime.kg"]},
+        {"staff_invite_public_url": "http://admin.sweetime.kg"},
         {"otp_mode": "mock"},
         {"seed_mode": "demo"},
     ],

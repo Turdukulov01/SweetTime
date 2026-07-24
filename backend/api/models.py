@@ -132,6 +132,72 @@ class AdminUser(Base):
     branch_id: Mapped[str | None] = mapped_column(
         ForeignKey("branches.id"), nullable=True, default=None
     )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class StaffInvitation(Base):
+    """One-time, tenant-scoped invitation for an admin-panel employee.
+
+    Only a SHA-256 lookup hash reaches the database. The raw bearer token is
+    returned once to the owner (and optionally delivered by SMTP).
+    """
+
+    __tablename__ = "staff_invitations"
+    __table_args__ = (
+        Index(
+            "ix_staff_invitations_company_created",
+            "company_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), index=True
+    )
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    role: Mapped[str] = mapped_column(String(32))
+    branch_id: Mapped[str | None] = mapped_column(
+        ForeignKey("branches.id", ondelete="SET NULL"), nullable=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    invited_by_id: Mapped[str] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="RESTRICT")
+    )
+    accepted_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    delivery_status: Mapped[str] = mapped_column(
+        String(32), default="manual_required"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class Customer(Base):

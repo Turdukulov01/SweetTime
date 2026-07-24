@@ -9,7 +9,9 @@ import {
   ContentDrawer,
   DeleteButton,
   MediaPicker,
-  PublicationBadge
+  PublicationBadge,
+  PublicationTimingPicker,
+  type PublicationMode
 } from "@/components/news/content-shared";
 import { describeApiError, type ContentStoryWrite } from "@/lib/api";
 import { useCompanyStore } from "@/lib/company-store";
@@ -40,6 +42,7 @@ interface StoryDraft {
   showOnHome: boolean;
   isPinned: boolean;
   sortOrder: number;
+  publicationMode: PublicationMode;
   publishedAt: string;
   expiresAt: string;
   expiryPreset: ExpiryPreset;
@@ -64,6 +67,8 @@ function draftFromStory(story: ContentStory): StoryDraft {
     showOnHome: story.showOnHome,
     isPinned: story.isPinned,
     sortOrder: story.sortOrder,
+    publicationMode:
+      Date.parse(story.publishedAt) > Date.now() ? "scheduled" : "now",
     publishedAt: toDateTimeLocal(story.publishedAt),
     expiresAt: story.expiresAt ? toDateTimeLocal(story.expiresAt) : "",
     expiryPreset: expiryPresetFor(story.expiresAt),
@@ -85,6 +90,7 @@ function newDraft(accentColor: string, sortOrder: number): StoryDraft {
     showOnHome: true,
     isPinned: false,
     sortOrder,
+    publicationMode: "now",
     publishedAt: toDateTimeLocal(new Date().toISOString()),
     expiresAt: "",
     expiryPreset: "never",
@@ -97,7 +103,10 @@ function newDraft(accentColor: string, sortOrder: number): StoryDraft {
 function applyExpiryPreset(draft: StoryDraft, preset: ExpiryPreset): StoryDraft {
   if (preset === "never") return { ...draft, expiryPreset: preset, expiresAt: "" };
   if (preset === "custom") return { ...draft, expiryPreset: preset };
-  const base = fromDateTimeLocal(draft.publishedAt);
+  const base =
+    draft.publicationMode === "scheduled"
+      ? fromDateTimeLocal(draft.publishedAt)
+      : new Date().toISOString();
   const date = base ? new Date(base) : new Date();
   const days = preset === "24h" ? 1 : preset === "3d" ? 3 : 7;
   date.setUTCDate(date.getUTCDate() + days);
@@ -137,10 +146,32 @@ function StoryEditor({
 
   const currentMedia = persisted?.media ?? EMPTY_MEDIA;
   const hasResultingMedia = Boolean(selectedFile || (!mediaRemoved && currentMedia.url));
+
+  function resolvedPublishedAt(): string | null {
+    if (draft.publicationMode === "scheduled") {
+      return fromDateTimeLocal(draft.publishedAt);
+    }
+    const original = story?.publishedAt;
+    if (
+      story?.isPublished &&
+      original &&
+      Date.parse(original) <= Date.now()
+    ) {
+      return original;
+    }
+    return new Date().toISOString();
+  }
+
   function validate(): string | null {
-    const publishedAt = fromDateTimeLocal(draft.publishedAt);
+    const publishedAt = resolvedPublishedAt();
     const expiresAt = draft.expiresAt ? fromDateTimeLocal(draft.expiresAt) : null;
     if (!publishedAt) return "Укажите корректную дату публикации.";
+    if (
+      draft.publicationMode === "scheduled" &&
+      Date.parse(publishedAt) <= Date.now()
+    ) {
+      return "Для публикации по расписанию выберите будущее время.";
+    }
     if (draft.expiresAt && !expiresAt) return "Укажите корректную дату окончания.";
     if (expiresAt && Date.parse(expiresAt) <= Date.parse(publishedAt)) {
       return "Окончание показа должно быть позже даты публикации.";
@@ -194,7 +225,7 @@ function StoryEditor({
       setError(validationError);
       return;
     }
-    const publishedAt = fromDateTimeLocal(draft.publishedAt) as string;
+    const publishedAt = resolvedPublishedAt() as string;
     const desired: ContentStoryWrite = {
       collectionId: draft.collectionId || null,
       title: draft.title,
@@ -286,16 +317,38 @@ function StoryEditor({
         <AccentPicker value={draft.accentColor} onChange={(accentColor) => setDraft({ ...draft, accentColor })} />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium text-coffee-700">Дата публикации</span>
-          <input type="datetime-local" value={draft.publishedAt} onChange={(event) => setDraft({ ...draft, publishedAt: event.target.value })} className="input" />
-        </label>
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium text-coffee-700">Порядок</span>
-          <input type="number" value={draft.sortOrder} onChange={(event) => setDraft({ ...draft, sortOrder: Number(event.target.value) || 0 })} className="input" />
-        </label>
-      </div>
+      <PublicationTimingPicker
+        mode={draft.publicationMode}
+        value={draft.publishedAt}
+        onModeChange={(publicationMode) =>
+          setDraft((current) => {
+            const next = {
+              ...current,
+              publicationMode,
+              isPublished:
+                publicationMode === "scheduled"
+                  ? true
+                  : current.isPublished
+            };
+            return ["24h", "3d", "7d"].includes(next.expiryPreset)
+              ? applyExpiryPreset(next, next.expiryPreset)
+              : next;
+          })
+        }
+        onValueChange={(publishedAt) =>
+          setDraft((current) => {
+            const next = { ...current, publishedAt };
+            return ["24h", "3d", "7d"].includes(next.expiryPreset)
+              ? applyExpiryPreset(next, next.expiryPreset)
+              : next;
+          })
+        }
+      />
+
+      <label className="block">
+        <span className="mb-1.5 block text-sm font-medium text-coffee-700">Порядок</span>
+        <input type="number" value={draft.sortOrder} onChange={(event) => setDraft({ ...draft, sortOrder: Number(event.target.value) || 0 })} className="input" />
+      </label>
 
       <fieldset>
         <legend className="mb-2 text-sm font-medium text-coffee-700">Срок показа</legend>

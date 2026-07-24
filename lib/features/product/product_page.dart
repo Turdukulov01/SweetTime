@@ -134,14 +134,10 @@ class _ProductPageState extends ConsumerState<ProductPage> {
               borderRadius: BorderRadius.circular(24),
             ),
             clipBehavior: Clip.antiAlias,
-            child: product.assetImage != null
-                ? Image.asset(
-                    product.assetImage!,
-                    fit: BoxFit.cover,
-                    cacheWidth: productImageCacheWidth,
-                    filterQuality: FilterQuality.low,
-                  )
-                : DrinkArt(product: product),
+            child: ProductHeroMedia(
+              product: product,
+              cacheWidth: productImageCacheWidth,
+            ),
           ),
           const SizedBox(height: 16),
           Row(
@@ -300,6 +296,76 @@ class _ProductPageState extends ConsumerState<ProductPage> {
         ),
       ),
     );
+  }
+}
+
+/// Product media used by both the regular constructor and cart-line editor.
+///
+/// Server media is authoritative. A bundled demo asset is only a fallback,
+/// followed by the generated drink artwork when neither image is available or
+/// an image fails to decode.
+class ProductHeroMedia extends StatelessWidget {
+  const ProductHeroMedia({
+    super.key,
+    required this.product,
+    required this.cacheWidth,
+  });
+
+  final Product product;
+  final int cacheWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = productHeroImageProvider(product);
+    if (provider is NetworkImage) {
+      return Image(
+        image: ResizeImage.resizeIfNeeded(cacheWidth, null, provider),
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.low,
+        errorBuilder: (context, error, stackTrace) =>
+            _LocalProductArtwork(product: product, cacheWidth: cacheWidth),
+      );
+    }
+    return _LocalProductArtwork(product: product, cacheWidth: cacheWidth);
+  }
+}
+
+/// Returns the authoritative image source for a product hero.
+///
+/// Kept as a small public helper so the server-image priority cannot regress
+/// independently of the visual widget.
+ImageProvider<Object>? productHeroImageProvider(Product product) {
+  final imageUrl = product.imageUrl?.trim();
+  if (imageUrl != null && imageUrl.isNotEmpty) {
+    return NetworkImage(imageUrl);
+  }
+  final assetImage = product.assetImage?.trim();
+  if (assetImage != null && assetImage.isNotEmpty) {
+    return AssetImage(assetImage);
+  }
+  return null;
+}
+
+class _LocalProductArtwork extends StatelessWidget {
+  const _LocalProductArtwork({required this.product, required this.cacheWidth});
+
+  final Product product;
+  final int cacheWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final assetImage = product.assetImage?.trim();
+    if (assetImage != null && assetImage.isNotEmpty) {
+      return Image.asset(
+        assetImage,
+        fit: BoxFit.cover,
+        cacheWidth: cacheWidth,
+        filterQuality: FilterQuality.low,
+        errorBuilder: (context, error, stackTrace) =>
+            DrinkArt(product: product),
+      );
+    }
+    return DrinkArt(product: product);
   }
 }
 

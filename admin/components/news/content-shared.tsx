@@ -1,8 +1,21 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, ImagePlus, LoaderCircle, Trash2, Upload, X } from "lucide-react";
-import { mediaTypeForFile, validateMediaFile } from "@/lib/content-validation";
+import {
+  AlertTriangle,
+  CalendarClock,
+  ImagePlus,
+  LoaderCircle,
+  Send,
+  Trash2,
+  Upload,
+  X
+} from "lucide-react";
+import {
+  mediaTypeForFile,
+  toDateTimeLocal,
+  validateMediaFile
+} from "@/lib/content-validation";
 import { describeApiError } from "@/lib/api";
 import type { ContentMedia } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -220,6 +233,109 @@ export function PublicationBadge({
     )}>
       {label}
     </span>
+  );
+}
+
+export type PublicationMode = "now" | "scheduled";
+
+export function PublicationTimingPicker({
+  mode,
+  value,
+  onModeChange,
+  onValueChange
+}: {
+  mode: PublicationMode;
+  value: string;
+  onModeChange: (mode: PublicationMode) => void;
+  onValueChange: (value: string) => void;
+}) {
+  const [zoneLabel, setZoneLabel] = useState("локальное время компьютера");
+
+  useEffect(() => {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const offsetMinutes = -new Date().getTimezoneOffset();
+    const offsetSign = offsetMinutes >= 0 ? "+" : "-";
+    const offsetHours = String(
+      Math.floor(Math.abs(offsetMinutes) / 60)
+    ).padStart(2, "0");
+    const offsetRemainder = String(Math.abs(offsetMinutes) % 60).padStart(
+      2,
+      "0"
+    );
+    setZoneLabel(
+      zone
+        ? `${zone}, UTC${offsetSign}${offsetHours}:${offsetRemainder}`
+        : `UTC${offsetSign}${offsetHours}:${offsetRemainder}`
+    );
+  }, []);
+
+  function selectMode(next: PublicationMode) {
+    onModeChange(next);
+    const parsedValue = Date.parse(value);
+    if (
+      next === "scheduled" &&
+      (!value || Number.isNaN(parsedValue) || parsedValue <= Date.now())
+    ) {
+      onValueChange(
+        toDateTimeLocal(new Date(Date.now() + 60 * 60 * 1000).toISOString())
+      );
+    }
+  }
+
+  return (
+    <fieldset className="rounded-2xl border border-coffee-900/10 p-4">
+      <legend className="px-1 text-sm font-semibold text-coffee-700">
+        Когда публикация появится в приложении
+      </legend>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <button
+          type="button"
+          aria-pressed={mode === "now"}
+          onClick={() => selectMode("now")}
+          className={cn(
+            "focus-ring flex min-h-12 items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm font-semibold transition",
+            mode === "now"
+              ? "border-accent bg-accent/10 text-accent"
+              : "border-coffee-900/15 text-coffee-700 hover:border-accent/60"
+          )}
+        >
+          <Send className="h-4 w-4 shrink-0" />
+          Сразу после сохранения
+        </button>
+        <button
+          type="button"
+          aria-pressed={mode === "scheduled"}
+          onClick={() => selectMode("scheduled")}
+          className={cn(
+            "focus-ring flex min-h-12 items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm font-semibold transition",
+            mode === "scheduled"
+              ? "border-accent bg-accent/10 text-accent"
+              : "border-coffee-900/15 text-coffee-700 hover:border-accent/60"
+          )}
+        >
+          <CalendarClock className="h-4 w-4 shrink-0" />
+          В выбранную дату и время
+        </button>
+      </div>
+      {mode === "scheduled" && (
+        <label className="mt-4 block">
+          <span className="mb-1.5 block text-sm font-medium text-coffee-700">
+            Дата и время публикации
+          </span>
+          <input
+            type="datetime-local"
+            value={value}
+            step={60}
+            onChange={(event) => onValueChange(event.target.value)}
+            className="input"
+          />
+        </label>
+      )}
+      <p className="mt-3 text-xs leading-relaxed text-coffee-500">
+        Используется время этого компьютера: {zoneLabel}. Сервер сохранит его в
+        UTC и автоматически откроет публикацию в указанную минуту.
+      </p>
+    </fieldset>
   );
 }
 

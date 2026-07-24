@@ -58,6 +58,20 @@ class Settings(BaseSettings):
     media_max_image_pixels: int = 25_000_000
     media_max_video_bytes: int = 50 * 1024 * 1024
 
+    # Staff invitations are always usable: without SMTP the owner receives a
+    # one-time link to copy manually. Configure SMTP to deliver that same link
+    # by email without changing the API or invitation security model.
+    staff_invite_public_url: str = "http://localhost:3020"
+    staff_invite_expiry_hours: int = Field(default=72, ge=1, le=720)
+    staff_invite_delivery_mode: Literal["manual", "smtp"] = "manual"
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_security: Literal["starttls", "ssl"] = "starttls"
+    smtp_timeout_seconds: int = Field(default=10, ge=1, le=60)
+
     @model_validator(mode="after")
     def validate_production_safety(self) -> "Settings":
         self.google_oauth_web_client_id = self.google_oauth_web_client_id.strip()
@@ -83,6 +97,24 @@ class Settings(BaseSettings):
                 for client_id in client_ids
             ):
                 raise ValueError("Google OAuth client IDs must be explicit Google client IDs")
+
+        self.staff_invite_public_url = (
+            self.staff_invite_public_url.strip().rstrip("/")
+        )
+        self.smtp_host = self.smtp_host.strip()
+        self.smtp_username = self.smtp_username.strip()
+        self.smtp_from_email = self.smtp_from_email.strip().lower()
+        if self.staff_invite_delivery_mode == "smtp":
+            if not self.smtp_host or not self.smtp_from_email:
+                raise ValueError(
+                    "SMTP_HOST and SMTP_FROM_EMAIL are required when "
+                    "STAFF_INVITE_DELIVERY_MODE is smtp"
+                )
+            if bool(self.smtp_username) != bool(self.smtp_password):
+                raise ValueError(
+                    "SMTP_USERNAME and SMTP_PASSWORD must either both be set "
+                    "or both be empty"
+                )
 
         if self.environment.lower() != "production":
             return self
@@ -114,6 +146,10 @@ class Settings(BaseSettings):
             )
         if self.seed_mode != "none":
             raise ValueError("SEED_MODE must be none in production")
+        if not self.staff_invite_public_url.startswith("https://"):
+            raise ValueError(
+                "STAFF_INVITE_PUBLIC_URL must use HTTPS in production"
+            )
         return self
 
     model_config = SettingsConfigDict(

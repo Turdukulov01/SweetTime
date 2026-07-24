@@ -9,6 +9,7 @@ services:
       ENVIRONMENT: production
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in deploy/production/.env}
       CORS_ORIGINS: ${CORS_ORIGINS:?Set HTTPS CORS_ORIGINS in deploy/production/.env}
+      STAFF_INVITE_PUBLIC_URL: ${ADMIN_PUBLIC_API_URL:?Set the public HTTPS admin origin in deploy/production/.env}
       OTP_MODE: disabled
       SEED_MODE: none
       BOOTSTRAP_OWNER_EMAIL: ${BOOTSTRAP_OWNER_EMAIL:?Set the real owner email}

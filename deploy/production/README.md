@@ -51,9 +51,29 @@ proxy. Canonical entry points are:
 - `https://lnp-corporation.duckdns.org/admin` (redirects to `/login`).
 
 Production login contains no demo credentials. Use only the real bootstrapped owner account. Products,
-branches, news, promotions, settings and the order queue use the authenticated production API. Staff
-management is deliberately hidden until server-side staff CRUD exists; the direct `/staff` route only
-shows an unavailable notice and performs no in-memory mutations.
+branches, news, promotions, settings and the order queue use the authenticated production API. The owner-only
+`/staff` section uses server-side staff CRUD and one-time invitations. Managers can manage catalog/content and
+all company orders; baristas can access only the order queue of their assigned branch. Settings, branding and
+team access remain owner-only, and every restriction is repeated by the API rather than relying on navigation.
+
+Staff invitations always work in manual mode: after creation or resend the owner can copy the one-time HTTPS
+link from the admin panel. To deliver the same link by email, configure a real SMTP provider:
+
+```dotenv
+STAFF_INVITE_EXPIRY_HOURS=72
+STAFF_INVITE_DELIVERY_MODE=smtp
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=replace-locally
+SMTP_PASSWORD=replace-locally
+SMTP_FROM_EMAIL=no-reply@example.com
+SMTP_SECURITY=starttls
+```
+
+Only certificate-verified STARTTLS or implicit TLS (`ssl`, normally port 465) is supported. Never commit SMTP
+credentials. The raw invitation token is not stored in PostgreSQL and is placed in the URL fragment so it does
+not enter reverse-proxy request logs. Before deploying this slice, run Alembic through revision
+`d8e42c1a7f90`.
 
 ## Google Sign-In setup
 

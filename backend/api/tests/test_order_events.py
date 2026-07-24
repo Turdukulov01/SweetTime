@@ -1,4 +1,6 @@
 import json
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
@@ -99,6 +101,7 @@ def _staff_stream_fixture(monkeypatch):
         name="Staff",
         role="manager",
         branch_id=None,
+        is_active=True,
     )
     monkeypatch.setattr(
         deps, "SessionLocal", lambda: _FakeSession(company, staff)
@@ -122,7 +125,27 @@ def test_stream_auth_accepts_staff_without_leaking_a_db_session(monkeypatch) -> 
         ),
     )
 
-    assert result == company.id
+    assert result.company_id == company.id
+    assert result.staff_id == staff.id
+    assert result.role == "manager"
+    assert result.branch_id is None
+    assert deps.order_event_access_still_valid(result) is True
+
+    staff.is_active = False
+    assert deps.order_event_access_still_valid(result) is False
+
+    staff.is_active = True
+    staff.role = "barista"
+    staff.branch_id = "branch-a"
+    assert deps.order_event_access_still_valid(result) is False
+
+    staff.role = "manager"
+    staff.branch_id = None
+    expired = replace(
+        result,
+        token_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+    )
+    assert deps.order_event_access_still_valid(expired) is False
 
 
 def test_stream_auth_rejects_cross_tenant_token_before_stream(monkeypatch) -> None:

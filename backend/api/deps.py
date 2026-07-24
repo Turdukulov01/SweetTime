@@ -11,6 +11,7 @@
 `require_role(*roles)` — RBAC поверх get_current_staff.
 """
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Path, status
@@ -37,6 +38,15 @@ bearer_scheme = HTTPBearer(
     auto_error=False,
     description="JWT access token (Authorization: Bearer <accessToken>)",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class OrderEventAccess:
+    company_id: str
+    staff_id: str
+    role: str
+    branch_id: str | None
+    token_expires_at: datetime
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +165,11 @@ def get_current_staff(
     staff = db.get(AdminUser, payload["sub"])
     # company_id сверяем ещё и по БД: роль/компанию могли изменить после выпуска
     # токена (токены stateless, revocation-листа пока нет).
-    if staff is None or staff.company_id != company.id:
+    if (
+        staff is None
+        or staff.company_id != company.id
+        or not staff.is_active
+    ):
         raise _unauthorized("Unknown staff user")
     return staff
 
@@ -163,7 +177,7 @@ def get_current_staff(
 def authorize_order_event_stream(
     companyId: str = Path(...),
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-) -> str:
+) -> OrderEventAccess:
     """Authenticate SSE without holding a pooled DB session for its lifetime.
 
     Yield dependencies are cleaned up only after a streaming response closes.
@@ -185,9 +199,49 @@ def authorize_order_event_stream(
         if company is None:
             raise HTTPException(status_code=404, detail="Company not found")
         staff = db.get(AdminUser, payload["sub"])
-        if staff is None or staff.company_id != companyId:
+        if (
+            staff is None
+            or staff.company_id != companyId
+            or not staff.is_active
+        ):
             raise _unauthorized("Unknown staff user")
-    return companyId
+        if staff.role not in {"owner", "manager", "barista"}:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Staff role is not allowed to stream orders",
+            )
+        if staff.role == "barista" and not staff.branch_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Barista is not assigned to a branch",
+            )
+    return OrderEventAccess(
+        company_id=companyId,
+        staff_id=staff.id,
+        role=staff.role,
+        branch_id=staff.branch_id if staff.role == "barista" else None,
+        token_expires_at=datetime.fromtimestamp(
+            float(payload["exp"]), tz=timezone.utc
+        ),
+    )
+
+
+def order_event_access_still_valid(access: OrderEventAccess) -> bool:
+    """Revalidate a long-lived SSE connection without retaining a DB session."""
+
+    if datetime.now(timezone.utc) >= access.token_expires_at:
+        return False
+    with SessionLocal() as db:
+        staff = db.get(AdminUser, access.staff_id)
+        if (
+            staff is None
+            or staff.company_id != access.company_id
+            or not staff.is_active
+            or staff.role != access.role
+        ):
+            return False
+        current_branch = staff.branch_id if staff.role == "barista" else None
+        return current_branch == access.branch_id
 
 
 def get_current_customer(

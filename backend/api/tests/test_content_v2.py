@@ -22,7 +22,7 @@ from api.content import (
 from api.database import Base
 from api.deps import _assert_same_company, require_role
 from api.main import list_news
-from api.models import AdminUser, Company, News, StoryCollection
+from api.models import AdminUser, Company, News, NewsPost, StoryCollection
 from api.storage import StorageService
 
 
@@ -155,6 +155,51 @@ def test_public_home_and_legacy_hide_inactive_and_cap_at_30(content_db) -> None:
         legacy = list_news(company=company, db=db)
         legacy_ids = {item.id for item in legacy}
         assert {"draft", "future", "expired"}.isdisjoint(legacy_ids)
+
+
+def test_story_and_news_post_publish_at_exact_scheduled_instant(
+    content_db, monkeypatch
+) -> None:
+    factory = content_db
+    scheduled_at = datetime(2030, 1, 2, 3, 4, tzinfo=timezone.utc)
+    with factory() as db:
+        db.add(_story("scheduled-story", published_at=scheduled_at))
+        db.add(
+            NewsPost(
+                id="scheduled-post",
+                company_id="sweettime",
+                title=_localized("Scheduled post"),
+                summary=_localized("Summary"),
+                body=_localized("Body"),
+                is_published=True,
+                published_at=scheduled_at,
+                media_type="none",
+            )
+        )
+        db.commit()
+        company = db.get(Company, "sweettime")
+
+        monkeypatch.setattr(
+            content,
+            "_now",
+            lambda: scheduled_at - timedelta(microseconds=1),
+        )
+        assert public_home_stories(limit=30, company=company, db=db) == []
+        assert content.public_news_posts(
+            limit=20, cursor=None, company=company, db=db
+        ).items == []
+
+        monkeypatch.setattr(content, "_now", lambda: scheduled_at)
+        assert [
+            item.id
+            for item in public_home_stories(limit=30, company=company, db=db)
+        ] == ["scheduled-story"]
+        assert [
+            item.id
+            for item in content.public_news_posts(
+                limit=20, cursor=None, company=company, db=db
+            ).items
+        ] == ["scheduled-post"]
 
 
 def test_legacy_news_serializes_media_only_story_with_blank_text(content_db) -> None:

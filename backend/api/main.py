@@ -45,6 +45,7 @@ from .content import router as content_router
 from .config import settings
 from .database import engine, get_db
 from .deps import (
+    OrderEventAccess,
     authorize_order_event_stream,
     get_company,
     get_company_branch,
@@ -54,9 +55,11 @@ from .deps import (
     get_company_promotion,
     get_current_customer,
     get_current_staff,
+    order_event_access_still_valid,
     require_role,
 )
 from .models import (
+    AdminUser,
     Branch,
     Category,
     Company,
@@ -72,6 +75,8 @@ from .order_events import encode_sse, event_payload, order_event_hub
 from .seed import seed_if_empty
 from .serializers import order_out as _order_out
 from .storage import StorageValidationError, storage_service
+from .staff import public_router as staff_public_router
+from .staff import router as staff_router
 
 
 @asynccontextmanager
@@ -106,6 +111,8 @@ app.add_middleware(
 app.include_router(auth_global_router)
 app.include_router(auth_router)
 app.include_router(content_router)
+app.include_router(staff_public_router)
+app.include_router(staff_router)
 
 # В production `/media/*` отдаёт nginx напрямую. Локально nginx обычно нет,
 # поэтому dev-only mount позволяет проверить загруженный URL на телефоне/ПК.
@@ -120,6 +127,7 @@ if settings.environment.lower() != "production":
 # статусы заказов (см. ADMIN_PANEL.md).
 require_content_staff = require_role("owner", "manager")
 require_queue_staff = require_role("owner", "manager", "barista")
+require_owner_staff = require_role("owner")
 
 
 _INVITE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9-]{2,64}$")
@@ -441,7 +449,7 @@ def get_config(company: Company = Depends(get_company)) -> schemas.CompanyOut:
     "/api/companies/{companyId}/config",
     response_model=schemas.CompanyOut,
     tags=["config"],
-    dependencies=[Depends(require_content_staff)],
+    dependencies=[Depends(require_owner_staff)],
 )
 def patch_config(
     patch: schemas.CompanyPatch,
@@ -584,7 +592,7 @@ def _delete_company_brand_image(
     "/api/companies/{companyId}/branding/logo",
     response_model=schemas.CompanyOut,
     tags=["config"],
-    dependencies=[Depends(require_content_staff)],
+    dependencies=[Depends(require_owner_staff)],
 )
 def put_company_logo(
     file: UploadFile = File(...),
@@ -600,7 +608,7 @@ def put_company_logo(
     "/api/companies/{companyId}/branding/logo",
     response_model=schemas.CompanyOut,
     tags=["config"],
-    dependencies=[Depends(require_content_staff)],
+    dependencies=[Depends(require_owner_staff)],
 )
 def delete_company_logo(
     company: Company = Depends(get_company), db: Session = Depends(get_db)
@@ -614,7 +622,7 @@ def delete_company_logo(
     "/api/companies/{companyId}/branding/background",
     response_model=schemas.CompanyOut,
     tags=["config"],
-    dependencies=[Depends(require_content_staff)],
+    dependencies=[Depends(require_owner_staff)],
 )
 def put_company_background(
     file: UploadFile = File(...),
@@ -633,7 +641,7 @@ def put_company_background(
     "/api/companies/{companyId}/branding/background",
     response_model=schemas.CompanyOut,
     tags=["config"],
-    dependencies=[Depends(require_content_staff)],
+    dependencies=[Depends(require_owner_staff)],
 )
 def delete_company_background(
     company: Company = Depends(get_company), db: Session = Depends(get_db)
@@ -1371,17 +1379,22 @@ def _build_order_items_v2(
     "/api/companies/{companyId}/orders",
     response_model=list[schemas.OrderOut],
     tags=["orders"],
-    # Очередь заказов компании — админская ручка, любой сотрудник компании.
-    dependencies=[Depends(get_current_staff)],
+    # Owner/manager видят компанию целиком; barista — только свой филиал.
 )
 def list_orders(
-    company: Company = Depends(get_company), db: Session = Depends(get_db)
+    company: Company = Depends(get_company),
+    staff: AdminUser = Depends(require_queue_staff),
+    db: Session = Depends(get_db),
 ) -> list[schemas.OrderOut]:
-    orders = db.scalars(
-        select(Order)
-        .where(Order.company_id == company.id)
-        .order_by(Order.created_at.desc())
-    ).all()
+    query = select(Order).where(Order.company_id == company.id)
+    if staff.role == "barista":
+        if not staff.branch_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Barista is not assigned to a branch",
+            )
+        query = query.where(Order.branch_id == staff.branch_id)
+    orders = db.scalars(query.order_by(Order.created_at.desc())).all()
     return [_order_out(o) for o in orders]
 
 
@@ -1392,9 +1405,10 @@ def list_orders(
 )
 async def stream_order_events(
     request: Request,
-    company_id: str = Depends(authorize_order_event_stream),
+    access: OrderEventAccess = Depends(authorize_order_event_stream),
     last_event_id: str | None = Header(default=None),
 ) -> StreamingResponse:
+    company_id = access.company_id
     try:
         cursor = max(0, int(last_event_id or "0"))
     except ValueError:
@@ -1418,6 +1432,13 @@ async def stream_order_events(
                 ),
                 abandon_on_cancel=True,
             )
+            access_is_current = await anyio.to_thread.run_sync(
+                order_event_access_still_valid,
+                access,
+                abandon_on_cancel=True,
+            )
+            if not access_is_current:
+                break
             if batch.reset_required:
                 cursor = order_event_hub.latest_id(company_id)
                 yield encode_sse(
@@ -1431,6 +1452,11 @@ async def stream_order_events(
                 continue
             for notice in batch.events:
                 cursor = notice.id
+                if (
+                    access.branch_id is not None
+                    and notice.data.get("branchId") != access.branch_id
+                ):
+                    continue
                 yield encode_sse(
                     event=notice.event,
                     event_id=notice.id,
@@ -1564,7 +1590,12 @@ def create_order(
     order_event_hub.publish(
         locked_company.id,
         "order.created",
-        event_payload(order.id, order.number, order.status),
+        event_payload(
+            order.id,
+            order.number,
+            order.status,
+            order.branch_id,
+        ),
     )
     return _order_out(order)
 
@@ -1574,13 +1605,17 @@ def create_order(
     response_model=schemas.OrderOut,
     tags=["orders"],
     # Статусы двигает и бариста — это его основная работа в очереди.
-    dependencies=[Depends(require_queue_staff)],
 )
 def patch_order_status(
     body: schemas.OrderStatusPatch,
     order: Order = Depends(get_company_order),
+    staff: AdminUser = Depends(require_queue_staff),
     db: Session = Depends(get_db),
 ) -> schemas.OrderOut:
+    if staff.role == "barista" and (
+        not staff.branch_id or order.branch_id != staff.branch_id
+    ):
+        raise HTTPException(status_code=404, detail="Order not found")
     if not _is_valid_transition(order.status, body.status):
         raise HTTPException(
             status_code=409,
@@ -1597,7 +1632,12 @@ def patch_order_status(
     order_event_hub.publish(
         order.company_id,
         "order.updated",
-        event_payload(order.id, order.number, order.status),
+        event_payload(
+            order.id,
+            order.number,
+            order.status,
+            order.branch_id,
+        ),
     )
     return _order_out(order)
 

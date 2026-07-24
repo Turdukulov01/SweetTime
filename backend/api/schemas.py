@@ -8,6 +8,7 @@
 """
 
 from datetime import datetime
+import re
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -730,6 +731,29 @@ class PromotionPatch(BaseModel):
 # ---------------------------------------------------------------------------
 
 StaffRole = Literal["owner", "manager", "barista"]
+StaffAssignableRole = Literal["manager", "barista"]
+StaffInvitationStatus = Literal["pending", "accepted", "revoked", "expired"]
+StaffInvitationDeliveryStatus = Literal[
+    "manual_required", "sent", "failed"
+]
+
+
+def normalize_staff_email(value: str) -> str:
+    normalized = value.strip().lower()
+    # Intentionally conservative ASCII validation. It avoids adding the
+    # optional email-validator package to production for one security-sensitive
+    # workflow while accepting normal business addresses.
+    if (
+        len(normalized) > 255
+        or not re.fullmatch(
+            r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+            r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+            r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+",
+            normalized,
+        )
+    ):
+        raise ValueError("Enter a valid email address")
+    return normalized
 
 
 class TokenPair(BaseModel):
@@ -747,6 +771,11 @@ class StaffLoginIn(BaseModel):
     email: str = Field(min_length=3)
     password: str = Field(min_length=1)
 
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return normalize_staff_email(value)
+
 
 class StaffUserOut(BaseModel):
     """Профиль сотрудника. Пароля/хэша тут нет и быть не должно."""
@@ -757,10 +786,121 @@ class StaffUserOut(BaseModel):
     role: StaffRole
     branchId: str | None = None
     companyId: str
+    isActive: bool
+    createdAt: datetime
+    updatedAt: datetime
 
 
 class StaffLoginOut(TokenPair):
     user: StaffUserOut
+
+
+class StaffInvitationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=3, max_length=255)
+    role: StaffAssignableRole
+    branchId: str | None = Field(default=None, max_length=64)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return normalize_staff_email(value)
+
+    @model_validator(mode="after")
+    def validate_branch_assignment(self) -> "StaffInvitationCreate":
+        if self.role == "barista" and not self.branchId:
+            raise ValueError("branchId is required for a barista")
+        if self.role == "manager" and self.branchId is not None:
+            raise ValueError("branchId is only allowed for a barista")
+        return self
+
+
+class StaffUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=2, max_length=120)
+    role: StaffAssignableRole | None = None
+    branchId: str | None = Field(default=None, max_length=64)
+    isActive: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if len(normalized) < 2:
+            raise ValueError("Name must contain at least 2 characters")
+        return normalized
+
+    @model_validator(mode="after")
+    def require_change(self) -> "StaffUpdate":
+        if not self.model_fields_set:
+            raise ValueError("At least one staff field is required")
+        if "role" in self.model_fields_set and self.role is None:
+            raise ValueError("role cannot be null")
+        return self
+
+
+class StaffInvitationOut(BaseModel):
+    id: str
+    companyId: str
+    email: str
+    role: StaffAssignableRole
+    branchId: str | None = None
+    status: StaffInvitationStatus
+    deliveryStatus: StaffInvitationDeliveryStatus
+    expiresAt: datetime
+    createdAt: datetime
+    sentAt: datetime | None = None
+    acceptedAt: datetime | None = None
+
+
+class StaffInvitationActionOut(BaseModel):
+    invitation: StaffInvitationOut
+    # Returned only by create/resend. It is never persisted in plaintext.
+    inviteUrl: str
+
+
+class StaffInvitationTokenIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=32, max_length=256)
+
+
+class StaffInvitationPreviewOut(BaseModel):
+    email: str
+    companyId: str
+    companyName: str
+    role: StaffAssignableRole
+    branchName: str | None = None
+    expiresAt: datetime
+
+
+class StaffInvitationAcceptIn(StaffInvitationTokenIn):
+    name: str = Field(min_length=2, max_length=120)
+    password: str = Field(min_length=12, max_length=128)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 2:
+            raise ValueError("Name must contain at least 2 characters")
+        return normalized
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must be at most 72 UTF-8 bytes")
+        if any(character in "\r\n\t\x00" for character in value):
+            raise ValueError("Password contains unsupported control characters")
+        if not any(character.isalpha() for character in value):
+            raise ValueError("Password must contain a letter")
+        if not any(character.isdigit() for character in value):
+            raise ValueError("Password must contain a digit")
+        return value
 
 
 class OtpRequestIn(BaseModel):

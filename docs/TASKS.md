@@ -1,6 +1,6 @@
 # SweetTime Status Backlog
 
-Updated: 2026-07-16. Work is sequential unless the owner explicitly approves a skip.
+Updated: 2026-07-24. Work is sequential unless the owner explicitly approves a skip.
 
 ## Status Rules
 
@@ -16,6 +16,27 @@ Updated: 2026-07-16. Work is sequential unless the owner explicitly approves a s
 This is the short operational list shared by Claude Code and Codex. Detailed phase acceptance
 below remains authoritative; this section records the current execution order.
 
+- [ ] **Scheduled stories/news publication.** **[partial—verified locally; production rollout
+  and device acceptance pending]** Story and feed editors can publish immediately or choose an exact
+  local date, hour and minute. The API keeps future content hidden until `published_at <= now`;
+  boundary coverage proves it appears at the exact scheduled instant. While the app is foregrounded,
+  a coalesced content-only refresh checks stories, collections and news every 30 seconds without
+  reloading branding, branches or the catalog. Fixed-expiry story presets are calculated from the
+  scheduled publication time. Admin typecheck and 14/14 content tests pass. Remaining acceptance:
+  run the complete backend/Flutter suites, deploy the admin/backend changes, install the new APK and
+  verify one scheduled image and video publication on a physical device.
+- [ ] **Production staff invitations and RBAC.** **[partial—verified by review; runtime/deploy
+  acceptance pending]** The owner can invite a manager or branch-bound barista by email, edit role,
+  branch, name and active state, resend/revoke pending invitations, and copy a one-time link when
+  SMTP is not configured. The employee follows the HTTPS link and creates their own password; only a
+  SHA-256 token digest is stored and accepted/revoked/expired links cannot be reused. Owner-only
+  management, inactive-account rejection, branch-scoped barista order access and SSE revalidation are
+  enforced server-side. Migration: `d8e42c1a7f90`. Remaining acceptance: run backend tests against
+  PostgreSQL, deploy/migrate, configure and verify SMTP (manual-link delivery is the current safe
+  fallback), then complete owner/manager/barista browser acceptance.
+- [x] **Product detail media.** **[verified locally]** Product detail and cart-line editing now use
+  the server product image first, then a bundled asset and finally generated drink art. Decode/network
+  failures fall back safely; targeted Flutter analysis and 3/3 media regressions pass.
 - [ ] **S5.3 backend — customer persistence.** **[partial—verified on production]** Production API now
   has customer favorites, order history, recurring orders and server avatar storage, with Alembic
   revisions and manual auth/tenant checks. Product sizes/toppings and OrderItem V2 now use stable
