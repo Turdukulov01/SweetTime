@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,6 +16,14 @@ import 'shared/widgets/branded_background.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Пуши — некритичный путь: отсутствие/ошибка google-services.json или
+  // Firebase не должны ронять запуск приложения. На Android опции читаются из
+  // google-services.json автоматически, поэтому options здесь не передаём.
+  try {
+    await Firebase.initializeApp();
+  } catch (_) {
+    // Без Firebase приложение работает как раньше, просто без push-уведомлений.
+  }
   final cachedBranding = await SharedPreferencesBrandingStore(
     companyId: 'sweettime',
   ).read();

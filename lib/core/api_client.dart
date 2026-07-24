@@ -635,9 +635,15 @@ Color? parseHexColor(String? raw) {
 /// Клиент demo-API. Все методы «мягкие»: таймаут 2 секунды на запрос,
 /// любая ошибка сети/формата -> null, приложение продолжает жить на DemoData.
 class ApiClient {
-  ApiClient({this.companyId = 'sweettime'});
+  ApiClient({this.companyId = 'sweettime', http.Client? client})
+    : _client = client ?? http.Client();
 
   final String companyId;
+
+  /// Инъектируемый HTTP-клиент — используется push-token ручками, чтобы их
+  /// можно было проверить через `MockClient` без реальной сети. Остальные
+  /// методы исторически ходят через top-level `http.*`; менять их незачем.
+  final http.Client _client;
 
   static const Duration _timeout = Duration(seconds: 2);
   static const Duration _orderTimeout = Duration(seconds: 10);
@@ -1327,6 +1333,67 @@ class ApiClient {
       return _parseFavoritesResponse(response);
     } catch (_) {
       return const ApiResult<List<String>>.unavailable();
+    }
+  }
+
+  /// `PUT /auth/customer/me/push-tokens` — регистрация device-токена FCM для
+  /// пуш-уведомлений. Идемпотентно; сервер отвечает 204. Пуш некритичен:
+  /// 401/403 -> rejected (даёт один refresh), прочие ошибки -> unavailable.
+  Future<ApiResult<bool>> registerPushToken(
+    String accessToken, {
+    required String token,
+    required String platform,
+  }) async {
+    return _pushTokenRequest(
+      method: 'PUT',
+      path: '/auth/customer/me/push-tokens',
+      accessToken: accessToken,
+      token: token,
+      platform: platform,
+    );
+  }
+
+  /// `POST /auth/customer/me/push-tokens/remove` — снятие device-токена FCM
+  /// (например, при выходе из аккаунта). Идемпотентно; сервер отвечает 204.
+  Future<ApiResult<bool>> removePushToken(
+    String accessToken, {
+    required String token,
+    required String platform,
+  }) async {
+    return _pushTokenRequest(
+      method: 'POST',
+      path: '/auth/customer/me/push-tokens/remove',
+      accessToken: accessToken,
+      token: token,
+      platform: platform,
+    );
+  }
+
+  Future<ApiResult<bool>> _pushTokenRequest({
+    required String method,
+    required String path,
+    required String accessToken,
+    required String token,
+    required String platform,
+  }) async {
+    try {
+      final uri = _uri(path);
+      final headers = {..._bearer(accessToken), ..._jsonHeader};
+      final body = jsonEncode({'token': token, 'platform': platform});
+      final response =
+          await (method == 'PUT'
+                  ? _client.put(uri, headers: headers, body: body)
+                  : _client.post(uri, headers: headers, body: body))
+              .timeout(_timeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<bool>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<bool>.unavailable();
+      }
+      return const ApiResult<bool>.ok(true);
+    } catch (_) {
+      return const ApiResult<bool>.unavailable();
     }
   }
 

@@ -11,6 +11,7 @@ import '../core/cart_store.dart';
 import '../core/branding_store.dart';
 import '../core/google_identity.dart';
 import '../core/order_history_store.dart';
+import '../core/push_service.dart';
 import '../core/referral_invite.dart';
 import '../core/story_view_store.dart';
 import '../core/theme/app_theme.dart';
@@ -396,7 +397,9 @@ class AppStateController extends StateNotifier<AppState> {
     GoogleIdentityProvider? googleIdentity,
     CompanyConfig? initialBranding,
     BrandingStore? brandingStore,
-  }) : _languagePreferences =
+    PushService? pushService,
+  }) : _pushService = pushService ?? const PushService(),
+       _languagePreferences =
            languagePreferences ?? SharedPreferencesLanguagePreferenceStore(),
        _authStore = authStore ?? SecureAuthStore(),
        _cartStore =
@@ -470,9 +473,16 @@ class AppStateController extends StateNotifier<AppState> {
            pointEvents: DemoData.pointEvents,
            recurring: null,
          ),
-       );
+       ) {
+    // FCM ротирует device-токен: слушаем обновления и перерегистрируем токен,
+    // пока клиент авторизован. Без Firebase поток пустой — подписка безвредна.
+    _pushTokenRefreshSubscription = _pushService.tokenRefreshes.listen(
+      _handlePushTokenRefresh,
+    );
+  }
 
   final ApiClient _api;
+  final PushService _pushService;
   final GoogleIdentityProvider _googleIdentity;
   final LanguagePreferenceStore _languagePreferences;
   final CartStore _cartStore;
@@ -509,6 +519,13 @@ class AppStateController extends StateNotifier<AppState> {
   bool _cartPersistDirty = false;
   Completer<void>? _cartPersistCompleter;
   int _recurringMutationRevision = 0;
+
+  /// Подписка на onTokenRefresh FCM; отменяется в [dispose].
+  StreamSubscription<String>? _pushTokenRefreshSubscription;
+
+  /// Последний device-токен, успешно зарегистрированный на сервере. Нужен,
+  /// чтобы best-effort снять именно его при выходе из аккаунта.
+  String? _registeredPushToken;
 
   /// Однократная попытка подключиться к demo-API при старте (таймаут 2 с
   /// на запрос внутри [ApiClient]). При успехе подменяем каталог/филиалы и
@@ -846,6 +863,7 @@ class AppStateController extends StateNotifier<AppState> {
           await _loadCustomerFavorites();
           await _loadCustomerOrders();
           await _loadCustomerRecurring();
+          _syncPushTokenForCurrentCustomer();
         case ApiAuthStatus.rejected:
           _expireCustomerSession();
         case ApiAuthStatus.invalid:
@@ -894,6 +912,7 @@ class AppStateController extends StateNotifier<AppState> {
         _applyCustomerProfile(result.value!);
         await _loadHiddenOrderIdsForCurrentCustomer();
         await _loadCustomerOrders();
+        _syncPushTokenForCurrentCustomer();
         return CustomerSessionResumeResult.active;
       case ApiAuthStatus.rejected:
         _expireCustomerSession();
@@ -1057,6 +1076,72 @@ class AppStateController extends StateNotifier<AppState> {
         : state.copyWith(recurring: recurring);
   }
 
+  /// Регистрирует device-токен FCM для авторизованного клиента (fire-and-forget).
+  /// Вызывается после логина/восстановления сессии; основной поток не блокирует.
+  void _syncPushTokenForCurrentCustomer() {
+    if (state.isGuest || state.customerId == null) return;
+    unawaited(_registerPushToken());
+  }
+
+  void _handlePushTokenRefresh(String token) {
+    if (token.isEmpty || state.isGuest || state.customerId == null) return;
+    unawaited(_registerPushToken(explicitToken: token));
+  }
+
+  /// Отправляет device-токен на сервер. Пуш некритичен: отсутствие Firebase,
+  /// пустой токен, смена аккаунта во время запроса или сетевая ошибка — всё
+  /// молча проглатывается и не влияет на сессию.
+  Future<void> _registerPushToken({String? explicitToken}) async {
+    final epoch = _accountEpoch;
+    final customerId = state.customerId;
+    if (state.isGuest || customerId == null) return;
+    try {
+      final token = explicitToken ?? await _pushService.obtainToken();
+      if (token == null || token.isEmpty) return;
+      if (epoch != _accountEpoch ||
+          state.isGuest ||
+          state.customerId != customerId) {
+        return;
+      }
+      final result = await _withCustomerToken(
+        (accessToken) => _api.registerPushToken(
+          accessToken,
+          token: token,
+          platform: _pushService.platform,
+        ),
+      );
+      if (result.isOk) _registeredPushToken = token;
+    } catch (_) {
+      // Регистрация пуш-токена — best-effort и не должна ломать сессию.
+    }
+  }
+
+  /// Best-effort снятие текущего токена перед очисткой сессии (logout).
+  /// Ничего не делает, если токен не регистрировался (в т.ч. без Firebase).
+  Future<void> _removeRegisteredPushToken() async {
+    final token = _registeredPushToken;
+    if (token == null || token.isEmpty) return;
+    _registeredPushToken = null;
+    try {
+      await _withCustomerToken(
+        (accessToken) => _api.removePushToken(
+          accessToken,
+          token: token,
+          platform: _pushService.platform,
+        ),
+      );
+    } catch (_) {
+      // Best-effort: сервер и сам отсеивает токены, переставшие принимать пуши.
+    }
+  }
+
+  @override
+  void dispose() {
+    _pushTokenRefreshSubscription?.cancel();
+    _pushTokenRefreshSubscription = null;
+    super.dispose();
+  }
+
   /// Вход по OTP работает только через backend. Публичного fallback с кодом
   /// 1111 нет: недоступный SMS/backend не должен создавать локальную сессию.
   Future<bool> loginWithOtp(String phone, String code) async {
@@ -1095,6 +1180,7 @@ class AppStateController extends StateNotifier<AppState> {
     await _loadCustomerFavorites();
     await _loadCustomerOrders();
     await _loadCustomerRecurring();
+    _syncPushTokenForCurrentCustomer();
     return true;
   }
 
@@ -1465,6 +1551,9 @@ class AppStateController extends StateNotifier<AppState> {
   void _expireCustomerSession() {
     _accountEpoch++;
     _favoritesSyncDirty = false;
+    // Токен принадлежал завершённой сессии: снять его больше нельзя (bearer
+    // сейчас очистится), поэтому просто забываем и не пытаемся removePushToken.
+    _registeredPushToken = null;
     unawaited(_clearTokens());
     state = state.copyWith(
       isGuest: true,
@@ -1489,6 +1578,9 @@ class AppStateController extends StateNotifier<AppState> {
   }
 
   void logout() {
+    // Снимаем device-токен ДО очистки сессии, пока bearer-токен ещё валиден.
+    // Fire-and-forget: logout синхронно переводит UI в гостевой режим.
+    unawaited(_removeRegisteredPushToken());
     _expireCustomerSession();
     unawaited(_googleIdentity.signOut());
   }
@@ -1524,6 +1616,8 @@ class AppStateController extends StateNotifier<AppState> {
 
     _accountEpoch++;
     _favoritesSyncDirty = false;
+    // Аккаунт удаляется на сервере целиком вместе со своими push-токенами.
+    _registeredPushToken = null;
     await _clearTokens();
     try {
       await _googleIdentity.signOut();

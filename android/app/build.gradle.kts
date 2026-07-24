@@ -3,6 +3,8 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
+    // Firebase: читает android/app/google-services.json для FCM push-уведомлений.
+    id("com.google.gms.google-services")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
