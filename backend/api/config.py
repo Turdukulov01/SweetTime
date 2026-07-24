@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     smtp_security: Literal["starttls", "ssl"] = "starttls"
     smtp_timeout_seconds: int = Field(default=10, ge=1, le=60)
 
+    # Push-уведомления (FCM HTTP v1). Fail-closed: без сервисного аккаунта
+    # Firebase отправка выключена; активация постоянных заказов работает и без
+    # пушей. Файл сервисного аккаунта — секрет, монтируется в контейнер.
+    fcm_enabled: bool = False
+    fcm_service_account_file: str = ""
+
     @model_validator(mode="after")
     def validate_production_safety(self) -> "Settings":
         self.google_oauth_web_client_id = self.google_oauth_web_client_id.strip()
@@ -115,6 +121,12 @@ class Settings(BaseSettings):
                     "SMTP_USERNAME and SMTP_PASSWORD must either both be set "
                     "or both be empty"
                 )
+
+        self.fcm_service_account_file = self.fcm_service_account_file.strip()
+        if self.fcm_enabled and not self.fcm_service_account_file:
+            raise ValueError(
+                "FCM_SERVICE_ACCOUNT_FILE is required when FCM_ENABLED is true"
+            )
 
         if self.environment.lower() != "production":
             return self

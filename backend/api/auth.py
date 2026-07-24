@@ -41,6 +41,7 @@ from .models import (
     Company,
     Customer,
     CustomerIdentity,
+    CustomerPushToken,
     CustomerSession,
     MediaFile,
     Order,
@@ -1358,4 +1359,65 @@ def customer_cancel_recurring(
     if sub is not None and sub.active:
         sub.active = False
         db.commit()
+    return Response(status_code=204)
+
+
+@router.put(
+    "/customer/me/push-tokens",
+    status_code=204,
+    summary="Зарегистрировать FCM-токен устройства (идемпотентно)",
+    tags=["customer"],
+)
+def customer_register_push_token(
+    body: schemas.PushTokenIn,
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Upsert по токену. Токен = физическое устройство: если им вошёл другой
+    клиент, строка переприсваивается ему — пуши старого аккаунта не должны
+    приходить на чужой телефон."""
+    existing = db.scalars(
+        select(CustomerPushToken).where(CustomerPushToken.token == body.token)
+    ).first()
+    now = datetime.now(timezone.utc)
+    if existing is None:
+        db.add(
+            CustomerPushToken(
+                id=f"pt-{uuid4().hex[:12]}",
+                company_id=customer.company_id,
+                customer_id=customer.id,
+                token=body.token,
+                platform=body.platform,
+                updated_at=now,
+            )
+        )
+    else:
+        existing.company_id = customer.company_id
+        existing.customer_id = customer.id
+        existing.platform = body.platform
+        existing.updated_at = now
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.post(
+    "/customer/me/push-tokens/remove",
+    status_code=204,
+    summary="Удалить FCM-токен устройства (выход из аккаунта)",
+    tags=["customer"],
+)
+def customer_remove_push_token(
+    body: schemas.PushTokenIn,
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Идемпотентно: чужой или уже отсутствующий токен — тоже 204 (важен
+    конечный результат «на этом устройстве пушей не будет»)."""
+    db.execute(
+        sql_delete(CustomerPushToken).where(
+            CustomerPushToken.token == body.token,
+            CustomerPushToken.customer_id == customer.id,
+        )
+    )
+    db.commit()
     return Response(status_code=204)

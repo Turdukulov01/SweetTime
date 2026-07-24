@@ -720,6 +720,31 @@ class RecurringOrder(Base):
     )
 
 
+class CustomerPushToken(Base):
+    """FCM device-токен клиента для push-уведомлений.
+
+    Токен уникален глобально (одно физическое устройство): если тем же
+    устройством вошёл другой клиент, строка переприсваивается ему — пуши
+    старого аккаунта не должны приходить на чужой телефон.
+    """
+
+    __tablename__ = "customer_push_tokens"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id"), index=True
+    )
+    customer_id: Mapped[str] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    token: Mapped[str] = mapped_column(String(512), unique=True)
+    # android | ios
+    platform: Mapped[str] = mapped_column(String(16), default="android")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 def utcnow_iso() -> str:
     """ISO-8601 UTC в формате JS toISOString(): 2026-07-12T09:00:00.000Z."""
     return (

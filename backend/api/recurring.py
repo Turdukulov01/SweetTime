@@ -38,6 +38,7 @@ from .models import (
     utcnow_iso,
 )
 from .order_events import event_payload, order_event_hub
+from .push import send_to_customer
 
 logger = logging.getLogger("sweettime.recurring")
 
@@ -253,7 +254,31 @@ def activate_due_orders(db: Session, now: datetime) -> list[Order]:
             "order.updated",
             event_payload(order.id, order.number, order.status, order.branch_id),
         )
+        _notify_activation(db, order)
     return activated
+
+
+def _notify_activation(db: Session, order: Order) -> None:
+    """Push клиенту: заказ пошёл в работу, к какому времени и куда прийти.
+
+    Best-effort: без FCM-кредов или при сетевой ошибке активация всё равно
+    состоялась — уведомление не является условием приготовления заказа.
+    """
+    if order.customer_id is None:
+        return
+    try:
+        send_to_customer(
+            db,
+            company_id=order.company_id,
+            customer_id=order.customer_id,
+            title="Готовим ваш постоянный заказ",
+            body=(
+                f"Заберите к {order.ready_time} — {order.branch_name or 'кофейня'}."
+            ),
+            data={"orderId": order.id, "kind": "recurring_activated"},
+        )
+    except Exception:  # noqa: BLE001 — пуш не должен ломать активацию
+        logger.exception("recurring push failed for order %s", order.id)
 
 
 def run_scheduler_tick(db: Session, now: datetime | None = None) -> None:

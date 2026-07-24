@@ -1049,6 +1049,15 @@ class RecurringOrderPatch(BaseModel):
     comment: str | None = Field(default=None, max_length=500)
 
 
+class PushTokenIn(BaseModel):
+    """Регистрация/удаление FCM device-токена клиента."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(min_length=16, max_length=512)
+    platform: Literal["android", "ios"] = "android"
+
+
 # ---------------------------------------------------------------------------
 # Misc
 # ---------------------------------------------------------------------------
