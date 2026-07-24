@@ -1,7 +1,63 @@
 # Заметки Claude Code
 
-Обновлено: 2026-07-21. Владелец файла — Claude Code; Codex читает, но не редактирует.
+Обновлено: 2026-07-24. Владелец файла — Claude Code; Codex читает, но не редактирует.
 Структура — по `docs/collab/README.md` (протокол Codex принят, спасибо за доработку).
+
+## 0-ter. Приёмка этапа 2026-07-24 (CX-035/036/037) + коммит — 2026-07-24
+
+Codex завершил локально этап (scheduled-публикация сторис/news, приглашения сотрудников +
+серверный RBAC, фото товара в деталях) и оставил handoff: код не закоммичен из-за отказа записи
+в `.git` в его sandbox; просил владельца выполнить `git add -- admin backend deploy docs lib test`
++ commit. Владелец выбрал сначала **полные локальные сюиты**, коммит после зелёного.
+
+Что я сделал (по прямому решению владельца — вариант B):
+- Поднял окружение: Flutter `C:\Users\user\my_sdk_flutter\...` (3.44.5), backend — venv из
+  `backend/api/requirements.txt` (+`pytest==8.3.4`, которого нет в requirements). Python `py`
+  (3.13.5). Backend-тесты `api/tests` идут на in-memory SQLite (`StaticPool`) — Postgres/Docker
+  не нужны, то есть закрыл именно тот пробел, который у Codex был средовым.
+- **Полные прогоны — зелёные:** Flutter `analyze --no-pub` чисто; `flutter test --no-pub` **99/99**
+  (закрыт непроверенный у Codex 30-сек content-таймер: `test/news_content_test.dart` «lightweight
+  refresh replaces scheduled story and news content» проходит). Backend `pytest api/tests` **95/95**
+  (единственные warning — `InsecureKeyLengthWarning` от коротких тестовых HMAC-секретов, не прод).
+- **Коммит `dacded8`** ровно 33 файла этапа (`git add -- admin backend deploy docs lib test`).
+  `.codex-phone-install.png` НЕ добавлен (в корне, вне зон add) — как и просил Codex. В сообщении
+  указал авторство Codex и мою верификацию.
+
+Осталось по канону `docs/TASKS.md` (статусы не трогал): production rollout admin/backend,
+`alembic upgrade head` до `d8e42c1a7f90`, настройка/проверка SMTP (пока честный fallback —
+ручная ссылка), браузерная приёмка owner/manager/barista, свежий APK и проверка одной отложенной
+image+video публикации на устройстве. Staff/schedule НЕ считать production-ready по факту UI.
+
+Codex: зоны не открывал под правки — только read-only прогон + коммит твоей работы; `lib/`,
+`backend/api`, `admin/` остаются твоими до следующего поручения владельца.
+
+### Доводка этапа: версия, APK, деплой-подготовка — 2026-07-24 (владелец: «быстро всё сделаем»)
+
+- Бамп версии `1.0.1+2 → 1.0.2+3` (commit `ed8527c`): в этап вошли Flutter-правки (30-сек content
+  timer, фото товара), нужен свежий APK; versionCode 3 > 2 для чистой замены на устройстве.
+- **Граф миграций проверен вручную** (17 ревизий, ровно одна голова `d8e42c1a7f90`, цепочка
+  линейная; непосредственный родитель — `c19f6b4a8e21`, голова до этапа). `alembic upgrade head`
+  на актуальном перед этапом проде применит РОВНО ОДНУ миграцию (staff invitations). Отдельной
+  миграции для scheduled-публикации нет. Multiple-heads исключены. Предостережение в runbook:
+  перед апгрейдом сверить `alembic current` == `c19f6b4a8e21` (в старых заметках прод как
+  `b91e7c4a2d10` — это более ранняя веха, не текущая голова).
+- **Свежий подписанный APK** `1.0.2+3`: `build/app/outputs/flutter-apk/app-release.apk`,
+  81 971 110 байт (~78.2 MB), SHA-256 `3c71119f1f57edb67d65796030b720f3f12d27694cff286d95d32ce6807cadc1`.
+  Копия — `dist/SweetTime-Android-test-2026-07-24.apk`. Собран прод-API + Google Web audience
+  (дефолты в коде + явные dart-define). Подпись — release (fail-closed, без debug-фолбэка).
+- **Устройство `f3bff2a5`**: `adb install -r` → Success (поверх твоего прошлого релиза — значит
+  signer ИДЕНТИЧЕН боевому `0312D7…CCD044`, т.к. Android иначе отверг бы `-r`; assetlinks ок).
+  Смоук: старт без крэша, процесс жив, в logcat нет FATAL/AndroidRuntime. Полный UI-смоук
+  (3 QR-таба, фото товара) и проверка отложенной image+video публикации — ПОСЛЕ деплоя backend,
+  иначе телефон смотрит в прод без новых фич.
+- **Деплой не выполнял**: SSH к боевому серверу заблокирован харнессом (там же ChainLens + миграция
+  боевой БД) — это действие владельца по модели «твои команды». Подготовил инкрементальный runbook
+  `deploy/production/ROLLOUT-2026-07-24.md` (бэкап → `alembic current` → build backend/admin →
+  `up -d` → APK в downloads → smoke → браузерная приёмка RBAC/расписания → опц. restore-drill).
+  SMTP — когда будут реальные креды, до этого штатный ручной fallback-линк.
+
+Коммиты этапа: `dacded8` (код), `ed8527c` (bump). Осталось для приёмки — прод-раскатка владельцем
+и постдеплойная проверка на устройстве. Статусы `docs/TASKS.md` не менял (это решение владельца).
 
 ## 0-bis. iOS-подготовка — 2026-07-21 (по прямому поручению владельца)
 
