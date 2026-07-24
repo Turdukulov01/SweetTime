@@ -258,7 +258,11 @@ function DashboardContent() {
     { key: "week", label: "7 дней", cutoff: now - 7 * DAY_MS },
     { key: "month", label: "30 дней", cutoff: now - 30 * DAY_MS }
   ];
-  const validOrders = orders.filter((order) => order.status !== "cancelled");
+  // "scheduled" — план постоянных заказов, ещё не работа и не выручка:
+  // в счётчики и аналитику не входит (как и отменённые).
+  const validOrders = orders.filter(
+    (order) => order.status !== "cancelled" && order.status !== "scheduled"
+  );
   const ordersFor = (period: PeriodDefinition) =>
     validOrders.filter(
       (order) => new Date(order.createdAt).getTime() >= period.cutoff
@@ -526,7 +530,10 @@ function DashboardContent() {
 
   const branchName = (branchId: string) =>
     branches.find((branch) => branch.id === branchId)?.name ?? branchId;
-  const recentOrders = [...orders]
+  // Планы "scheduled" не показываем: сгенерированные утром постоянные заказы
+  // вытеснили бы реальные из пяти последних строк.
+  const recentOrders = orders
+    .filter((order) => order.status !== "scheduled")
     .sort(
       (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()

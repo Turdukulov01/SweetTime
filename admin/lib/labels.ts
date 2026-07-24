@@ -1,6 +1,7 @@
 import type { OrderStatus, OrderType, Role } from "@/lib/types";
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
+  scheduled: "Запланирован",
   new: "Новый",
   preparing: "Готовится",
   ready: "Готов",

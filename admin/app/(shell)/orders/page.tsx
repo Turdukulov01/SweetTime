@@ -4,9 +4,23 @@
 // Крупные кнопки для баристы, фильтр по филиалу (barista жёстко привязан к своему).
 // Данные — из боевого API (GET /orders требует токен стаффа); если API не
 // ответил, показываем ошибку, а не мок-очередь.
+//
+// Постоянные заказы: статус "scheduled" — это план на сегодня, а не работа.
+// Такие заказы не попадают в колонки доски, а живут в панели «Расписание
+// постоянных»; за 10 минут до времени выдачи сервер сам переводит их в "new".
 
 import { useCallback, useState } from "react";
-import { Ban, ChevronRight, MapPin, ReceiptText, TriangleAlert } from "lucide-react";
+import {
+  Ban,
+  CalendarClock,
+  ChevronDown,
+  ChevronRight,
+  MapPin,
+  MessageSquareText,
+  ReceiptText,
+  Repeat,
+  TriangleAlert
+} from "lucide-react";
 import { OrderDetailsDrawer } from "@/components/order-details-drawer";
 import { StatusBadge } from "@/components/status-badge";
 import { useCompanyStore } from "@/lib/company-store";
@@ -25,6 +39,115 @@ const NEXT_ACTION: Partial<
   preparing: { next: "ready", label: "Готов" },
   ready: { next: "done", label: "Выдать" }
 };
+
+/** Время выдачи для строки расписания: readyTime сервера или scheduledFor */
+function planTime(order: Order): string {
+  if (order.readyTime) return order.readyTime;
+  return order.scheduledFor ? formatTime(order.scheduledFor) : "—";
+}
+
+/** «Клубничный моти-кап + Матча» — состав одной строкой для плана дня */
+function planItems(order: Order): string {
+  const names = order.items
+    .map((item) =>
+      item.quantity > 1
+        ? `${item.quantity} × ${item.name || "Без названия"}`
+        : item.name || "Без названия"
+    )
+    .filter(Boolean);
+  return names.length ? names.join(" + ") : "Состав не передан";
+}
+
+/**
+ * Панель-аккордеон «Расписание постоянных»: сгенерированные на сегодня
+ * постоянные заказы (статус "scheduled"), отсортированные по времени выдачи.
+ * Персонал видит план дня заранее — в час-пик заказы не приходят внезапно.
+ */
+function RecurringSchedule({
+  orders,
+  branchName,
+  showBranch
+}: {
+  orders: Order[];
+  branchName: (branchId: string) => string;
+  showBranch: boolean;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <section className="surface mt-6 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setCollapsed((value) => !value)}
+        aria-expanded={!collapsed}
+        className="focus-ring flex w-full items-center justify-between gap-3 px-5 py-4 text-left transition hover:bg-coffee-900/[0.03] dark:hover:bg-white/5"
+      >
+        <span className="flex items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-50 text-sky-700 dark:bg-sky-400/15 dark:text-sky-300">
+            <CalendarClock className="h-4 w-4" />
+          </span>
+          <span>
+            <span className="block text-sm font-semibold text-coffee-900">
+              Расписание постоянных · {orders.length}
+            </span>
+            <span className="mt-0.5 block text-xs text-coffee-500">
+              План на сегодня. За 10 минут до времени выдачи заказ сам появится
+              в колонке «Новый»
+            </span>
+          </span>
+        </span>
+        <ChevronDown
+          className={cn(
+            "h-5 w-5 shrink-0 text-coffee-500 transition-transform",
+            !collapsed && "rotate-180"
+          )}
+        />
+      </button>
+
+      {!collapsed && (
+        <ul className="border-t border-coffee-900/10">
+          {orders.map((order) => (
+            <li
+              key={order.id}
+              className="border-b border-coffee-900/5 px-5 py-2.5 last:border-0"
+            >
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
+                <span className="font-semibold tabular-nums text-coffee-900">
+                  {planTime(order)}
+                </span>
+                <span className="text-coffee-500">·</span>
+                <span className="font-medium text-coffee-700">
+                  {order.number}
+                </span>
+                <span className="text-coffee-500">·</span>
+                <span className="text-coffee-700">{order.customerName}</span>
+                <span className="text-coffee-500">·</span>
+                <span className="min-w-0 text-coffee-700">
+                  {planItems(order)}
+                </span>
+                {showBranch && (
+                  <>
+                    <span className="text-coffee-500">·</span>
+                    <span className="inline-flex items-center gap-1 text-xs text-coffee-500">
+                      <MapPin className="h-3 w-3" />
+                      {branchName(order.branchId)}
+                    </span>
+                  </>
+                )}
+              </div>
+              {order.comment && (
+                <p className="mt-1 flex items-start gap-1.5 text-xs text-coffee-500">
+                  <MessageSquareText className="mt-0.5 h-3 w-3 shrink-0 text-accent" />
+                  {order.comment}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 
 function OrderCard({
   order,
@@ -56,6 +179,12 @@ function OrderCard({
           <p className="mt-0.5 text-xs text-coffee-500">
             {ORDER_TYPE_LABELS[order.type]} · {order.customerName}
           </p>
+          {order.isRecurring && (
+            <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-0.5 text-xs font-semibold text-sky-700 dark:bg-sky-400/15 dark:text-sky-300">
+              <Repeat className="h-3 w-3" />
+              Постоянный{order.readyTime ? ` · к ${order.readyTime}` : ""}
+            </span>
+          )}
           {showBranch && (
             <p className="mt-0.5 flex items-center gap-1 text-xs text-coffee-500">
               <MapPin className="h-3 w-3" />
@@ -183,6 +312,12 @@ export default function OrdersPage() {
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
 
+  // План постоянных заказов на сегодня: статус "scheduled" не попадает в
+  // колонки доски (byStatus фильтрует явно), сортировка по времени выдачи.
+  const scheduledPlan = visibleOrders
+    .filter((o) => o.status === "scheduled")
+    .sort((a, b) => planTime(a).localeCompare(planTime(b), "ru"));
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -246,6 +381,14 @@ export default function OrdersPage() {
 
       {!loadFailed && loading && orders.length === 0 && (
         <p className="mt-6 text-sm text-coffee-500">Загружаем очередь…</p>
+      )}
+
+      {!loadFailed && scheduledPlan.length > 0 && (
+        <RecurringSchedule
+          orders={scheduledPlan}
+          branchName={branchName}
+          showBranch={!isBarista && effectiveBranch === "all"}
+        />
       )}
 
       <div

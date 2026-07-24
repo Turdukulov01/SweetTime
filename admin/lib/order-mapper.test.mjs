@@ -98,9 +98,27 @@ test("does not invent absent optional order or item data", () => {
   assert.equal(order.customerPhone, undefined);
   assert.equal(order.comment, undefined);
   assert.equal(order.paymentStatus, undefined);
+  // Старый backend не шлёт поля постоянных заказов — дефолты, не выдумки
+  assert.equal(order.isRecurring, false);
+  assert.equal(order.scheduledFor, undefined);
   assert.equal(order.items[0].imageUrl, undefined);
   assert.equal(order.items[0].description, undefined);
   assert.equal(order.items[0].toppings, undefined);
+});
+
+test("maps recurring schedule fields when the server sends them", () => {
+  const order = mapApiOrder("sweettime", {
+    ...baseOrder,
+    status: "scheduled",
+    isRecurring: true,
+    scheduledFor: "2026-07-16T12:36:00.000Z",
+    readyTime: "18:36"
+  });
+
+  assert.equal(order.status, "scheduled");
+  assert.equal(order.isRecurring, true);
+  assert.equal(order.scheduledFor, "2026-07-16T12:36:00.000Z");
+  assert.equal(order.readyTime, "18:36");
 });
 
 test("localized snapshots use RU then KY then EN without synthetic text", () => {

@@ -49,6 +49,9 @@ export interface ApiOrderContract {
   status: OrderStatus;
   readyTime?: string | null;
   comment?: string | null;
+  /** Старый backend этих полей не шлёт: отсутствие = false / null. */
+  isRecurring?: boolean | null;
+  scheduledFor?: string | null;
   itemsVersion?: 1 | 2;
   items: ApiOrderItemContract[];
   subtotal?: number | null;
@@ -146,6 +149,8 @@ export function mapApiOrder(companyId: string, value: ApiOrderContract): Order {
     status: value.status,
     readyTime: optionalText(value.readyTime),
     comment: optionalText(value.comment),
+    isRecurring: value.isRecurring ?? false,
+    scheduledFor: optionalText(value.scheduledFor),
     itemsVersion: value.itemsVersion,
     total: value.total,
     subtotal: finiteOptional(value.subtotal),

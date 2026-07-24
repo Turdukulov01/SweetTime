@@ -290,7 +290,17 @@ export interface RecurringOrder {
 
 export type OrderType = "pickup" | "scheduled" | "qr";
 
-export type OrderStatus = "new" | "preparing" | "ready" | "done" | "cancelled";
+/**
+ * "scheduled" — сгенерированный на сегодня «постоянный» заказ, который ещё не
+ * в работе: сервер сам переведёт его в "new" за 10 минут до scheduledFor.
+ */
+export type OrderStatus =
+  | "scheduled"
+  | "new"
+  | "preparing"
+  | "ready"
+  | "done"
+  | "cancelled";
 
 export type PaymentMethod = "mock" | "cash" | "qr";
 
@@ -339,6 +349,10 @@ export interface Order {
   branchAddress?: string;
   readyTime?: string;
   comment?: string;
+  /** Заказ сгенерирован из подписки «постоянный заказ»; старый backend поля не шлёт */
+  isRecurring?: boolean;
+  /** Целевой момент выдачи (ISO-8601 UTC) для постоянных заказов */
+  scheduledFor?: string;
   itemsVersion?: 1 | 2;
   /** Может отсутствовать у старого demo API или локальных моков */
   paymentMethod?: PaymentMethod;

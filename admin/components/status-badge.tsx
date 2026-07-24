@@ -3,6 +3,7 @@ import type { OrderStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const STATUS_STYLES: Record<OrderStatus, string> = {
+  scheduled: "bg-sky-50 text-sky-700 dark:bg-sky-400/15 dark:text-sky-300",
   new: "bg-accent/10 text-accent dark:bg-accent/20",
   preparing: "bg-cream-200 text-coffee-700 dark:bg-cream-200/15",
   ready: "bg-mint-100 text-emerald-700 dark:bg-mint-500/15 dark:text-mint-300",
