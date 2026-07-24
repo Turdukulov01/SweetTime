@@ -17,6 +17,7 @@ import {
 import { RoleGate } from "@/components/role-gate";
 import {
   apiCreateStaffInvitation,
+  apiDeleteStaffMember,
   apiFetchStaff,
   apiFetchStaffInvitations,
   apiPatchStaffMember,
@@ -86,13 +87,17 @@ function StaffRow({
   branches,
   currentUserId,
   saving,
-  onSave
+  deleting,
+  onSave,
+  onDelete
 }: {
   member: StaffMember;
   branches: Branch[];
   currentUserId: string;
   saving: boolean;
+  deleting: boolean;
   onSave: (member: StaffMember, patch: StaffMemberPatch) => Promise<void>;
+  onDelete: (member: StaffMember) => Promise<void>;
 }) {
   const [name, setName] = useState(member.name);
   const [role, setRole] = useState<StaffAssignableRole>(
@@ -250,20 +255,39 @@ function StaffRow({
         </p>
       </td>
 
-      <td className="px-5 py-4 text-right">
-        <button
-          type="button"
-          onClick={() => void save()}
-          disabled={!isDirty || !canSave || saving}
-          className="focus-ring inline-flex h-10 items-center gap-2 rounded-full bg-accent px-4 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {saving ? (
-            <RefreshCw className="h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4" />
+      <td className="px-5 py-4">
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={!isDirty || !canSave || saving || deleting}
+            className="focus-ring inline-flex h-10 items-center gap-2 rounded-full bg-accent px-4 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {saving ? (
+              <RefreshCw className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            Сохранить
+          </button>
+          {!isOwner && !isCurrentUser && (
+            <button
+              type="button"
+              onClick={() => void onDelete(member)}
+              disabled={saving || deleting}
+              title="Удалить сотрудника"
+              aria-label={`Удалить сотрудника ${member.name}`}
+              className="focus-ring inline-flex h-10 items-center gap-2 rounded-full border border-red-500/30 px-4 text-sm font-semibold text-red-600 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-300"
+            >
+              {deleting ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              Удалить
+            </button>
           )}
-          Сохранить
-        </button>
+        </div>
       </td>
     </tr>
   );
@@ -413,6 +437,28 @@ function StaffContent() {
         current.map((item) => (item.id === saved.id ? saved : item))
       );
       setSuccessMessage(`Данные ${saved.name} сохранены`);
+    } catch (error) {
+      setActionError(describeApiError(error));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleStaffDelete(member: StaffMember) {
+    if (!companyId || busyKey) return;
+    if (
+      !window.confirm(
+        `Удалить сотрудника ${member.name} (${member.email})? Аккаунт и доступ будут удалены безвозвратно. Для временной блокировки используйте «Отключён».`
+      )
+    ) {
+      return;
+    }
+    clearMessages();
+    setBusyKey(`staff:delete:${member.id}`);
+    try {
+      await apiDeleteStaffMember(companyId, member.id);
+      setStaff((current) => current.filter((item) => item.id !== member.id));
+      setSuccessMessage(`Сотрудник ${member.name} удалён`);
     } catch (error) {
       setActionError(describeApiError(error));
     } finally {
@@ -851,7 +897,9 @@ function StaffContent() {
                     branches={branches}
                     currentUserId={user?.id ?? ""}
                     saving={busyKey === `staff:${member.id}`}
+                    deleting={busyKey === `staff:delete:${member.id}`}
                     onSave={handleStaffSave}
+                    onDelete={handleStaffDelete}
                   />
                 ))}
               </tbody>

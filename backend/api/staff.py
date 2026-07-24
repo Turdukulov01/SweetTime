@@ -401,6 +401,35 @@ def update_staff(
     return staff_out(target)
 
 
+@router.delete("/{staffId}", status_code=204)
+def delete_staff(
+    staffId: str,
+    company: Company = Depends(get_company),
+    owner: AdminUser = Depends(require_owner),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Полностью удаляет сотрудника (для уволенных), в отличие от «отключить».
+
+    Владельца удалить нельзя (в т.ч. себя): аккаунт владельца защищён так же, как
+    в update_staff. Удаление hard: строка admin_users исчезает, а get_current_staff
+    каждый запрос перечитывает пользователя из БД — доступ отзывается немедленно,
+    даже по ещё не истёкшему access-токену. Email освобождается для повторного найма.
+    Идемпотентно по результату: удаление отсутствующего сотрудника — 404, но
+    повторный вызов после успешного удаления тоже 404 (сотрудника уже нет).
+    """
+    target = db.get(AdminUser, staffId)
+    if target is None or target.company_id != company.id:
+        raise HTTPException(status_code=404, detail="Staff user not found")
+    if target.role == "owner":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Owner account cannot be deleted here",
+        )
+    db.delete(target)
+    db.commit()
+    return Response(status_code=204)
+
+
 @public_router.post(
     "/preview",
     response_model=schemas.StaffInvitationPreviewOut,

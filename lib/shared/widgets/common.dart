@@ -13,13 +13,19 @@ class AppLogo extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Для марки берём полноразмерный логотип, а не миниатюру: миниатюра мелкая и
+    // на плотных экранах выглядит замыленной. Файл логотипа лёгкий, так дешевле
+    // качества почти не теряем.
     final branding = ref.watch(
       appStateProvider.select(
-        (s) => (appName: s.appName, logoUrl: s.logoThumbnailUrl ?? s.logoUrl),
+        (s) => (appName: s.appName, logoUrl: s.logoUrl ?? s.logoThumbnailUrl),
       ),
     );
     final appName = branding.appName;
     final theme = Theme.of(context);
+    // Декодируем ровно под физический размер на этом экране — резко и без лишней
+    // памяти (иначе Flutter масштабирует уже растянутую миниатюру).
+    final decodePx = (size * MediaQuery.devicePixelRatioOf(context)).round();
     final mark = Container(
       width: size,
       height: size,
@@ -47,6 +53,9 @@ class AppLogo extends ConsumerWidget {
               width: size,
               height: size,
               fit: BoxFit.cover,
+              filterQuality: FilterQuality.medium,
+              cacheWidth: decodePx,
+              cacheHeight: decodePx,
               errorBuilder: (_, _, _) => Icon(
                 Icons.storefront_rounded,
                 color: Colors.white,

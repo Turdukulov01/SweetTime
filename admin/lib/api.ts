@@ -454,6 +454,15 @@ export async function apiPatchStaffMember(
   return mapStaffMember(user);
 }
 
+export function apiDeleteStaffMember(
+  companyId: string,
+  staffId: string
+): Promise<void> {
+  return requestVoid(
+    `/api/companies/${encodeURIComponent(companyId)}/staff/${encodeURIComponent(staffId)}`
+  );
+}
+
 export async function apiFetchStaffInvitations(
   companyId: string
 ): Promise<StaffInvitation[]> {

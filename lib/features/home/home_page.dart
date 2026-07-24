@@ -248,8 +248,9 @@ class _TappableLogo extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Для зума на весь экран берём полноразмерный логотип, а не миниатюру.
     final logoUrl = ref.watch(
-      appStateProvider.select((s) => s.logoThumbnailUrl ?? s.logoUrl),
+      appStateProvider.select((s) => s.logoUrl ?? s.logoThumbnailUrl),
     );
     return GestureDetector(
       onTap: () => showFullscreenImage(
@@ -263,7 +264,7 @@ class _TappableLogo extends ConsumerWidget {
           color: Theme.of(context).colorScheme.primary,
         ),
       ),
-      child: const AppLogo(size: 40, showWordmark: true),
+      child: const AppLogo(size: 48, showWordmark: true),
     );
   }
 }

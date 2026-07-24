@@ -244,6 +244,67 @@ def test_deactivated_staff_tokens_stop_working_immediately(staff_db) -> None:
         assert caught.value.status_code == 401
 
 
+def test_owner_can_delete_staff_and_owner_is_protected(staff_db) -> None:
+    with staff_db() as db:
+        company = db.get(Company, "sweettime")
+        owner = db.get(AdminUser, "owner")
+        now = datetime.now(timezone.utc)
+        barista = AdminUser(
+            id="barista",
+            company_id=company.id,
+            email="barista@sweettime.test",
+            hashed_password="unused",
+            name="Barista",
+            role="barista",
+            branch_id="branch-a",
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(barista)
+        db.commit()
+        token = create_access_token(
+            subject=barista.id,
+            typ="staff",
+            company_id=company.id,
+            role=barista.role,
+        )
+
+        # Владельца удалить нельзя — 409, строка остаётся.
+        with pytest.raises(HTTPException) as protected:
+            staff.delete_staff(
+                staffId=owner.id, company=company, owner=owner, db=db
+            )
+        assert protected.value.status_code == 409
+        assert db.get(AdminUser, owner.id) is not None
+
+        # Обычного сотрудника удаляем — строки больше нет.
+        response = staff.delete_staff(
+            staffId=barista.id, company=company, owner=owner, db=db
+        )
+        assert response.status_code == 204
+        assert db.get(AdminUser, barista.id) is None
+
+        # Доступ по ещё не истёкшему токену отзывается сразу: пользователя нет → 401.
+        with pytest.raises(HTTPException) as revoked:
+            deps.get_current_staff(
+                credentials=HTTPAuthorizationCredentials(
+                    scheme="Bearer",
+                    credentials=token,
+                ),
+                company=company,
+                db=db,
+            )
+        assert revoked.value.status_code == 401
+
+        # Повторное удаление отсутствующего сотрудника — 404.
+        with pytest.raises(HTTPException) as missing:
+            staff.delete_staff(
+                staffId=barista.id, company=company, owner=owner, db=db
+            )
+        assert missing.value.status_code == 404
+
+
 def test_barista_order_access_is_limited_to_assigned_branch(staff_db) -> None:
     with staff_db() as db:
         company = db.get(Company, "sweettime")

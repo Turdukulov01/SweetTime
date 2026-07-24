@@ -29,13 +29,14 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 
 function BranchCard({
   branch,
-  unavailableCount
+  unavailableProducts
 }: {
   branch: Branch;
-  unavailableCount: number;
+  unavailableProducts: string[];
 }) {
   const { updateBranch } = useCompanyStore();
   const [editing, setEditing] = useState(false);
+  const [showUnavailable, setShowUnavailable] = useState(false);
   const [draft, setDraft] = useState<BranchDraft>({
     name: branch.name,
     address: branch.address,
@@ -140,11 +141,20 @@ function BranchCard({
         </div>
         <div className="flex items-center gap-2.5">
           <PackageX className="h-4 w-4 shrink-0 text-coffee-500" />
-          {unavailableCount > 0 ? (
-            <span>
-              Недоступно {unavailableCount}{" "}
-              {pluralRu(unavailableCount, "товар", "товара", "товаров")}
-            </span>
+          {unavailableProducts.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowUnavailable(true)}
+              className="focus-ring rounded text-left underline decoration-dotted underline-offset-4 transition hover:text-accent"
+            >
+              Недоступно {unavailableProducts.length}{" "}
+              {pluralRu(
+                unavailableProducts.length,
+                "товар",
+                "товара",
+                "товаров"
+              )}
+            </button>
           ) : (
             <span className="text-emerald-700 dark:text-mint-300">
               Все товары доступны
@@ -152,6 +162,47 @@ function BranchCard({
           )}
         </div>
       </div>
+
+      {showUnavailable && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Недоступные товары — ${branch.name}`}
+          onClick={() => setShowUnavailable(false)}
+        >
+          <div
+            className="surface w-full max-w-md overflow-hidden p-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-coffee-900/10 px-5 py-4">
+              <h3 className="flex items-center gap-2 text-base font-semibold text-coffee-900">
+                <PackageX className="h-4 w-4 text-accent" />
+                Недоступно в «{branch.name}»
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowUnavailable(false)}
+                aria-label="Закрыть"
+                className="focus-ring rounded-full p-1 text-coffee-500 transition hover:bg-coffee-900/5"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <ul className="max-h-[64vh] overflow-y-auto px-5 py-3">
+              {unavailableProducts.map((name, index) => (
+                <li
+                  key={`${name}-${index}`}
+                  className="flex items-center gap-2 border-b border-coffee-900/5 py-2 text-sm text-coffee-700 last:border-0 dark:text-coffee-200"
+                >
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent/60" />
+                  {name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       <div className="mt-5 flex gap-2">
         {editing ? (
@@ -299,11 +350,9 @@ function BranchesContent() {
           <BranchCard
             key={branch.id}
             branch={branch}
-            unavailableCount={
-              products.filter(
-                (p) => !p.availableBranchIds.includes(branch.id)
-              ).length
-            }
+            unavailableProducts={products
+              .filter((p) => !p.availableBranchIds.includes(branch.id))
+              .map((p) => p.name)}
           />
         ))}
       </div>
