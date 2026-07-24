@@ -38,10 +38,18 @@
 - Deploy: `ROLLOUT-recurring-v1.md` (2 миграции) + `docker-compose.fcm.yml` overlay +
   шаги Firebase. Коммиты `60940d4`, спек `2583742`.
 
-**Осталось (владелец):** деплой этапа по `ROLLOUT-recurring-v1.md`; для пушей — создать
-Firebase-проект (google-services.json + сервисный аккаунт). **Осталось (разработка):**
-Flutter FCM-клиент (firebase_messaging: разрешение, device-токен → PUT /push-tokens) — только
-после google-services.json; backend к нему готов.
+**Firebase подключён владельцем 2026-07-24:** проект `project-1c2e438d-...-861e8` (№440029771649),
+`google-services.json` в `android/app/` (в gitignore), сервисный аккаунт — у владельца для сервера.
+**Flutter FCM-клиент ГОТОВ (`ec3b92f`, версия 1.0.5+6):** firebase_core/firebase_messaging +
+google-services plugin 4.4.2 (совместим с AGP 9.0.1/Kotlin 2.3.20), PushService (разрешение
+Android 13+, токен, refresh), регистрация токена на backend после логина / снятие при logout.
+analyze чисто, тесты 105/105, **подписанный release-APK с Firebase собирается** (R8 без доп.
+proguard). APK sha `f10bcd7e…`.
+
+**Осталось только владельцу/ops:** (1) деплой этапа `ROLLOUT-recurring-v1.md` (архив
+`sweettime-5df3ddb`, 2 миграции — backend/admin, FCM-overlay уже в архиве); (2) сервисный аккаунт
+на сервер + `FCM_SERVICE_ACCOUNT_HOST_FILE` в `.env` + запуск backend с `-f docker-compose.fcm.yml`;
+(3) поставить APK 1.0.5+6; (4) e2e-проверка пуша. Код фичи закрыт полностью.
 
 ## 0-ter. Приёмка этапа 2026-07-24 (CX-035/036/037) + коммит — 2026-07-24
 
