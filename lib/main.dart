@@ -142,8 +142,21 @@ class _SweetTimeAppState extends ConsumerState<SweetTimeApp>
       // Один фон под всем приложением: Scaffold'ы прозрачны (см. AppTheme), а
       // брендовый фон рисуется здесь, поэтому виден на КАЖДОМ экране, включая
       // push-страницы (товар, оформление, профиль-подэкраны).
-      builder: (context, child) =>
-          BrandedBackground(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) {
+        // Системный размер шрифта уважаем (доступность), но в диапазоне
+        // 0.9–1.3: экстремальный масштаб на старых/маленьких телефонах
+        // разносит макет (наезжающие карточки, обрезанный текст).
+        final media = MediaQuery.of(context);
+        return MediaQuery(
+          data: media.copyWith(
+            textScaler: media.textScaler.clamp(
+              minScaleFactor: 0.9,
+              maxScaleFactor: 1.3,
+            ),
+          ),
+          child: BrandedBackground(child: child ?? const SizedBox.shrink()),
+        );
+      },
       routerConfig: appRouter,
     );
   }
