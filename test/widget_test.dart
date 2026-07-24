@@ -89,14 +89,34 @@ Map<String, dynamic> _v1OrderJson() => <String, dynamic>{
   'createdAt': '2026-07-01T12:00:00Z',
 };
 
-Map<String, dynamic> _recurringJson({String? paidUntil}) => <String, dynamic>{
+Map<String, dynamic> _recurringJson({
+  String? paidUntil,
+  int dailyTotal = 350,
+  String? comment,
+}) => <String, dynamic>{
   'productIds': [DemoData.products.first.id],
   'time': '11:00',
   'branchId': DemoData.branches.first.id,
   'plan': 'week',
   'paidUntil': paidUntil ?? '2026-07-22T12:00:00Z',
+  'dailyTotal': dailyTotal,
+  'comment': ?comment,
   'active': true,
 };
+
+/// Актуальная демо-цена набора за день — как её пересчитал бы сервер.
+int _demoDailyTotal(List<String> productIds) {
+  var total = 0;
+  for (final id in productIds) {
+    for (final product in DemoData.products) {
+      if (product.id == id) {
+        total += product.basePrice;
+        break;
+      }
+    }
+  }
+  return total;
+}
 
 void main() {
   test('catalog starting price uses the lowest final size price', () {
@@ -648,17 +668,97 @@ void main() {
   });
 
   test('recurring parser accepts stable IDs and server paidUntil', () {
-    final recurring = parseCustomerRecurringOrder(_recurringJson());
+    final recurring = parseCustomerRecurringOrder(
+      _recurringJson(comment: 'Тёплый, без трубочки'),
+    );
 
     expect(recurring, isNotNull);
     expect(recurring!.productIds, [DemoData.products.first.id]);
     expect(recurring.branchId, DemoData.branches.first.id);
     expect(recurring.plan, RecurringPlan.week);
     expect(recurring.paidUntil, DateTime.utc(2026, 7, 22, 12));
+    expect(recurring.dailyTotal, 350);
+    expect(recurring.comment, 'Тёплый, без трубочки');
+
+    // Пожелания опциональны — их отсутствие не ломает подписку.
+    expect(parseCustomerRecurringOrder(_recurringJson())?.comment, isNull);
 
     final invalid = _recurringJson()..['time'] = '25:00';
     expect(parseCustomerRecurringOrder(invalid), isNull);
+
+    // Новый контракт всегда отдаёт актуальную цену дня: без неё UI не может
+    // честно показать сумму, поэтому такой ответ не принимается.
+    final missingDailyTotal = _recurringJson()..remove('dailyTotal');
+    expect(parseCustomerRecurringOrder(missingDailyTotal), isNull);
   });
+
+  test('order history maps recurring metadata and "scheduled" status', () {
+    final json = _v2OrderJson()
+      ..['status'] = 'scheduled'
+      ..['isRecurring'] = true
+      ..['scheduledFor'] = '2026-07-24T11:00:00Z';
+
+    final order = parseCustomerOrderHistoryEntry(json);
+
+    expect(order, isNotNull);
+    expect(order!.status, OrderStatus.scheduled);
+    expect(order.isRecurring, isTrue);
+    expect(order.scheduledFor, DateTime.utc(2026, 7, 24, 11));
+
+    // Обычный заказ без новых полей остаётся валидным (безопасный default).
+    final plain = parseCustomerOrderHistoryEntry(_v2OrderJson());
+    expect(plain, isNotNull);
+    expect(plain!.isRecurring, isFalse);
+    expect(plain.scheduledFor, isNull);
+  });
+
+  test(
+    'recurring PATCH edits the subscription without touching plan or paidUntil',
+    () async {
+      final api = _CatalogAuthApiClient(
+        profile: _testCustomerProfile,
+        recurring: parseCustomerRecurringOrder(_recurringJson())!,
+      );
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(accessToken: 'good', refreshToken: 'fresh'),
+        cartStore: _MemoryCartStore(),
+        api: api,
+      );
+      await controller.bootstrap();
+      expect(controller.state.recurring, isNotNull);
+
+      final edited = await controller.editRecurring(
+        time: '12:30',
+        comment: 'Тёплый, без трубочки',
+        commentProvided: true,
+      );
+
+      expect(edited, isTrue);
+      // Редактирование не является покупкой: PUT не вызывался,
+      // а в PATCH ушли только изменённые поля.
+      expect(api.recurringPutCalls, isEmpty);
+      expect(api.recurringPatchCalls, [
+        {
+          'productIds': null,
+          'time': '12:30',
+          'branchId': null,
+          'comment': 'Тёплый, без трубочки',
+        },
+      ]);
+      expect(controller.state.recurring?.time, '12:30');
+      expect(controller.state.recurring?.comment, 'Тёплый, без трубочки');
+      expect(controller.state.recurring?.plan, RecurringPlan.week);
+      expect(
+        controller.state.recurring?.paidUntil,
+        DateTime.utc(2026, 7, 22, 12),
+      );
+
+      // Пустой PATCH не отправляется вовсе.
+      expect(await controller.editRecurring(), isFalse);
+      expect(api.recurringPatchCalls, hasLength(1));
+    },
+  );
 
   test(
     'server recurring hydrates and authoritative null clears stale state',
@@ -2079,6 +2179,17 @@ class _OfflineApiClient extends ApiClient {
     required String time,
     required String branchId,
     required RecurringPlan plan,
+    String? comment,
+  }) async => const ApiResult<RecurringOrder?>.unavailable();
+
+  @override
+  Future<ApiResult<RecurringOrder?>> patchCustomerRecurring(
+    String accessToken, {
+    List<String>? productIds,
+    String? time,
+    String? branchId,
+    String? comment,
+    bool commentProvided = false,
   }) async => const ApiResult<RecurringOrder?>.unavailable();
 
   @override
@@ -2186,6 +2297,7 @@ class _FakeAuthApiClient extends ApiClient {
   final List<String> googleIdTokens = [];
   final List<String> contactPhoneCalls = [];
   final List<List<String>> recurringPutCalls = [];
+  final List<Map<String, Object?>> recurringPatchCalls = [];
   int recurringDeleteCalls = 0;
   int accountDeleteCalls = 0;
   final List<List<String>> favoritePutCalls = [];
@@ -2288,17 +2400,63 @@ class _FakeAuthApiClient extends ApiClient {
     required String time,
     required String branchId,
     required RecurringPlan plan,
+    String? comment,
   }) async {
     recurringPutCalls.add(List.unmodifiable(productIds));
     if (accessToken != 'good') {
       return const ApiResult<RecurringOrder?>.rejected();
     }
+    final normalizedComment = comment?.trim();
     serverRecurring = RecurringOrder(
       productIds: List.unmodifiable(productIds),
       time: time,
       branchId: branchId,
       plan: plan,
       paidUntil: DateTime.utc(2026, 7, 22),
+      dailyTotal: _demoDailyTotal(productIds),
+      comment: normalizedComment == null || normalizedComment.isEmpty
+          ? null
+          : normalizedComment,
+    );
+    return ApiResult<RecurringOrder?>.ok(serverRecurring);
+  }
+
+  @override
+  Future<ApiResult<RecurringOrder?>> patchCustomerRecurring(
+    String accessToken, {
+    List<String>? productIds,
+    String? time,
+    String? branchId,
+    String? comment,
+    bool commentProvided = false,
+  }) async {
+    recurringPatchCalls.add({
+      'productIds': productIds,
+      'time': time,
+      'branchId': branchId,
+      if (commentProvided) 'comment': comment,
+    });
+    if (accessToken != 'good') {
+      return const ApiResult<RecurringOrder?>.rejected();
+    }
+    final current = serverRecurring;
+    // PATCH контракта отвечает 404, когда активной подписки нет.
+    if (current == null) return const ApiResult<RecurringOrder?>.unavailable();
+    final ids = productIds ?? current.productIds;
+    final normalizedComment = comment?.trim();
+    serverRecurring = RecurringOrder(
+      productIds: List.unmodifiable(ids),
+      time: time ?? current.time,
+      branchId: branchId ?? current.branchId,
+      // Редактирование не трогает тариф и оплаченный срок.
+      plan: current.plan,
+      paidUntil: current.paidUntil,
+      dailyTotal: _demoDailyTotal(ids),
+      comment: commentProvided
+          ? (normalizedComment == null || normalizedComment.isEmpty
+                ? null
+                : normalizedComment)
+          : current.comment,
     );
     return ApiResult<RecurringOrder?>.ok(serverRecurring);
   }
@@ -2459,6 +2617,7 @@ class _ControlledRecurringApiClient extends _CatalogAuthApiClient {
     required String time,
     required String branchId,
     required RecurringPlan plan,
+    String? comment,
   }) {
     recurringPutCalls.add(List.unmodifiable(productIds));
     return _putCompleter.future;

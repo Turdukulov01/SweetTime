@@ -324,6 +324,14 @@ OrderHistoryEntry? parseCustomerOrderHistoryEntry(dynamic raw) {
       (raw['promoCode'] != null && promoCode == null)) {
     return null;
   }
+  // Метка «Постоянный заказ»: только явное true, чтобы отсутствие поля на
+  // старом сервере не меняло смысла обычной истории.
+  final isRecurring = raw['isRecurring'] == true;
+  final scheduledForRaw = raw['scheduledFor'];
+  final scheduledFor = scheduledForRaw is String
+      ? DateTime.tryParse(scheduledForRaw)
+      : null;
+  if (scheduledForRaw != null && scheduledFor == null) return null;
   final rawItems = raw['items'];
   if (id == null ||
       number == null ||
@@ -390,6 +398,8 @@ OrderHistoryEntry? parseCustomerOrderHistoryEntry(dynamic raw) {
     branchAddress: branchAddress,
     comment: comment,
     promoCode: promoCode,
+    isRecurring: isRecurring,
+    scheduledFor: scheduledFor,
   );
 }
 
@@ -540,6 +550,7 @@ OrderType? _orderType(dynamic raw) => switch (raw) {
 
 OrderStatus? _orderStatus(dynamic raw) => switch (raw) {
   'new' => OrderStatus.created,
+  'scheduled' => OrderStatus.scheduled,
   'awaiting_payment' => OrderStatus.awaitingPayment,
   'paid' => OrderStatus.paid,
   'accepted' => OrderStatus.accepted,
@@ -575,6 +586,12 @@ RecurringOrder? parseCustomerRecurringOrder(dynamic raw) {
   final paidUntil = paidUntilRaw is String
       ? DateTime.tryParse(paidUntilRaw)
       : null;
+  // Актуальная цена дня — обязательное поле нового контракта: без него UI
+  // не может честно показать сумму после смены состава или цен каталога.
+  final dailyTotal = _nonNegativeInt(raw['dailyTotal']);
+  final commentRaw = raw['comment'];
+  if (commentRaw != null && commentRaw is! String) return null;
+  final comment = _optionalString(commentRaw);
   if (productIds == null ||
       productIds.isEmpty ||
       productIds.length != productIds.toSet().length ||
@@ -582,6 +599,7 @@ RecurringOrder? parseCustomerRecurringOrder(dynamic raw) {
       !RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(time) ||
       branchId == null ||
       plan == null ||
+      dailyTotal == null ||
       (paidUntilRaw != null && paidUntil == null) ||
       raw['active'] != true) {
     return null;
@@ -592,6 +610,8 @@ RecurringOrder? parseCustomerRecurringOrder(dynamic raw) {
     branchId: branchId,
     plan: plan,
     paidUntil: paidUntil,
+    dailyTotal: dailyTotal,
+    comment: comment,
   );
 }
 
@@ -1181,12 +1201,15 @@ class ApiClient {
     }
   }
 
+  /// `PUT /auth/customer/me/recurring` — покупка/продление: полный набор
+  /// полей, сервер пересчитывает `paidUntil` по выбранному тарифу.
   Future<ApiResult<RecurringOrder?>> replaceCustomerRecurring(
     String accessToken, {
     required List<String> productIds,
     required String time,
     required String branchId,
     required RecurringPlan plan,
+    String? comment,
   }) async {
     try {
       final response = await http
@@ -1198,6 +1221,8 @@ class ApiClient {
               'time': time,
               'branchId': branchId,
               'plan': plan.name,
+              // PUT заменяет объект целиком: пустое пожелание — это null.
+              'comment': _normalizedComment(comment),
             }),
           )
           .timeout(_timeout);
@@ -1216,6 +1241,54 @@ class ApiClient {
     } catch (_) {
       return const ApiResult<RecurringOrder?>.unavailable();
     }
+  }
+
+  /// `PATCH /auth/customer/me/recurring` — редактирование активной подписки
+  /// без повторной оплаты: тариф и `paidUntil` не меняются. Отправляем только
+  /// изменённые поля; `comment` передаётся явно (null внутри JSON очищает
+  /// пожелание), когда [commentProvided] = true.
+  Future<ApiResult<RecurringOrder?>> patchCustomerRecurring(
+    String accessToken, {
+    List<String>? productIds,
+    String? time,
+    String? branchId,
+    String? comment,
+    bool commentProvided = false,
+  }) async {
+    try {
+      final body = <String, Object?>{
+        'productIds': ?productIds,
+        'time': ?time,
+        'branchId': ?branchId,
+      };
+      if (commentProvided) body['comment'] = _normalizedComment(comment);
+      final response = await http
+          .patch(
+            _uri('/auth/customer/me/recurring'),
+            headers: {..._bearer(accessToken), ..._jsonHeader},
+            body: jsonEncode(body),
+          )
+          .timeout(_timeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<RecurringOrder?>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<RecurringOrder?>.unavailable();
+      }
+      final recurring = parseCustomerRecurringOrder(
+        jsonDecode(utf8.decode(response.bodyBytes)),
+      );
+      return recurring == null
+          ? const ApiResult<RecurringOrder?>.unavailable()
+          : ApiResult<RecurringOrder?>.ok(recurring);
+    } catch (_) {
+      return const ApiResult<RecurringOrder?>.unavailable();
+    }
+  }
+
+  static String? _normalizedComment(String? comment) {
+    final value = comment?.trim();
+    return value == null || value.isEmpty ? null : value;
   }
 
   Future<ApiResult<bool>> deleteCustomerRecurring(String accessToken) async {

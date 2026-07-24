@@ -1961,6 +1961,7 @@ class AppStateController extends StateNotifier<AppState> {
     required String time,
     required Branch branch,
     required RecurringPlan plan,
+    String? comment,
   }) async {
     if (state.isGuest ||
         !state.catalogAuthoritative ||
@@ -1996,6 +1997,78 @@ class AppStateController extends StateNotifier<AppState> {
         time: time,
         branchId: currentBranch.id,
         plan: plan,
+        comment: comment,
+      ),
+    );
+    final recurring = result.value;
+    if (!result.isOk ||
+        recurring == null ||
+        mutationRevision != _recurringMutationRevision ||
+        epoch != _accountEpoch ||
+        state.isGuest ||
+        state.customerId != customerId) {
+      return false;
+    }
+    state = state.copyWith(recurring: recurring);
+    return true;
+  }
+
+  /// Редактирование активной подписки БЕЗ повторной оплаты (PATCH): состав,
+  /// время, филиал и пожелания меняются, тариф и `paidUntil` — нет.
+  /// Отправляются только изменённые поля; null = «не менять».
+  /// [commentProvided] = true передаёт `comment` явно (пустая строка очищает).
+  Future<bool> editRecurring({
+    List<Product>? products,
+    String? time,
+    Branch? branch,
+    String? comment,
+    bool commentProvided = false,
+  }) async {
+    final current = state.recurring;
+    if (state.isGuest || current == null) return false;
+    final hasChanges =
+        products != null || time != null || branch != null || commentProvided;
+    if (!hasChanges) return false;
+    if (time != null && !RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(time)) {
+      return false;
+    }
+    Branch? currentBranch;
+    if (branch != null) {
+      currentBranch = state.branches
+          .where((candidate) => candidate.id == branch.id)
+          .firstOrNull;
+      if (currentBranch == null) return false;
+    }
+    List<String>? productIds;
+    if (products != null) {
+      if (!state.catalogAuthoritative || products.isEmpty) return false;
+      final targetBranchId = currentBranch?.id ?? current.branchId;
+      productIds = <String>[];
+      for (final requested in products) {
+        final currentProduct = state.products
+            .where((candidate) => candidate.id == requested.id)
+            .firstOrNull;
+        if (currentProduct == null ||
+            !currentProduct.availableBranchIds.contains(targetBranchId) ||
+            productIds.contains(currentProduct.id)) {
+          return false;
+        }
+        productIds.add(currentProduct.id);
+      }
+    }
+
+    final epoch = _accountEpoch;
+    final mutationRevision = ++_recurringMutationRevision;
+    final customerId = state.customerId;
+    if (customerId == null) return false;
+    final result = await _withCustomerToken(
+      (token) => _api.patchCustomerRecurring(
+        token,
+        productIds: productIds,
+        time: time,
+        branchId: currentBranch?.id,
+        comment: comment,
+        commentProvided: commentProvided,
       ),
     );
     final recurring = result.value;
@@ -2245,6 +2318,7 @@ class AppStateController extends StateNotifier<AppState> {
           branchId: DemoData.branches.first.id,
           plan: RecurringPlan.week,
           paidUntil: DateTime.now().add(const Duration(days: 7)),
+          dailyTotal: DemoData.products[0].basePrice,
         ),
       );
     }

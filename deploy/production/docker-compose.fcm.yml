@@ -1,0 +1,18 @@
+# Overlay для push-уведомлений (FCM). Подключается ТОЛЬКО когда владелец
+# создал Firebase-проект и положил JSON сервисного аккаунта на сервер:
+#
+#   docker compose --env-file .env \
+#     -f docker-compose.yml -f docker-compose.fcm.yml up -d backend
+#
+# Без overlay backend стартует с FCM_ENABLED=false (пуши — честный no-op).
+# FCM_SERVICE_ACCOUNT_HOST_FILE в .env, например:
+#   FCM_SERVICE_ACCOUNT_HOST_FILE=/srv/sweetime/secrets/fcm-service-account.json
+# Файл: chmod 640, группа с GID из SWEETIME_GID (контейнер читает read-only).
+services:
+  backend:
+    environment:
+      FCM_ENABLED: "true"
+      FCM_SERVICE_ACCOUNT_FILE: /app/secrets/fcm-service-account.json
+    volumes:
+      - /srv/sweetime/media:/app/media
+      - ${FCM_SERVICE_ACCOUNT_HOST_FILE:?Set FCM_SERVICE_ACCOUNT_HOST_FILE in deploy/production/.env}:/app/secrets/fcm-service-account.json:ro

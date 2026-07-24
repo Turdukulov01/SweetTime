@@ -526,6 +526,8 @@ class OrderHistoryEntry {
     this.branchAddress,
     this.comment,
     this.promoCode,
+    this.isRecurring = false,
+    this.scheduledFor,
   });
 
   final String id;
@@ -546,6 +548,12 @@ class OrderHistoryEntry {
   final String? branchAddress;
   final String? comment;
   final String? promoCode;
+
+  /// Заказ сгенерирован подпиской «постоянный заказ», а не оформлен вручную.
+  final bool isRecurring;
+
+  /// Плановое время готовности сгенерированного постоянного заказа (UTC).
+  final DateTime? scheduledFor;
 
   bool get supportsExactRepeat => itemsVersion == 2;
 
@@ -595,6 +603,10 @@ enum PaymentMethod {
 
 enum OrderStatus {
   created,
+
+  /// Сгенерированный постоянный заказ на сегодня: ещё не в работе, сервер сам
+  /// переведёт его в `new` за 10 минут до времени готовности.
+  scheduled,
   awaitingPayment,
   paid,
   accepted,
@@ -634,6 +646,8 @@ class RecurringOrder {
     required this.branchId,
     required this.plan,
     required this.paidUntil,
+    required this.dailyTotal,
+    this.comment,
   });
 
   final List<String> productIds;
@@ -641,4 +655,11 @@ class RecurringOrder {
   final String branchId;
   final RecurringPlan plan;
   final DateTime? paidUntil;
+
+  /// Актуальная серверная цена набора за один день по текущему каталогу.
+  /// После редактирования состава или смены цен сервер пересчитывает сумму.
+  final int dailyTotal;
+
+  /// Пожелания клиента к каждому заказу (до 500 символов).
+  final String? comment;
 }

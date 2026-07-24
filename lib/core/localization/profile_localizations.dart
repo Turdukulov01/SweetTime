@@ -576,6 +576,30 @@ extension ProfileLocalizations on AppLocalizations {
     'Pay $total and enable (demo)',
   );
 
+  String get recurringCommentLabel => _pick(
+    'Пожелания к заказу',
+    'Заказга каалоолор',
+    'Order preferences',
+  );
+
+  String get recurringSaveChanges => _pick(
+    'Сохранить изменения',
+    'Өзгөртүүлөрдү сактоо',
+    'Save changes',
+  );
+
+  String get recurringChangesSaved => _pick(
+    'Изменения сохранены. Срок оплаты не изменился.',
+    'Өзгөртүүлөр сакталды. Төлөм мөөнөтү өзгөргөн жок.',
+    'Changes saved. Your paid period is unchanged.',
+  );
+
+  String recurringDailyPrice(String amount) => _pick(
+    'Набор за день: $amount',
+    'Күнүнө топтом: $amount',
+    'Daily set: $amount',
+  );
+
   String _profileLocalizedDate(DateTime value) {
     final day = value.day.toString().padLeft(2, '0');
     final month = value.month.toString().padLeft(2, '0');

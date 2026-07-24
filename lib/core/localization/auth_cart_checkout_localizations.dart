@@ -347,6 +347,7 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
 
   String orderStatusLabel(OrderStatus value) => switch (value) {
     OrderStatus.created => _pick('Создан', 'Түзүлдү', 'Created'),
+    OrderStatus.scheduled => _pick('Запланирован', 'Пландалган', 'Scheduled'),
     OrderStatus.awaitingPayment => _pick(
       'Ожидает оплаты',
       'Төлөм күтүлүүдө',

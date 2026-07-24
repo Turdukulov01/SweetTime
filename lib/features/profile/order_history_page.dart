@@ -432,6 +432,10 @@ class _OrderListCard extends StatelessWidget {
                         _OrderStatusPill(status: order.status),
                       ],
                     ),
+                    if (order.isRecurring) ...[
+                      const SizedBox(height: 6),
+                      const _RecurringBadge(),
+                    ],
                     const SizedBox(height: 6),
                     Text(
                       subtitle,
@@ -456,6 +460,42 @@ class _OrderListCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Бейдж «Постоянный заказ» для заказов, сгенерированных подпиской.
+class _RecurringBadge extends StatelessWidget {
+  const _RecurringBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = theme.colorScheme.tertiary;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.event_repeat_outlined, size: 13, color: color),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              AppLocalizations.of(context).recurringOrderTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -563,6 +603,10 @@ class _OrderDetailSheet extends ConsumerWidget {
                     _OrderStatusPill(status: order.status),
                   ],
                 ),
+                if (order.isRecurring) ...[
+                  const SizedBox(height: 8),
+                  const _RecurringBadge(),
+                ],
                 const SizedBox(height: 18),
                 Card(
                   margin: EdgeInsets.zero,
