@@ -1169,14 +1169,35 @@ def _iso_z(dt: datetime) -> str:
     )
 
 
-def _recurring_out(sub: RecurringOrder) -> schemas.RecurringOrderOut:
+def _recurring_daily_total(db: Session, sub: RecurringOrder) -> int:
+    """Актуальная цена набора за один день по ТЕКУЩЕМУ каталогу (базовые цены).
+
+    Считает сервер, а не клиент: после редактирования состава (PATCH) и при
+    смене цен в каталоге клиент видит честную сумму. Исчезнувшие из каталога
+    товары в сумму не входят (их не приготовят)."""
+    ids = list(sub.product_ids or [])
+    if not ids:
+        return 0
+    prices = db.scalars(
+        select(Product.price).where(
+            Product.company_id == sub.company_id, Product.id.in_(ids)
+        )
+    ).all()
+    return int(sum(prices))
+
+
+def _recurring_out(
+    db: Session, sub: RecurringOrder
+) -> schemas.RecurringOrderOut:
     return schemas.RecurringOrderOut(
         productIds=list(sub.product_ids or []),
+        comment=sub.comment,
         time=sub.time,
         branchId=sub.branch_id,
         plan=sub.plan,
         paidUntil=_iso_z(sub.paid_until) if sub.paid_until else None,
         active=sub.active,
+        dailyTotal=_recurring_daily_total(db, sub),
     )
 
 
@@ -1209,7 +1230,7 @@ def customer_recurring(
     sub = _find_recurring(db, customer)
     if sub is None or not sub.active:
         return None
-    return _recurring_out(sub)
+    return _recurring_out(db, sub)
 
 
 @router.put(
@@ -1252,6 +1273,7 @@ def customer_set_recurring(
         db.add(sub)
 
     sub.product_ids = list(dict.fromkeys(body.productIds))  # дубли убираем
+    sub.comment = body.comment
     sub.time = body.time
     sub.branch_id = body.branchId
     sub.plan = body.plan
@@ -1261,7 +1283,62 @@ def customer_set_recurring(
 
     db.commit()
     db.refresh(sub)
-    return _recurring_out(sub)
+    return _recurring_out(db, sub)
+
+
+@router.patch(
+    "/customer/me/recurring",
+    response_model=schemas.RecurringOrderOut,
+    summary="Редактировать активный постоянный заказ (без смены срока оплаты)",
+    tags=["customer"],
+)
+def customer_patch_recurring(
+    body: schemas.RecurringOrderPatch,
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+) -> schemas.RecurringOrderOut:
+    """Правит состав/время/филиал/пожелания УЖЕ оплаченной подписки.
+
+    Принципиально НЕ трогает plan и paid_until: редактирование — не покупка,
+    иначе каждая правка бесплатно продлевала бы подписку (или наоборот
+    сгорал бы оплаченный срок). Продление/смена тарифа — только PUT.
+    Цены не фиксируются здесь: каждый сгенерированный заказ снапшотит
+    актуальные цены каталога, а dailyTotal в ответе показывает текущую сумму.
+    """
+    sub = _find_recurring(db, customer)
+    if sub is None or not sub.active:
+        raise HTTPException(
+            status_code=404, detail="No active recurring order"
+        )
+
+    if body.branchId is not None:
+        branch = db.get(Branch, body.branchId)
+        if branch is None or branch.company_id != customer.company_id:
+            raise HTTPException(status_code=404, detail="Branch not found")
+        sub.branch_id = body.branchId
+
+    if body.productIds is not None:
+        known = _known_product_ids(db, customer.company_id, body.productIds)
+        unknown = [pid for pid in body.productIds if pid not in known]
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Unknown products for this company: "
+                    f"{', '.join(unknown)}"
+                ),
+            )
+        sub.product_ids = list(dict.fromkeys(body.productIds))
+
+    if body.time is not None:
+        sub.time = body.time
+
+    if "comment" in body.model_fields_set:
+        sub.comment = body.comment
+
+    db.commit()
+    db.refresh(sub)
+    return _recurring_out(db, sub)
 
 
 @router.delete(

@@ -601,6 +601,15 @@ class Order(Base):
             "client_request_id",
             name="uq_order_customer_request",
         ),
+        # Один сгенерированный заказ на подписку в день. Для обычных заказов
+        # recurring_order_id/service_date = NULL и в уникальность не попадают
+        # (NULL-значения в UNIQUE считаются различными и в PostgreSQL, и в SQLite).
+        UniqueConstraint(
+            "company_id",
+            "recurring_order_id",
+            "service_date",
+            name="uq_order_recurring_service_date",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -649,6 +658,21 @@ class Order(Base):
     request_fingerprint: Mapped[str | None] = mapped_column(
         String(64), nullable=True, default=None
     )
+    # Постоянный заказ: заказ сгенерирован из подписки (метка «постоянный» + идемпотентность).
+    recurring_order_id: Mapped[str | None] = mapped_column(
+        ForeignKey("recurring_orders.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+        index=True,
+    )
+    # Целевой момент выдачи (UTC) для сгенерированного постоянного заказа.
+    scheduled_for: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    # Локальная дата обслуживания "YYYY-MM-DD" — ключ идемпотентности генерации.
+    service_date: Mapped[str | None] = mapped_column(
+        String(10), nullable=True, default=None
+    )
 
 
 class RecurringOrder(Base):
@@ -679,6 +703,8 @@ class RecurringOrder(Base):
     )
     # ["p1", "p4"] — id товаров этой же компании (проверяется на PUT)
     product_ids: Mapped[list] = mapped_column(JSON, default=list)
+    # Пожелания клиента к каждому сгенерированному заказу (опционально)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # Время выдачи "HH:MM" (локальное время кофейни)
     time: Mapped[str] = mapped_column(String(5))
     branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"))

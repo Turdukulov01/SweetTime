@@ -6,8 +6,22 @@
 получился бы цикл (main импортирует auth).
 """
 
+from datetime import timezone
+
 from . import schemas
 from .models import Order
+
+
+def _iso_z_utc(dt) -> str | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (
+        dt.astimezone(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def order_out(o: Order) -> schemas.OrderOut:
@@ -32,4 +46,6 @@ def order_out(o: Order) -> schemas.OrderOut:
         pointsEarned=o.points_earned,
         createdAt=o.created_at,
         clientRequestId=o.client_request_id,
+        isRecurring=o.recurring_order_id is not None,
+        scheduledFor=_iso_z_utc(o.scheduled_for),
     )

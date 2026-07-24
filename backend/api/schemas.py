@@ -22,7 +22,10 @@ from pydantic import (
 )
 
 OrderType = Literal["pickup", "scheduled", "qr"]
-OrderStatus = Literal["new", "preparing", "ready", "done", "cancelled"]
+# scheduled — сгенерированный постоянный заказ, ещё не активированный в очередь.
+OrderStatus = Literal[
+    "scheduled", "new", "preparing", "ready", "done", "cancelled"
+]
 PaymentMethod = Literal["mock", "cash", "qr"]
 NewsVisual = Literal["sparkle", "storefront", "qr", "loyalty"]
 
@@ -382,6 +385,10 @@ class OrderOut(BaseModel):
     pointsEarned: int
     createdAt: str
     clientRequestId: str | None = None
+    # Заказ сгенерирован из постоянного заказа (подписки).
+    isRecurring: bool = False
+    # Целевой момент выдачи (ISO-8601 UTC) для постоянного заказа.
+    scheduledFor: str | None = None
 
 
 class OrderCreate(BaseModel):
@@ -1000,19 +1007,23 @@ HourMinute = Annotated[str, StringConstraints(pattern=r"^([01]\d|2[0-3]):[0-5]\d
 
 
 class RecurringOrderOut(BaseModel):
-    """Постоянный заказ (подписка). paidUntil — ISO-8601 UTC, считает сервер."""
+    """Постоянный заказ (подписка). paidUntil — ISO-8601 UTC, считает сервер.
+    dailyTotal — актуальная серверная цена набора за один день (по текущему
+    каталогу): после редактирования состава клиент видит честную цену."""
 
     productIds: list[str]
+    comment: str | None = None
     time: HourMinute
     branchId: str
     plan: RecurringPlan
     paidUntil: str | None = None
     active: bool
+    dailyTotal: int = 0
 
 
 class RecurringOrderPut(BaseModel):
-    """Создание/замена подписки. Срок оплаты (paidUntil) клиент НЕ присылает —
-    сервер считает его сам по plan."""
+    """Создание/замена подписки (покупка/продление). Срок оплаты (paidUntil)
+    клиент НЕ присылает — сервер считает его сам по plan."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1020,6 +1031,22 @@ class RecurringOrderPut(BaseModel):
     time: HourMinute
     branchId: str
     plan: RecurringPlan
+    comment: str | None = Field(default=None, max_length=500)
+
+
+class RecurringOrderPatch(BaseModel):
+    """Редактирование активной подписки БЕЗ смены тарифа и срока оплаты:
+    состав, время, филиал, пожелания. paid_until и plan не трогаются —
+    продление только через PUT (покупку)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    productIds: list[str] | None = Field(
+        default=None, min_length=1, max_length=20
+    )
+    time: HourMinute | None = None
+    branchId: str | None = None
+    comment: str | None = Field(default=None, max_length=500)
 
 
 # ---------------------------------------------------------------------------

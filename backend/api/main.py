@@ -21,7 +21,8 @@
 company_id всегда берётся из токена и сверяется с {companyId} пути (403).
 """
 
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from hashlib import sha256
 from html import escape
@@ -44,6 +45,7 @@ from .auth import router as auth_router
 from .content import router as content_router
 from .config import settings
 from .database import engine, get_db
+from .recurring import recurring_scheduler_loop
 from .deps import (
     OrderEventAccess,
     authorize_order_event_stream,
@@ -86,7 +88,19 @@ async def lifespan(_: FastAPI):
     if settings.seed_mode == "demo":
         with Session(engine) as db:
             seed_if_empty(db)
-    yield
+    # Планировщик постоянных заказов: генерация scheduled-заказов на сегодня
+    # и активация за PREP_LEAD до времени выдачи (backend/api/recurring.py).
+    scheduler_stop = asyncio.Event()
+    scheduler_task = asyncio.create_task(
+        recurring_scheduler_loop(scheduler_stop)
+    )
+    try:
+        yield
+    finally:
+        scheduler_stop.set()
+        scheduler_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await scheduler_task
 
 
 app = FastAPI(
@@ -1221,11 +1235,18 @@ _FINAL_STATUSES = {"done", "cancelled"}
 
 
 def _is_valid_transition(current: str, new: str) -> bool:
-    """new→preparing→ready→done (только вперёд); cancel из любого не-финального."""
+    """new→preparing→ready→done (только вперёд); cancel из любого не-финального.
+
+    scheduled (сгенерированный постоянный заказ) → только new (активация,
+    обычно её делает планировщик) или cancelled. Прыжок scheduled→preparing
+    запрещён: заказ обязан пройти через очередь, как все остальные.
+    """
     if current in _FINAL_STATUSES:
         return False
     if new == "cancelled":
         return True
+    if current == "scheduled":
+        return new == "new"
     if current in _STATUS_CHAIN and new in _STATUS_CHAIN:
         return _STATUS_CHAIN.index(new) > _STATUS_CHAIN.index(current)
     return False
