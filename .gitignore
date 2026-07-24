@@ -69,3 +69,7 @@ backend/**/__pycache__/
 # Local and production secrets. Keep only documented examples in Git.
 .env
 **/.env
+
+# Firebase service account (backend push secret) — NEVER commit
+*firebase-adminsdk*.json
+fcm-service-account*.json

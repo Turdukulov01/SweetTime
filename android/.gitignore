@@ -12,3 +12,7 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# Firebase per-project config (push). Held locally like key.properties: a
+# white-label build drops in its own google-services.json.
+app/google-services.json
