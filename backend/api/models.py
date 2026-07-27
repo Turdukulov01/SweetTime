@@ -676,20 +676,22 @@ class Order(Base):
 
 
 class RecurringOrder(Base):
-    """Постоянный заказ клиента — предоплаченная подписка «любимый напиток».
+    """Независимый предоплаченный постоянный заказ клиента.
 
-    У клиента ОДНА подписка (так устроен UI приложения); гарантируется
-    уникальным индексом по customer_id: PUT обновляет строку на месте, DELETE
-    только снимает `active`. Строку не удаляем: по ней видно, что и до какой
-    даты было оплачено (деньги — не черновик).
-
-    `paid_until` считает сервер по `plan` (single/week/month), а не клиент:
-    срок оплаты — не то, что можно присылать с устройства.
+    У клиента может быть несколько активных подписок — на разные наборы,
+    филиалы и время. Денежные поля и ``items`` являются серверным снапшотом;
+    уже сгенерированные заказы при редактировании подписки не меняются.
     """
 
     __tablename__ = "recurring_orders"
     __table_args__ = (
-        UniqueConstraint("customer_id", name="uq_recurring_order_customer"),
+        Index(
+            "ix_recurring_orders_company_customer_active_created",
+            "company_id",
+            "customer_id",
+            "active",
+            "created_at",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -703,20 +705,216 @@ class RecurringOrder(Base):
     )
     # ["p1", "p4"] — id товаров этой же компании (проверяется на PUT)
     product_ids: Mapped[list] = mapped_column(JSON, default=list)
+    # Locked server snapshots used for subscription billing and admin audit.
+    items: Mapped[list] = mapped_column(
+        JSON, default=list, server_default=text("'[]'")
+    )
     # Пожелания клиента к каждому сгенерированному заказу (опционально)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # Время выдачи "HH:MM" (локальное время кофейни)
     time: Mapped[str] = mapped_column(String(5))
     branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"))
-    # single | week | month
+    # single | week | month | custom
     plan: Mapped[str] = mapped_column(String(16))
+    # Inclusive local Bishkek end date for plan=custom.
+    custom_until: Mapped[date | None] = mapped_column(
+        Date, nullable=True, default=None
+    )
     # Оплачено до (UTC); null — подписка без оплаты
     paid_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    daily_total: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0")
+    )
+    prepaid_total: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0")
+    )
+    version: Mapped[int] = mapped_column(
+        Integer, default=1, server_default=text("1")
+    )
+    billing_mode: Mapped[str] = mapped_column(
+        String(32), default="prepaid", server_default=text("'prepaid'")
+    )
+    # Original verified payment source.  Existing/demo subscriptions are
+    # "mock"; real provider integrations must set their own immutable payment
+    # reference server-side after a successful webhook.
+    payment_method: Mapped[str] = mapped_column(
+        String(16), default="mock", server_default=text("'mock'")
+    )
+    provider_payment_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, default=None
+    )
+    settlement_mode: Mapped[str] = mapped_column(
+        String(32), default="mock", server_default=text("'mock'")
+    )
+    # Positive: additional mock charge. Negative: credit.
+    last_adjustment: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0")
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class RecurringOrderAdjustment(Base):
+    """Idempotent mock-settlement audit entry for a recurring order."""
+
+    __tablename__ = "recurring_order_adjustments"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "customer_id",
+            "idempotency_key",
+            name="uq_recurring_adjustment_customer_key",
+        ),
+        Index(
+            "ix_recurring_adjustments_order_created",
+            "recurring_order_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), index=True
+    )
+    customer_id: Mapped[str | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    recurring_order_id: Mapped[str] = mapped_column(
+        ForeignKey("recurring_orders.id", ondelete="CASCADE"), index=True
+    )
+    operation: Mapped[str] = mapped_column(String(16))
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    previous_version: Mapped[int] = mapped_column(Integer)
+    result_version: Mapped[int] = mapped_column(Integer)
+    remaining_occurrences: Mapped[int] = mapped_column(Integer)
+    amount: Mapped[int] = mapped_column(Integer)
+    settlement_mode: Mapped[str] = mapped_column(
+        String(32), default="mock", server_default=text("'mock'")
+    )
+    result_snapshot: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class RecurringRefund(Base):
+    """Durable, idempotent refund/claim created by recurring cancellation.
+
+    Provider calls are deliberately separated from the cancellation
+    transaction.  A committed ``pending`` row can always be retried after a
+    process crash; cash and exhausted/unsupported provider refunds use a
+    one-time manager-confirmed manual claim.
+    """
+
+    __tablename__ = "recurring_refunds"
+    __table_args__ = (
+        UniqueConstraint(
+            "recurring_order_id",
+            name="uq_recurring_refund_order",
+        ),
+        UniqueConstraint(
+            "company_id",
+            "customer_id",
+            "idempotency_key",
+            name="uq_recurring_refund_customer_key",
+        ),
+        UniqueConstraint(
+            "company_id",
+            "manual_completion_key",
+            name="uq_recurring_refund_manual_key",
+        ),
+        Index(
+            "ix_recurring_refunds_company_status_created",
+            "company_id",
+            "status",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    company_id: Mapped[str] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), index=True
+    )
+    customer_id: Mapped[str | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    recurring_order_id: Mapped[str] = mapped_column(
+        ForeignKey("recurring_orders.id", ondelete="CASCADE"), index=True
+    )
+    adjustment_id: Mapped[str | None] = mapped_column(
+        ForeignKey("recurring_order_adjustments.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    amount: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(16), default="сом")
+    payment_method: Mapped[str] = mapped_column(String(16), default="mock")
+    provider: Mapped[str] = mapped_column(
+        String(32), default="none", server_default=text("'none'")
+    )
+    provider_payment_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
+    provider_refund_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
+    # pending | processing | refunded | manual_required | manual_paid | failed
+    status: Mapped[str] = mapped_column(
+        String(32), default="pending", server_default=text("'pending'")
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(128))
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    refundable_occurrences: Mapped[int] = mapped_column(Integer, default=0)
+    cancelled_order_ids: Mapped[list] = mapped_column(
+        JSON, default=list, server_default=text("'[]'")
+    )
+    non_refundable_order_ids: Mapped[list] = mapped_column(
+        JSON, default=list, server_default=text("'[]'")
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0")
+    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    failure_code: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    manual_completion_key: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
+    manual_completed_by: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True
+    )
+    manual_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
 

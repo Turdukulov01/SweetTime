@@ -12,6 +12,7 @@ from api import auth, recurring, schemas
 from api.database import Base
 from api.main import _is_valid_transition
 from api.models import Branch, Company, Customer, Order, Product, RecurringOrder
+from api.recurring_api import _remaining_occurrences
 
 
 # 09:00 в Бишкеке (03:00 UTC): «утро» — план дня генерируется заранее.
@@ -120,12 +121,15 @@ def _add_subscription(db, **kw) -> RecurringOrder:
         company_id="sweettime",
         customer_id=kw.get("customer_id", "cust-1"),
         product_ids=kw.get("product_ids", ["p-moti", "p-matcha"]),
+        items=kw.get("items", []),
         comment=kw.get("comment", "Без сахара, пожалуйста"),
         time=kw.get("time", "18:36"),
         branch_id="branch-a",
         plan=kw.get("plan", "week"),
         paid_until=kw.get("paid_until", MORNING_UTC + timedelta(days=7)),
         active=kw.get("active", True),
+        daily_total=kw.get("daily_total", 0),
+        prepaid_total=kw.get("prepaid_total", 0),
     )
     db.add(sub)
     db.commit()
@@ -161,6 +165,44 @@ def test_generation_creates_scheduled_order_and_is_idempotent(rec_db) -> None:
         assert again == []
         total_orders = db.scalars(select(Order.id)).all()
         assert len(total_orders) == 1
+
+
+def test_generation_uses_locked_v2_snapshot_after_catalog_change(rec_db) -> None:
+    with rec_db() as db:
+        _add_subscription(
+            db,
+            product_ids=["p-moti"],
+            items=[
+                {
+                    "productId": "p-moti",
+                    "name": {"ru": "Оплаченный клубничный напиток"},
+                    "description": {"ru": "Зафиксированное описание"},
+                    "imageUrl": "/media/products/locked.webp",
+                    "sizeId": None,
+                    "size": None,
+                    "unitPrice": 320,
+                    "quantity": 1,
+                    "total": 320,
+                }
+            ],
+            daily_total=320,
+            prepaid_total=2240,
+        )
+        product = db.get(Product, "p-moti")
+        product.price = 999
+        product.active = False
+        db.commit()
+
+        [order] = recurring.generate_due_orders(db, MORNING_UTC)
+
+        assert order.total == 320
+        assert order.items[0]["unitPrice"] == 320
+        assert order.items[0]["productName"] == {
+            "ru": "Оплаченный клубничный напиток"
+        }
+        assert order.items[0]["productDescription"] == {
+            "ru": "Зафиксированное описание"
+        }
 
 
 def test_generation_skips_past_unpaid_and_inactive(rec_db) -> None:
@@ -207,7 +249,9 @@ def test_activation_flips_to_new_only_within_prep_lead(rec_db) -> None:
     assert not _is_valid_transition("new", "scheduled")
 
 
-def test_patch_edits_without_touching_paid_until(rec_db) -> None:
+def test_legacy_patch_preserves_paid_occurrences_and_settles_difference(
+    rec_db,
+) -> None:
     with rec_db() as db:
         customer = db.get(Customer, "cust-1")
 
@@ -227,8 +271,16 @@ def test_patch_edits_without_touching_paid_until(rec_db) -> None:
         assert put_out.comment == "Со льдом"
         paid_until_before = db.scalars(select(RecurringOrder.paid_until)).one()
 
-        # Редактирование (PATCH): состав/время/пожелания меняются,
-        # paid_until — НЕТ (правка не продлевает подписку бесплатно).
+        sub_before = db.scalars(select(RecurringOrder)).one()
+        remaining_before = _remaining_occurrences(
+            db,
+            sub_before,
+            datetime.now(timezone.utc),
+        )
+        prepaid_before = sub_before.prepaid_total
+
+        # Legacy PATCH delegates to V2: paid occurrence count is preserved,
+        # while the changed composition is settled as a mock adjustment.
         patched = auth.customer_patch_recurring(
             body=schemas.RecurringOrderPatch(
                 productIds=["p-moti", "p-matcha"],
@@ -244,7 +296,16 @@ def test_patch_edits_without_touching_paid_until(rec_db) -> None:
         # Цена дня пересчитана сервером по текущему каталогу.
         assert patched.dailyTotal == 750
         paid_until_after = db.scalars(select(RecurringOrder.paid_until)).one()
-        assert paid_until_after == paid_until_before
+        assert paid_until_after != paid_until_before
+        sub_after = db.scalars(select(RecurringOrder)).one()
+        assert _remaining_occurrences(
+            db,
+            sub_after,
+            datetime.now(timezone.utc),
+        ) == remaining_before
+        expected_adjustment = (750 - 300) * remaining_before
+        assert patched.lastAdjustment == expected_adjustment
+        assert patched.prepaidTotal == prepaid_before + expected_adjustment
 
         # Чужой/несуществующий товар отклоняется.
         with pytest.raises(HTTPException) as bad:

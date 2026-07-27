@@ -1179,35 +1179,95 @@ def _recurring_daily_total(db: Session, sub: RecurringOrder) -> int:
     ids = list(sub.product_ids or [])
     if not ids:
         return 0
-    prices = db.scalars(
-        select(Product.price).where(
-            Product.company_id == sub.company_id, Product.id.in_(ids)
+    total = 0
+    for product_id in ids:
+        product = db.get(Product, product_id)
+        if product is None or product.company_id != sub.company_id:
+            continue
+        size = (product.sizes or [None])[0]
+        unit_price = int(product.price)
+        if isinstance(size, dict):
+            unit_price += int(size.get("priceDelta", 0))
+        total += unit_price
+    return total
+
+
+def _legacy_recurring_items(db: Session, sub: RecurringOrder) -> list[dict]:
+    """Build V2-compatible response snapshots for pre-V2 rows."""
+
+    items: list[dict] = []
+    for product_id in list(sub.product_ids or []):
+        product = db.get(Product, product_id)
+        if product is None or product.company_id != sub.company_id:
+            continue
+        size = (product.sizes or [None])[0]
+        unit_price = int(product.price)
+        if isinstance(size, dict):
+            unit_price += int(size.get("priceDelta", 0))
+        items.append(
+            {
+                "productId": product.id,
+                "name": product.name,
+                "description": product.description,
+                "imageUrl": product.image_url,
+                "sizeId": size.get("id") if isinstance(size, dict) else None,
+                "size": size.get("name") if isinstance(size, dict) else None,
+                "unitPrice": unit_price,
+                "quantity": 1,
+                "total": unit_price,
+            }
         )
-    ).all()
-    return int(sum(prices))
+    return items
 
 
 def _recurring_out(
     db: Session, sub: RecurringOrder
 ) -> schemas.RecurringOrderOut:
+    dynamic_total = _recurring_daily_total(db, sub)
+    daily_total = int(sub.daily_total or dynamic_total)
+    items = list(sub.items or _legacy_recurring_items(db, sub))
     return schemas.RecurringOrderOut(
+        id=sub.id,
         productIds=list(sub.product_ids or []),
+        items=items,
         comment=sub.comment,
         time=sub.time,
         branchId=sub.branch_id,
         plan=sub.plan,
+        customUntil=(
+            sub.custom_until.isoformat()
+            if sub.custom_until is not None
+            else None
+        ),
         paidUntil=_iso_z(sub.paid_until) if sub.paid_until else None,
         active=sub.active,
-        dailyTotal=_recurring_daily_total(db, sub),
+        dailyTotal=daily_total,
+        prepaidTotal=int(
+            sub.prepaid_total
+            or daily_total * _PLAN_DAYS.get(sub.plan, 0)
+        ),
+        version=int(sub.version or 1),
+        billingMode=sub.billing_mode or "prepaid",
+        settlementMode=sub.settlement_mode or "mock",
+        paymentMethod=sub.payment_method or "mock",
+        lastAdjustment=int(sub.last_adjustment or 0),
+        createdAt=_iso_z(sub.created_at),
+        updatedAt=_iso_z(sub.updated_at or sub.created_at),
     )
 
 
 def _find_recurring(db: Session, customer: Customer) -> RecurringOrder | None:
     """Подписка клиента (одна на клиента), включая отменённую."""
     return db.scalars(
-        select(RecurringOrder).where(
+        select(RecurringOrder)
+        .where(
             RecurringOrder.company_id == customer.company_id,
             RecurringOrder.customer_id == customer.id,
+        )
+        .order_by(
+            RecurringOrder.active.desc(),
+            RecurringOrder.created_at.asc(),
+            RecurringOrder.id.asc(),
         )
     ).first()
 
@@ -1262,8 +1322,14 @@ def customer_set_recurring(
             detail=f"Unknown products for this company: {', '.join(unknown)}",
         )
 
+    from .recurring_api import _build_locked_items, _term_for_plan
+
+    product_ids, items, daily_total = _build_locked_items(
+        db, customer.company_id, body.branchId, body.productIds
+    )
     now = datetime.now(timezone.utc)
     sub = _find_recurring(db, customer)
+    previous_version = int(sub.version or 0) if sub is not None else 0
     if sub is None:
         sub = RecurringOrder(
             id=f"rec-{uuid4().hex[:10]}",
@@ -1273,14 +1339,34 @@ def customer_set_recurring(
         )
         db.add(sub)
 
-    sub.product_ids = list(dict.fromkeys(body.productIds))  # дубли убираем
+    sub.product_ids = product_ids
+    sub.items = items
     sub.comment = body.comment
     sub.time = body.time
     sub.branch_id = body.branchId
     sub.plan = body.plan
     # Срок оплаты — серверный: тариф выбирает клиент, дату считаем мы.
-    sub.paid_until = now + timedelta(days=_PLAN_DAYS[body.plan])
+    occurrences, paid_until, custom_until = _term_for_plan(
+        db,
+        sub.id,
+        body.time,
+        body.plan,
+        body.customUntil,
+        now,
+    )
+    sub.custom_until = custom_until
+    sub.paid_until = paid_until
     sub.active = True
+    sub.daily_total = daily_total
+    sub.prepaid_total = daily_total * occurrences
+    sub.version = max(1, previous_version + 1)
+    sub.billing_mode = "prepaid"
+    sub.payment_method = "mock"
+    sub.provider_payment_id = None
+    sub.settlement_mode = "mock"
+    sub.last_adjustment = sub.prepaid_total
+    sub.paid_at = now
+    sub.updated_at = now
 
     db.commit()
     db.refresh(sub)
@@ -1290,7 +1376,7 @@ def customer_set_recurring(
 @router.patch(
     "/customer/me/recurring",
     response_model=schemas.RecurringOrderOut,
-    summary="Редактировать активный постоянный заказ (без смены срока оплаты)",
+    summary="Редактировать первый активный постоянный заказ (legacy)",
     tags=["customer"],
 )
 def customer_patch_recurring(
@@ -1298,48 +1384,26 @@ def customer_patch_recurring(
     customer: Customer = Depends(get_current_customer),
     db: Session = Depends(get_db),
 ) -> schemas.RecurringOrderOut:
-    """Правит состав/время/филиал/пожелания УЖЕ оплаченной подписки.
+    """Compatibility wrapper with the same settlement rules as V2.
 
-    Принципиально НЕ трогает plan и paid_until: редактирование — не покупка,
-    иначе каждая правка бесплатно продлевала бы подписку (или наоборот
-    сгорал бы оплаченный срок). Продление/смена тарифа — только PUT.
-    Цены не фиксируются здесь: каждый сгенерированный заказ снапшотит
-    актуальные цены каталога, а dailyTotal в ответе показывает текущую сумму.
+    Old APKs do not address a subscription by ID, so the wrapper selects the
+    first active row. The actual edit is delegated to V2 to prevent a free
+    composition upgrade through the legacy route.
     """
     sub = _find_recurring(db, customer)
     if sub is None or not sub.active:
         raise HTTPException(
             status_code=404, detail="No active recurring order"
         )
+    from .recurring_api import patch_customer_recurring_order
 
-    if body.branchId is not None:
-        branch = db.get(Branch, body.branchId)
-        if branch is None or branch.company_id != customer.company_id:
-            raise HTTPException(status_code=404, detail="Branch not found")
-        sub.branch_id = body.branchId
-
-    if body.productIds is not None:
-        known = _known_product_ids(db, customer.company_id, body.productIds)
-        unknown = [pid for pid in body.productIds if pid not in known]
-        if unknown:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Unknown products for this company: "
-                    f"{', '.join(unknown)}"
-                ),
-            )
-        sub.product_ids = list(dict.fromkeys(body.productIds))
-
-    if body.time is not None:
-        sub.time = body.time
-
-    if "comment" in body.model_fields_set:
-        sub.comment = body.comment
-
-    db.commit()
-    db.refresh(sub)
-    return _recurring_out(db, sub)
+    return patch_customer_recurring_order(
+        sub.id,
+        body,
+        idempotency_key=None,
+        customer=customer,
+        db=db,
+    )
 
 
 @router.delete(
@@ -1357,8 +1421,16 @@ def customer_cancel_recurring(
     подписки) тоже 204: важен конечный результат «активной подписки нет»."""
     sub = _find_recurring(db, customer)
     if sub is not None and sub.active:
-        sub.active = False
-        db.commit()
+        # Route old APKs through the same durable refund workflow as V2.  The
+        # deterministic key makes repeat DELETE requests harmless.
+        from .recurring_api import _cancel_recurring
+
+        _cancel_recurring(
+            recurring_id=sub.id,
+            customer=customer,
+            idempotency_key=f"legacy-singleton-delete:{customer.id}:{sub.id}",
+            db=db,
+        )
     return Response(status_code=204)
 
 

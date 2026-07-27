@@ -46,6 +46,8 @@ from .content import router as content_router
 from .config import settings
 from .database import engine, get_db
 from .recurring import recurring_scheduler_loop
+from .recurring_api import router as recurring_api_router
+from .refunds import recurring_refund_worker_loop
 from .deps import (
     OrderEventAccess,
     authorize_order_event_stream,
@@ -94,13 +96,21 @@ async def lifespan(_: FastAPI):
     scheduler_task = asyncio.create_task(
         recurring_scheduler_loop(scheduler_stop)
     )
+    refund_worker_stop = asyncio.Event()
+    refund_worker_task = asyncio.create_task(
+        recurring_refund_worker_loop(refund_worker_stop)
+    )
     try:
         yield
     finally:
         scheduler_stop.set()
+        refund_worker_stop.set()
         scheduler_task.cancel()
+        refund_worker_task.cancel()
         with suppress(asyncio.CancelledError):
             await scheduler_task
+        with suppress(asyncio.CancelledError):
+            await refund_worker_task
 
 
 app = FastAPI(
@@ -124,6 +134,7 @@ app.add_middleware(
 # Логин/refresh/me/OTP: /api/companies/{companyId}/auth/...
 app.include_router(auth_global_router)
 app.include_router(auth_router)
+app.include_router(recurring_api_router)
 app.include_router(content_router)
 app.include_router(staff_public_router)
 app.include_router(staff_router)

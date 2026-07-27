@@ -82,6 +82,31 @@ def test_demo_bootstrap_is_isolated_complete_and_idempotent() -> None:
         assert recurring is not None
         assert recurring.product_ids == ["cg-p3", "cg-p7"]
         assert recurring.active is True
+        expected_daily_total = 0
+        for product_id in recurring.product_ids:
+            recurring_product = db.get(Product, product_id)
+            assert recurring_product is not None
+            first_size = (recurring_product.sizes or [None])[0]
+            expected_daily_total += recurring_product.price + (
+                int(first_size.get("priceDelta", 0))
+                if isinstance(first_size, dict)
+                else 0
+            )
+        assert [item["productId"] for item in recurring.items] == [
+            "cg-p3",
+            "cg-p7",
+        ]
+        assert sum(item["total"] for item in recurring.items) == (
+            expected_daily_total
+        )
+        assert recurring.daily_total == expected_daily_total
+        assert recurring.prepaid_total == expected_daily_total * 30
+        assert recurring.version == 1
+        assert recurring.billing_mode == "prepaid"
+        assert recurring.settlement_mode == "mock"
+        assert recurring.last_adjustment == recurring.prepaid_total
+        assert recurring.paid_at is not None
+        assert recurring.updated_at is not None
 
         owner = db.get(AdminUser, "u-cg-owner")
         assert owner is not None
@@ -102,6 +127,11 @@ def test_demo_bootstrap_is_isolated_complete_and_idempotent() -> None:
             {"name": "S (250 мл)", "priceDelta": 0},
             {"name": "M (350 мл)", "priceDelta": 40},
         ]
+        recurring.items = []
+        recurring.daily_total = 0
+        recurring.prepaid_total = 0
+        recurring.last_adjustment = 0
+        recurring.paid_at = None
         db.commit()
 
         assert (
@@ -115,3 +145,8 @@ def test_demo_bootstrap_is_isolated_complete_and_idempotent() -> None:
         )
         assert _count(db, Order, "coffeego") == 25
         assert [option["id"] for option in flat_white.sizes] == ["s", "m"]
+        assert recurring.daily_total == expected_daily_total
+        assert recurring.prepaid_total == expected_daily_total * 30
+        assert recurring.last_adjustment == recurring.prepaid_total
+        assert recurring.paid_at is not None
+        assert len(recurring.items) == 2

@@ -78,6 +78,18 @@ class Settings(BaseSettings):
     fcm_enabled: bool = False
     fcm_service_account_file: str = ""
 
+    # Recurring-order refunds are provider-agnostic.  "disabled" is the safe
+    # production default: card/QR refunds that cannot be submitted
+    # automatically become a manager-verified manual claim.  "mock" exists
+    # only for local/demo acceptance and must never be enabled in production.
+    recurring_refund_provider_mode: Literal["disabled", "mock"] = "disabled"
+    recurring_refund_cancel_cutoff_minutes: int = Field(
+        default=120, ge=0, le=1440
+    )
+    recurring_refund_max_attempts: int = Field(default=5, ge=1, le=20)
+    recurring_refund_poll_seconds: int = Field(default=30, ge=5, le=3600)
+    recurring_refund_claim_days: int = Field(default=90, ge=1, le=365)
+
     @model_validator(mode="after")
     def validate_production_safety(self) -> "Settings":
         self.google_oauth_web_client_id = self.google_oauth_web_client_id.strip()
@@ -158,6 +170,10 @@ class Settings(BaseSettings):
             )
         if self.seed_mode != "none":
             raise ValueError("SEED_MODE must be none in production")
+        if self.recurring_refund_provider_mode == "mock":
+            raise ValueError(
+                "RECURRING_REFUND_PROVIDER_MODE=mock is forbidden in production"
+            )
         if not self.staff_invite_public_url.startswith("https://"):
             raise ValueError(
                 "STAFF_INVITE_PUBLIC_URL must use HTTPS in production"

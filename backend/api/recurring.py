@@ -73,14 +73,58 @@ def _scheduled_moment_utc(time_hhmm: str, local_day: datetime) -> datetime | Non
 def _build_recurring_items(
     db: Session, sub: RecurringOrder, branch: Branch
 ) -> tuple[list[dict], int]:
-    """Снапшот позиций по ТЕКУЩЕМУ каталогу (формат V2, как у обычных заказов).
+    """Order items from the prepaid locked snapshot.
 
-    Подписка хранит только product_ids — без размеров и топпингов. Если у
-    товара есть размеры, берём первый (базовый вариант) с его priceDelta,
-    чтобы бариста видел конкретный размер, а сумма была честной.
-    Товар исчезнувший/неактивный/недоступный в филиале — пропускается: его
-    физически не приготовить; пустой набор отменяет генерацию за день.
+    V2 subscriptions must not silently absorb later catalog price/status
+    changes. Legacy rows without ``items`` retain the old catalog fallback so
+    a rolling migration does not drop an already paid day.
     """
+    locked = list(sub.items or [])
+    if locked:
+        stored_items: list[dict] = []
+        subtotal = 0
+        for item in locked:
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"recurring {sub.id}: malformed locked item snapshot"
+                )
+            unit_price = int(item.get("unitPrice", -1))
+            quantity = int(item.get("quantity", 0))
+            total = int(item.get("total", -1))
+            if (
+                not item.get("productId")
+                or unit_price < 0
+                or quantity < 1
+                or total != unit_price * quantity
+            ):
+                raise ValueError(
+                    f"recurring {sub.id}: invalid locked item totals"
+                )
+            stored_items.append(
+                {
+                    "productId": item["productId"],
+                    "productName": item.get("name", ""),
+                    "productDescription": item.get("description", ""),
+                    "imageUrl": item.get("imageUrl"),
+                    "sizeId": item.get("sizeId"),
+                    "size": item.get("size"),
+                    "toppingIds": [],
+                    "toppings": [],
+                    "sugarPercent": None,
+                    "ice": None,
+                    "quantity": quantity,
+                    "unitPrice": unit_price,
+                    "total": total,
+                }
+            )
+            subtotal += total
+        if subtotal != int(sub.daily_total or 0):
+            raise ValueError(
+                f"recurring {sub.id}: locked subtotal does not match daily_total"
+            )
+        return stored_items, subtotal
+
+    # Legacy compatibility: before V2 the subscription stored only IDs.
     stored_items: list[dict] = []
     subtotal = 0
     for product_id in list(sub.product_ids or []):
@@ -151,86 +195,117 @@ def generate_due_orders(db: Session, now: datetime) -> list[Order]:
     ).all()
 
     for sub in subs:
-        target = _scheduled_moment_utc(sub.time, local_now)
-        if target is None or target <= now:
-            continue
-        paid_until = sub.paid_until
-        if paid_until is not None and paid_until.tzinfo is None:
-            paid_until = paid_until.replace(tzinfo=timezone.utc)
-        if paid_until is None or paid_until < target:
-            continue
-
-        exists = db.scalars(
-            select(Order.id).where(
-                Order.company_id == sub.company_id,
-                Order.recurring_order_id == sub.id,
-                Order.service_date == service_date,
-            )
-        ).first()
-        if exists is not None:
-            continue
-
-        customer = db.get(Customer, sub.customer_id)
-        branch = db.get(Branch, sub.branch_id)
-        company = db.get(Company, sub.company_id)
-        if customer is None or branch is None or company is None:
-            continue
-
-        items, subtotal = _build_recurring_items(db, sub, branch)
-        if not items:
-            logger.warning(
-                "recurring %s: no preparable products for %s, skipped",
-                sub.id,
-                service_date,
-            )
-            continue
-
-        # Блокируем строку компании на время выдачи номера (как в create_order).
-        db.execute(
-            select(Company).where(Company.id == company.id).with_for_update()
-        )
-        number, _ = _next_order_number(db, company)
-
-        order = Order(
-            id=f"o-{uuid4().hex[:12]}",
-            company_id=company.id,
-            number=number,
-            customer_name=customer.name,
-            customer_phone=customer.phone,
-            branch_id=branch.id,
-            branch_name=branch.name,
-            branch_address=branch.address,
-            type="scheduled",
-            status="scheduled",
-            ready_time=sub.time,
-            comment=sub.comment,
-            items_version=2,
-            items=items,
-            total=subtotal,
-            payment_method="mock",  # подписка предоплачена (demo-оплата)
-            points_used=0,
-            # Как обычный заказ: баллы начисляются при переходе в done.
-            points_earned=round(subtotal * company.loyalty["earnRate"]),
-            created_at=utcnow_iso(),
-            customer_id=customer.id,
-            recurring_order_id=sub.id,
-            scheduled_for=target,
-            service_date=service_date,
-        )
-        db.add(order)
         try:
-            db.commit()
+            order = _generate_for_subscription(
+                db, sub, now=now, local_now=local_now, service_date=service_date
+            )
         except IntegrityError:
             # Гонка двух тиков: уникальный ключ сработал — день уже создан.
             db.rollback()
             continue
-        created.append(order)
-        order_event_hub.publish(
-            company.id,
-            "order.created",
-            event_payload(order.id, order.number, order.status, order.branch_id),
-        )
+        except Exception:  # noqa: BLE001 — одна подписка не срывает остальные
+            db.rollback()
+            logger.exception("recurring %s: generation failed", sub.id)
+            continue
+        if order is not None:
+            created.append(order)
+            logger.info(
+                "recurring %s: generated order %s (%s) for %s at %s",
+                sub.id,
+                order.number,
+                order.id,
+                service_date,
+                sub.time,
+            )
+            order_event_hub.publish(
+                order.company_id,
+                "order.created",
+                event_payload(
+                    order.id, order.number, order.status, order.branch_id
+                ),
+            )
     return created
+
+
+def _generate_for_subscription(
+    db: Session,
+    sub: RecurringOrder,
+    *,
+    now: datetime,
+    local_now: datetime,
+    service_date: str,
+) -> Order | None:
+    """Создаёт scheduled-заказ подписки на сегодня; None — день пропущен."""
+    target = _scheduled_moment_utc(sub.time, local_now)
+    if target is None or target <= now:
+        return None
+    paid_until = sub.paid_until
+    if paid_until is not None and paid_until.tzinfo is None:
+        paid_until = paid_until.replace(tzinfo=timezone.utc)
+    if paid_until is None or paid_until < target:
+        return None
+
+    exists = db.scalars(
+        select(Order.id).where(
+            Order.company_id == sub.company_id,
+            Order.recurring_order_id == sub.id,
+            Order.service_date == service_date,
+        )
+    ).first()
+    if exists is not None:
+        return None
+
+    customer = db.get(Customer, sub.customer_id)
+    branch = db.get(Branch, sub.branch_id)
+    company = db.get(Company, sub.company_id)
+    if customer is None or branch is None or company is None:
+        return None
+
+    items, subtotal = _build_recurring_items(db, sub, branch)
+    if not items:
+        logger.warning(
+            "recurring %s: no preparable products for %s, skipped",
+            sub.id,
+            service_date,
+        )
+        return None
+
+    # Блокируем строку компании на время выдачи номера (как в create_order).
+    db.execute(
+        select(Company).where(Company.id == company.id).with_for_update()
+    )
+    number, _ = _next_order_number(db, company)
+
+    order = Order(
+        id=f"o-{uuid4().hex[:12]}",
+        company_id=company.id,
+        number=number,
+        customer_name=customer.name,
+        customer_phone=customer.phone,
+        branch_id=branch.id,
+        branch_name=branch.name,
+        branch_address=branch.address,
+        type="scheduled",
+        status="scheduled",
+        ready_time=sub.time,
+        comment=sub.comment,
+        items_version=2,
+        items=items,
+        total=subtotal,
+        payment_method="mock",  # подписка предоплачена (demo-оплата)
+        points_used=0,
+        # Как обычный заказ: баллы начисляются при переходе в done.
+        points_earned=round(subtotal * company.loyalty["earnRate"]),
+        created_at=utcnow_iso(),
+        customer_id=customer.id,
+        recurring_order_id=sub.id,
+        scheduled_for=target,
+        service_date=service_date,
+    )
+    db.add(order)
+    # IntegrityError (гонка тиков по уникальному ключу) ловит вызывающий.
+    db.commit()
+    return order
 
 
 def activate_due_orders(db: Session, now: datetime) -> list[Order]:

@@ -71,6 +71,46 @@ def _fresh_rows(records: list, model_type: type) -> list:
     ]
 
 
+def _locked_recurring_seed_items(
+    products: list[Product],
+    product_ids: list[str],
+) -> tuple[list[dict], int]:
+    """Build the same first-size locked snapshot used by recurring V2."""
+
+    by_id = {product.id: product for product in products}
+    items: list[dict] = []
+    daily_total = 0
+    for product_id in dict.fromkeys(product_ids):
+        product = by_id.get(product_id)
+        if product is None:
+            raise ProductionBootstrapError(
+                f"Demo recurring product is missing: {product_id}"
+            )
+        size = (product.sizes or [None])[0]
+        unit_price = int(product.price)
+        if isinstance(size, dict):
+            unit_price += int(size.get("priceDelta", 0))
+        items.append(
+            {
+                "productId": product.id,
+                "name": deepcopy(product.name),
+                "description": deepcopy(product.description),
+                "imageUrl": product.image_url,
+                "sizeId": size.get("id") if isinstance(size, dict) else None,
+                "size": (
+                    deepcopy(size.get("name"))
+                    if isinstance(size, dict)
+                    else None
+                ),
+                "unitPrice": unit_price,
+                "quantity": 1,
+                "total": unit_price,
+            }
+        )
+        daily_total += unit_price
+    return items, daily_total
+
+
 def _iso(dt: datetime) -> str:
     """ISO-8601 UTC в формате JS toISOString(): 2026-07-12T09:00:00.000Z."""
     return dt.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace(
@@ -1245,17 +1285,62 @@ def bootstrap_production_demo_company(
     if db.get(Company, "coffeego") is not None:
         # Converge an early CoffeeGo bootstrap which used legacy modifier JSON
         # without stable IDs. The public ProductOut contract requires IDs.
+        changed = False
         product = db.get(Product, "cg-p5")
         if product is not None and product.company_id == "coffeego":
             sizes = deepcopy(product.sizes or [])
-            changed = False
             for index, option in enumerate(sizes):
                 if not option.get("id"):
-                    option["id"] = "s" if index == 0 else "m" if index == 1 else f"size-{index + 1}"
+                    option["id"] = (
+                        "s"
+                        if index == 0
+                        else "m"
+                        if index == 1
+                        else f"size-{index + 1}"
+                    )
                     changed = True
             if changed:
                 product.sizes = sizes
-                db.commit()
+
+        recurring = db.get(RecurringOrder, "recurring-cg-eldar")
+        needs_recurring_repair = recurring is not None and (
+            not (recurring.items or [])
+            or int(recurring.daily_total or 0) <= 0
+            or int(recurring.prepaid_total or 0) <= 0
+            or int(recurring.version or 0) < 1
+            or not recurring.billing_mode
+            or not recurring.settlement_mode
+            or recurring.paid_at is None
+            or recurring.updated_at is None
+        )
+        if recurring is not None and needs_recurring_repair:
+            recurring_products = [
+                product
+                for product_id in recurring.product_ids or []
+                if (product := db.get(Product, product_id)) is not None
+                and product.company_id == "coffeego"
+            ]
+            items, daily_total = _locked_recurring_seed_items(
+                recurring_products,
+                list(recurring.product_ids or []),
+            )
+            now = datetime.now(timezone.utc)
+            occurrences = 30 if recurring.plan == "month" else 7
+            if recurring.plan == "single":
+                occurrences = 1
+            recurring.items = items
+            recurring.daily_total = daily_total
+            recurring.prepaid_total = daily_total * occurrences
+            recurring.version = max(1, int(recurring.version or 1))
+            recurring.billing_mode = "prepaid"
+            recurring.settlement_mode = "mock"
+            recurring.last_adjustment = recurring.prepaid_total
+            recurring.paid_at = recurring.paid_at or recurring.created_at or now
+            recurring.updated_at = now
+            changed = True
+
+        if changed:
+            db.commit()
         return False
     if db.scalar(select(AdminUser.id).where(AdminUser.email == email)) is not None:
         raise ProductionBootstrapError(
@@ -1303,16 +1388,38 @@ def bootstrap_production_demo_company(
         *_build_orders("coffeego", _COFFEEGO_ORDERS),
     ]
     _link_demo_customer_orders(orders, customer)
+    recurring_product_ids = ["cg-p3", "cg-p7"]
+    recurring_items, recurring_daily_total = _locked_recurring_seed_items(
+        products,
+        recurring_product_ids,
+    )
+    recurring_now = datetime.now(timezone.utc)
+    recurring_occurrences = 30
+    recurring_prepaid_total = (
+        recurring_daily_total * recurring_occurrences
+    )
     recurring = RecurringOrder(
         id="recurring-cg-eldar",
         company_id="coffeego",
         customer_id=customer.id,
-        product_ids=["cg-p3", "cg-p7"],
+        product_ids=recurring_product_ids,
+        items=recurring_items,
         time="09:30",
         branch_id="cg-b1",
         plan="month",
-        paid_until=datetime.now(timezone.utc) + timedelta(days=30),
+        paid_until=recurring_now + timedelta(days=30),
         active=True,
+        daily_total=recurring_daily_total,
+        prepaid_total=recurring_prepaid_total,
+        version=1,
+        billing_mode="prepaid",
+        payment_method="mock",
+        provider_payment_id=None,
+        settlement_mode="mock",
+        last_adjustment=recurring_prepaid_total,
+        paid_at=recurring_now,
+        created_at=recurring_now,
+        updated_at=recurring_now,
     )
 
     try:

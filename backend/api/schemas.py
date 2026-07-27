@@ -7,7 +7,7 @@
 текущем сиде), либо локализованный объект {ru,ky,en} — приложение умеет оба.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 import re
 from typing import Annotated, Literal
 
@@ -1000,25 +1000,55 @@ class FavoritesPut(BaseModel):
     productIds: list[str] = Field(default_factory=list, max_length=100)
 
 
-RecurringPlan = Literal["single", "week", "month"]
+RecurringPlan = Literal["single", "week", "month", "custom"]
+RecurringRefundStatus = Literal[
+    "pending",
+    "processing",
+    "refunded",
+    "manual_required",
+    "manual_paid",
+    "failed",
+]
 
 # "HH:MM" в 24-часовом формате: 00:00–23:59
 HourMinute = Annotated[str, StringConstraints(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
 
 
-class RecurringOrderOut(BaseModel):
-    """Постоянный заказ (подписка). paidUntil — ISO-8601 UTC, считает сервер.
-    dailyTotal — актуальная серверная цена набора за один день (по текущему
-    каталогу): после редактирования состава клиент видит честную цену."""
+class RecurringItemOut(BaseModel):
+    productId: str
+    name: str | dict
+    description: str | dict = ""
+    imageUrl: str | None = None
+    sizeId: str | None = None
+    size: str | dict | None = None
+    unitPrice: int = Field(ge=0)
+    quantity: int = Field(default=1, ge=1)
+    total: int = Field(ge=0)
 
+
+class RecurringOrderOut(BaseModel):
+    """Постоянный заказ с зафиксированными сервером составом и ценой."""
+
+    id: str
     productIds: list[str]
+    items: list[RecurringItemOut] = Field(default_factory=list)
     comment: str | None = None
     time: HourMinute
     branchId: str
     plan: RecurringPlan
+    customUntil: str | None = None
     paidUntil: str | None = None
     active: bool
-    dailyTotal: int = 0
+    dailyTotal: int = Field(default=0, ge=0)
+    prepaidTotal: int = Field(default=0, ge=0)
+    version: int = Field(default=1, ge=1)
+    billingMode: Literal["prepaid"] = "prepaid"
+    settlementMode: Literal["mock"] = "mock"
+    paymentMethod: PaymentMethod = "mock"
+    # Positive = mock charge, negative = credit, zero = non-financial edit.
+    lastAdjustment: int = 0
+    createdAt: str
+    updatedAt: str
 
 
 class RecurringOrderPut(BaseModel):
@@ -1031,13 +1061,20 @@ class RecurringOrderPut(BaseModel):
     time: HourMinute
     branchId: str
     plan: RecurringPlan
+    customUntil: date | None = None
     comment: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_custom_term(self):
+        if self.plan == "custom" and self.customUntil is None:
+            raise ValueError("customUntil is required for the custom plan")
+        if self.plan != "custom" and self.customUntil is not None:
+            raise ValueError("customUntil is only allowed for the custom plan")
+        return self
 
 
 class RecurringOrderPatch(BaseModel):
-    """Редактирование активной подписки БЕЗ смены тарифа и срока оплаты:
-    состав, время, филиал, пожелания. paid_until и plan не трогаются —
-    продление только через PUT (покупку)."""
+    """Редактирование V2 с mock-доплатой/кредитом за оставшиеся выдачи."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1046,7 +1083,158 @@ class RecurringOrderPatch(BaseModel):
     )
     time: HourMinute | None = None
     branchId: str | None = None
+    plan: RecurringPlan | None = None
+    customUntil: date | None = None
     comment: str | None = Field(default=None, max_length=500)
+    baseVersion: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def require_a_change(self):
+        changed = self.model_fields_set - {"baseVersion"}
+        if not changed:
+            raise ValueError("At least one recurring-order field must change")
+        if "customUntil" in self.model_fields_set and self.customUntil is None:
+            raise ValueError("customUntil cannot be null")
+        if self.plan == "custom" and self.customUntil is None:
+            raise ValueError(
+                "customUntil is required when switching to the custom plan"
+            )
+        if self.plan not in {None, "custom"} and self.customUntil is not None:
+            raise ValueError("customUntil is only allowed for the custom plan")
+        return self
+
+
+class RecurringAnalyticsCustomer(BaseModel):
+    id: str
+    name: str
+    phone: str | None = None
+
+
+class RecurringAnalyticsAdjustment(BaseModel):
+    amount: int
+    settlementMode: Literal["mock"] = "mock"
+    createdAt: str
+
+
+class RecurringRefundOut(BaseModel):
+    id: str
+    recurringOrderId: str
+    amount: int = Field(ge=0)
+    currency: str
+    paymentMethod: PaymentMethod
+    status: RecurringRefundStatus
+    provider: str
+    providerRefundId: str | None = None
+    refundableOccurrences: int = Field(ge=0)
+    cancelledOrderIds: list[str] = Field(default_factory=list)
+    nonRefundableOrderIds: list[str] = Field(default_factory=list)
+    attemptCount: int = Field(default=0, ge=0)
+    failureCode: str | None = None
+    failureMessage: str | None = None
+    claimCode: str | None = None
+    claimQrPayload: str | None = None
+    manualCompletedAt: str | None = None
+    createdAt: str
+    updatedAt: str
+
+
+class RecurringCancellationQuoteOut(BaseModel):
+    recurringOrderId: str
+    refundAmount: int = Field(ge=0)
+    currency: str
+    refundableOccurrences: int = Field(ge=0)
+    cancelledOrderIds: list[str] = Field(default_factory=list)
+    nonRefundableOrderIds: list[str] = Field(default_factory=list)
+    paymentMethod: PaymentMethod
+    cutoffMinutes: int = Field(ge=0)
+
+
+class RecurringCancellationOut(BaseModel):
+    recurringOrderId: str
+    cancelledAt: str
+    refund: RecurringRefundOut
+
+
+class RecurringManualRefundCompleteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    claim: str = Field(min_length=6, max_length=4096)
+
+
+class RecurringAnalyticsTodayOrder(BaseModel):
+    id: str
+    number: str
+    status: OrderStatus
+    total: int
+    scheduledFor: str | None = None
+
+
+class RecurringAnalyticsRow(BaseModel):
+    id: str
+    customer: RecurringAnalyticsCustomer
+    items: list[RecurringItemOut]
+    branchId: str
+    branchName: str
+    time: HourMinute
+    plan: RecurringPlan
+    customUntil: str | None = None
+    paidUntil: str | None = None
+    dailyTotal: int
+    prepaidTotal: int
+    lastAdjustment: RecurringAnalyticsAdjustment | None = None
+    todayOrder: RecurringAnalyticsTodayOrder | None = None
+
+
+class RecurringAnalyticsOut(BaseModel):
+    activeCount: int
+    generatedToday: int
+    completedToday: int
+    purchasesToday: int
+    committedDailyAmount: int
+    rows: list[RecurringAnalyticsRow]
+    refunds: list[RecurringRefundOut] = Field(default_factory=list)
+
+
+RecurringRegistryFilter = Literal[
+    "all",
+    "active",
+    "completed",
+    "cancelled",
+]
+RecurringRegistryStatus = Literal["active", "completed", "cancelled"]
+
+
+class RecurringRegistryCustomer(BaseModel):
+    id: str | None = None
+    name: str
+    phone: str | None = None
+
+
+class RecurringRegistryRow(BaseModel):
+    id: str
+    status: RecurringRegistryStatus
+    customer: RecurringRegistryCustomer
+    items: list[RecurringItemOut]
+    branchId: str
+    branchName: str
+    time: HourMinute
+    plan: RecurringPlan
+    customUntil: str | None = None
+    paidUntil: str | None = None
+    dailyTotal: int = Field(ge=0)
+    prepaidTotal: int = Field(ge=0)
+    createdAt: str
+    updatedAt: str
+    lastAdjustment: RecurringAnalyticsAdjustment | None = None
+    todayOrder: RecurringAnalyticsTodayOrder | None = None
+
+
+class RecurringRegistryOut(BaseModel):
+    total: int = Field(ge=0)
+    activeCount: int = Field(ge=0)
+    completedCount: int = Field(ge=0)
+    cancelledCount: int = Field(ge=0)
+    items: list[RecurringRegistryRow]
 
 
 class PushTokenIn(BaseModel):
