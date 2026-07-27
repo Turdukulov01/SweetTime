@@ -90,16 +90,43 @@ Map<String, dynamic> _v1OrderJson() => <String, dynamic>{
 };
 
 Map<String, dynamic> _recurringJson({
+  String id = 'rec-test-1',
+  String time = '11:00',
   String? paidUntil,
   int dailyTotal = 350,
+  int version = 3,
   String? comment,
 }) => <String, dynamic>{
+  'id': id,
   'productIds': [DemoData.products.first.id],
-  'time': '11:00',
+  'items': [
+    {
+      'productId': DemoData.products.first.id,
+      'name': {
+        'ru': DemoData.products.first.name.ru,
+        'ky': DemoData.products.first.name.ky,
+        'en': DemoData.products.first.name.en,
+      },
+      'imageUrl': null,
+      'sizeId': null,
+      'size': null,
+      'unitPrice': dailyTotal,
+      'quantity': 1,
+      'total': dailyTotal,
+    },
+  ],
+  'time': time,
   'branchId': DemoData.branches.first.id,
   'plan': 'week',
   'paidUntil': paidUntil ?? '2026-07-22T12:00:00Z',
   'dailyTotal': dailyTotal,
+  'prepaidTotal': dailyTotal * 7,
+  'version': version,
+  'billingMode': 'prepaid',
+  'settlementMode': 'mock',
+  'lastAdjustment': 0,
+  'createdAt': '2026-07-15T12:00:00Z',
+  'updatedAt': '2026-07-16T12:00:00Z',
   'comment': ?comment,
   'active': true,
 };
@@ -110,7 +137,8 @@ int _demoDailyTotal(List<String> productIds) {
   for (final id in productIds) {
     for (final product in DemoData.products) {
       if (product.id == id) {
-        total += product.basePrice;
+        total +=
+            product.basePrice + (product.sizes.firstOrNull?.priceDelta ?? 0);
         break;
       }
     }
@@ -713,7 +741,7 @@ void main() {
   });
 
   test(
-    'recurring PATCH edits the subscription without touching plan or paidUntil',
+    'recurring V2 PATCH targets one stable ID and preserves omitted fields',
     () async {
       final api = _CatalogAuthApiClient(
         profile: _testCustomerProfile,
@@ -740,10 +768,16 @@ void main() {
       expect(api.recurringPutCalls, isEmpty);
       expect(api.recurringPatchCalls, [
         {
+          'recurringId': 'rec-test-1',
           'productIds': null,
           'time': '12:30',
           'branchId': null,
+          'plan': null,
+          // customUntil не менялся → уходит как null; реальный сериализатор
+          // (api_client `?_dateOnly`) опускает его из HTTP-тела.
+          'customUntil': null,
           'comment': 'Тёплый, без трубочки',
+          'baseVersion': 3,
         },
       ]);
       expect(controller.state.recurring?.time, '12:30');
@@ -787,6 +821,114 @@ void main() {
       expect(cleared.state.recurring, isNull);
     },
   );
+
+  test(
+    'multiple recurring orders hydrate, append, edit and delete independently',
+    () async {
+      final first = parseCustomerRecurringOrder(
+        _recurringJson(id: 'rec-first', time: '09:00', version: 1),
+      )!;
+      final second = parseCustomerRecurringOrder(
+        _recurringJson(id: 'rec-second', time: '14:00', version: 2),
+      )!;
+      final api = _CatalogAuthApiClient(
+        profile: _testCustomerProfile,
+        recurringOrders: [first, second],
+      );
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(accessToken: 'good', refreshToken: 'fresh'),
+        cartStore: _MemoryCartStore(),
+        api: api,
+      );
+
+      await controller.bootstrap();
+      expect(controller.state.recurringOrders.map((item) => item.id), [
+        'rec-first',
+        'rec-second',
+      ]);
+
+      expect(
+        await controller.setRecurring(
+          products: [DemoData.products.first],
+          time: '18:00',
+          branch: DemoData.branches.first,
+          plan: RecurringPlan.single,
+        ),
+        isTrue,
+      );
+      expect(controller.state.recurringOrders, hasLength(3));
+      expect(controller.state.recurringOrders.take(2).map((item) => item.id), [
+        'rec-first',
+        'rec-second',
+      ]);
+
+      expect(
+        await controller.editRecurring(
+          recurringId: 'rec-second',
+          time: '15:30',
+        ),
+        isTrue,
+      );
+      expect(
+        controller.state.recurringOrders
+            .firstWhere((item) => item.id == 'rec-first')
+            .time,
+        '09:00',
+      );
+      expect(
+        controller.state.recurringOrders
+            .firstWhere((item) => item.id == 'rec-second')
+            .time,
+        '15:30',
+      );
+
+      expect(
+        await controller.cancelRecurring(recurringId: 'rec-second'),
+        isTrue,
+      );
+      expect(
+        controller.state.recurringOrders.map((item) => item.id),
+        isNot(contains('rec-second')),
+      );
+      expect(
+        controller.state.recurringOrders.map((item) => item.id),
+        contains('rec-first'),
+      );
+    },
+  );
+
+  test('session resume refreshes recurring orders from the server', () async {
+    final first = parseCustomerRecurringOrder(
+      _recurringJson(id: 'rec-first', time: '09:00'),
+    )!;
+    final replacement = parseCustomerRecurringOrder(
+      _recurringJson(id: 'rec-replacement', time: '17:45'),
+    )!;
+    final api = _CatalogAuthApiClient(
+      profile: _testCustomerProfile,
+      recurringOrders: [first],
+    );
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(accessToken: 'good', refreshToken: 'fresh'),
+      cartStore: _MemoryCartStore(),
+      api: api,
+    );
+    await controller.bootstrap();
+    expect(controller.state.recurringOrders.single.id, 'rec-first');
+
+    api.serverRecurringOrders
+      ..clear()
+      ..add(replacement);
+    expect(
+      await controller.resumeCustomerSession(),
+      CustomerSessionResumeResult.active,
+    );
+
+    expect(controller.state.recurringOrders.single.id, 'rec-replacement');
+    expect(controller.state.recurringOrders.single.time, '17:45');
+  });
 
   test('recurring PUT and DELETE use server-authoritative state', () async {
     final api = _CatalogAuthApiClient(profile: _testCustomerProfile);
@@ -1833,6 +1975,41 @@ void main() {
     expect(find.textContaining('История заказов'), findsNothing);
   });
 
+  testWidgets(
+    'active recurring order exposes edit action and opens a prefilled sheet',
+    (WidgetTester tester) async {
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+      )..seedDemo(auth: true, recurring: true);
+      await tester.pumpWidget(_testAppWithController(controller));
+      await tester.pump(const Duration(milliseconds: 900));
+
+      await _openNavigationTab(tester, 'Профиль');
+      final recurringEdit = find.byKey(
+        const ValueKey('recurring-edit-legacy-primary'),
+      );
+      await tester.scrollUntilVisible(
+        recurringEdit,
+        260,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      expect(recurringEdit, findsOneWidget);
+
+      await tester.tap(recurringEdit);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DraggableScrollableSheet), findsOneWidget);
+      expect(
+        find.textContaining(
+          DemoData.products.first.name.ru,
+          findRichText: true,
+        ),
+        findsWidgets,
+      );
+    },
+  );
+
   testWidgets('profile editor saves customer name without opening picker', (
     WidgetTester tester,
   ) async {
@@ -1991,38 +2168,43 @@ void main() {
     expect(tester.widget<ChoiceChip>(allFinder).selected, isTrue);
   });
 
-  testWidgets('layouts survive a 320dp screen at maximum (clamped) text scale', (
-    WidgetTester tester,
-  ) async {
-    // Старый/маленький телефон с крупным системным шрифтом: худший случай,
-    // который допускает наш кламп (1.3×), на узком экране 320dp. Ничего не
-    // должно давать RenderFlex overflow — иначе тест поймает исключение.
-    tester.view.physicalSize = const Size(320 * 2, 640 * 2);
-    tester.view.devicePixelRatio = 2.0;
-    // Система просит 2.0; MaterialApp.builder клампит до 1.3.
-    tester.platformDispatcher.textScaleFactorTestValue = 2.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+  testWidgets(
+    'layouts survive a 320dp screen at maximum (clamped) text scale',
+    (WidgetTester tester) async {
+      // Старый/маленький телефон с крупным системным шрифтом: худший случай,
+      // который допускает наш кламп (1.3×), на узком экране 320dp. Ничего не
+      // должно давать RenderFlex overflow — иначе тест поймает исключение.
+      tester.view.physicalSize = const Size(320 * 2, 640 * 2);
+      tester.view.devicePixelRatio = 2.0;
+      // Система просит 2.0; MaterialApp.builder клампит до 1.3.
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
 
-    await tester.pumpWidget(_testApp());
-    await tester.pump(const Duration(milliseconds: 900));
-    expect(tester.takeException(), isNull, reason: 'Home (верх) overflow');
+      await tester.pumpWidget(_testApp());
+      await tester.pump(const Duration(milliseconds: 900));
+      expect(tester.takeException(), isNull, reason: 'Home (верх) overflow');
 
-    // Прокручиваем всю ленту Home, чтобы построились акции, новости и хиты.
-    final homeScroll = find.byType(CustomScrollView).first;
-    for (var step = 0; step < 6; step++) {
-      await tester.drag(homeScroll, const Offset(0, -420));
-      await tester.pump();
-      expect(tester.takeException(), isNull, reason: 'Home скролл $step overflow');
-    }
+      // Прокручиваем всю ленту Home, чтобы построились акции, новости и хиты.
+      final homeScroll = find.byType(CustomScrollView).first;
+      for (var step = 0; step < 6; step++) {
+        await tester.drag(homeScroll, const Offset(0, -420));
+        await tester.pump();
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'Home скролл $step overflow',
+        );
+      }
 
-    // Проходим остальные основные вкладки.
-    for (final label in const ['Каталог', 'Корзина', 'Профиль']) {
-      await _openNavigationTab(tester, label);
-      expect(tester.takeException(), isNull, reason: '$label overflow');
-    }
-  });
+      // Проходим остальные основные вкладки.
+      for (final label in const ['Каталог', 'Корзина', 'Профиль']) {
+        await _openNavigationTab(tester, label);
+        expect(tester.takeException(), isNull, reason: '$label overflow');
+      }
+    },
+  );
 }
 
 String _regularSpaces(String value) =>
@@ -2201,6 +2383,63 @@ class _OfflineApiClient extends ApiClient {
   ) async => const ApiResult<List<OrderHistoryEntry>>.unavailable();
 
   @override
+  Future<ApiResult<List<RecurringOrder>>> fetchCustomerRecurringOrders(
+    String accessToken,
+  ) async => const ApiResult<List<RecurringOrder>>.unavailable();
+
+  @override
+  Future<ApiResult<List<RecurringRefund>>> fetchCustomerRecurringRefunds(
+    String accessToken,
+  ) async => const ApiResult<List<RecurringRefund>>.unavailable();
+
+  @override
+  Future<ApiResult<RecurringCancellationQuote>>
+  fetchRecurringCancellationQuote(
+    String accessToken,
+    String recurringId,
+  ) async => const ApiResult<RecurringCancellationQuote>.unavailable();
+
+  @override
+  Future<ApiResult<RecurringCancellation>> cancelCustomerRecurringOrder(
+    String accessToken,
+    String recurringId, {
+    required String idempotencyKey,
+  }) async => const ApiResult<RecurringCancellation>.unavailable();
+
+  @override
+  Future<ApiResult<RecurringOrder?>> createCustomerRecurringOrder(
+    String accessToken, {
+    required List<String> productIds,
+    required String time,
+    required String branchId,
+    required RecurringPlan plan,
+    DateTime? customUntil,
+    String? comment,
+    String? idempotencyKey,
+  }) async => const ApiResult<RecurringOrder?>.unavailable();
+
+  @override
+  Future<ApiResult<RecurringOrder?>> patchCustomerRecurringOrder(
+    String accessToken,
+    String recurringId, {
+    List<String>? productIds,
+    String? time,
+    String? branchId,
+    RecurringPlan? plan,
+    DateTime? customUntil,
+    String? comment,
+    bool commentProvided = false,
+    int? baseVersion,
+    String? idempotencyKey,
+  }) async => const ApiResult<RecurringOrder?>.unavailable();
+
+  @override
+  Future<ApiResult<bool>> deleteCustomerRecurringOrder(
+    String accessToken,
+    String recurringId,
+  ) async => const ApiResult<bool>.unavailable();
+
+  @override
   Future<ApiResult<RecurringOrder?>> fetchCustomerRecurring(
     String accessToken,
   ) async => const ApiResult<RecurringOrder?>.unavailable();
@@ -2212,6 +2451,7 @@ class _OfflineApiClient extends ApiClient {
     required String time,
     required String branchId,
     required RecurringPlan plan,
+    DateTime? customUntil,
     String? comment,
   }) async => const ApiResult<RecurringOrder?>.unavailable();
 
@@ -2315,13 +2555,24 @@ class _FakeAuthApiClient extends ApiClient {
     this.favoriteIds = const [],
     this.orders = const [],
     RecurringOrder? recurring,
+    List<RecurringOrder>? recurringOrders,
     this.accountDeleteResult = const ApiResult<bool>.ok(true),
-  }) : serverRecurring = recurring;
+  }) : serverRecurringOrders = List<RecurringOrder>.of(
+         recurringOrders ??
+             (recurring == null ? const <RecurringOrder>[] : [recurring]),
+       );
 
   final CustomerProfile profile;
   final List<String> favoriteIds;
   final List<OrderHistoryEntry> orders;
-  RecurringOrder? serverRecurring;
+  final List<RecurringOrder> serverRecurringOrders;
+  RecurringOrder? get serverRecurring => serverRecurringOrders.firstOrNull;
+  set serverRecurring(RecurringOrder? value) {
+    serverRecurringOrders
+      ..clear()
+      ..addAll(value == null ? const [] : [value]);
+  }
+
   final ApiResult<bool> accountDeleteResult;
   final List<String> customerMeCalls = [];
   final List<String> favoriteGetCalls = [];
@@ -2416,6 +2667,98 @@ class _FakeAuthApiClient extends ApiClient {
   }
 
   @override
+  Future<ApiResult<List<RecurringOrder>>> fetchCustomerRecurringOrders(
+    String accessToken,
+  ) async {
+    recurringGetCalls.add(accessToken);
+    if (accessToken != 'good') {
+      return const ApiResult<List<RecurringOrder>>.rejected();
+    }
+    return ApiResult<List<RecurringOrder>>.ok(
+      List.unmodifiable(serverRecurringOrders),
+    );
+  }
+
+  @override
+  Future<ApiResult<List<RecurringRefund>>> fetchCustomerRecurringRefunds(
+    String accessToken,
+  ) async => accessToken == 'good'
+      ? const ApiResult<List<RecurringRefund>>.ok([])
+      : const ApiResult<List<RecurringRefund>>.rejected();
+
+  @override
+  Future<ApiResult<RecurringCancellationQuote>>
+  fetchRecurringCancellationQuote(
+    String accessToken,
+    String recurringId,
+  ) async {
+    if (accessToken != 'good') {
+      return const ApiResult<RecurringCancellationQuote>.rejected();
+    }
+    final current = serverRecurringOrders
+        .where((item) => item.id == recurringId)
+        .firstOrNull;
+    if (current == null) {
+      return const ApiResult<RecurringCancellationQuote>.unavailable();
+    }
+    return ApiResult<RecurringCancellationQuote>.ok(
+      RecurringCancellationQuote(
+        recurringOrderId: current.id,
+        refundAmount: current.prepaidTotal,
+        currency: 'сом',
+        refundableOccurrences: current.plan.days,
+        cancelledOrderIds: const [],
+        nonRefundableOrderIds: const [],
+        paymentMethod: current.paymentMethod,
+        cutoffMinutes: 120,
+      ),
+    );
+  }
+
+  @override
+  Future<ApiResult<RecurringCancellation>> cancelCustomerRecurringOrder(
+    String accessToken,
+    String recurringId, {
+    required String idempotencyKey,
+  }) async {
+    recurringDeleteCalls++;
+    if (accessToken != 'good') {
+      return const ApiResult<RecurringCancellation>.rejected();
+    }
+    final current = serverRecurringOrders
+        .where((item) => item.id == recurringId)
+        .firstOrNull;
+    if (current == null) {
+      return const ApiResult<RecurringCancellation>.unavailable();
+    }
+    serverRecurringOrders.removeWhere((item) => item.id == recurringId);
+    final now = DateTime.utc(2026, 7, 27, 12);
+    final refund = RecurringRefund(
+      id: 'refund-$recurringId',
+      recurringOrderId: recurringId,
+      amount: current.prepaidTotal,
+      currency: 'сом',
+      paymentMethod: current.paymentMethod,
+      status: RecurringRefundStatus.refunded,
+      provider: 'mock',
+      providerRefundId: 'mock-refund-$recurringId',
+      refundableOccurrences: current.plan.days,
+      cancelledOrderIds: const [],
+      nonRefundableOrderIds: const [],
+      attemptCount: 1,
+      createdAt: now,
+      updatedAt: now,
+    );
+    return ApiResult<RecurringCancellation>.ok(
+      RecurringCancellation(
+        recurringOrderId: recurringId,
+        cancelledAt: now,
+        refund: refund,
+      ),
+    );
+  }
+
+  @override
   Future<ApiResult<RecurringOrder?>> fetchCustomerRecurring(
     String accessToken,
   ) async {
@@ -2427,12 +2770,50 @@ class _FakeAuthApiClient extends ApiClient {
   }
 
   @override
+  Future<ApiResult<RecurringOrder?>> createCustomerRecurringOrder(
+    String accessToken, {
+    required List<String> productIds,
+    required String time,
+    required String branchId,
+    required RecurringPlan plan,
+    DateTime? customUntil,
+    String? comment,
+    String? idempotencyKey,
+  }) async {
+    recurringPutCalls.add(List.unmodifiable(productIds));
+    if (accessToken != 'good') {
+      return const ApiResult<RecurringOrder?>.rejected();
+    }
+    final normalizedComment = comment?.trim();
+    final recurring = RecurringOrder(
+      id: 'rec-test-${serverRecurringOrders.length + 1}',
+      productIds: List.unmodifiable(productIds),
+      time: time,
+      branchId: branchId,
+      plan: plan,
+      customUntil: customUntil,
+      paidUntil: DateTime.utc(2026, 7, 22),
+      dailyTotal: _demoDailyTotal(productIds),
+      prepaidTotal: _demoDailyTotal(productIds) * plan.days,
+      version: 1,
+      billingMode: 'prepaid',
+      settlementMode: 'mock',
+      comment: normalizedComment == null || normalizedComment.isEmpty
+          ? null
+          : normalizedComment,
+    );
+    serverRecurringOrders.add(recurring);
+    return ApiResult<RecurringOrder?>.ok(recurring);
+  }
+
+  @override
   Future<ApiResult<RecurringOrder?>> replaceCustomerRecurring(
     String accessToken, {
     required List<String> productIds,
     required String time,
     required String branchId,
     required RecurringPlan plan,
+    DateTime? customUntil,
     String? comment,
   }) async {
     recurringPutCalls.add(List.unmodifiable(productIds));
@@ -2445,13 +2826,77 @@ class _FakeAuthApiClient extends ApiClient {
       time: time,
       branchId: branchId,
       plan: plan,
+      customUntil: customUntil,
       paidUntil: DateTime.utc(2026, 7, 22),
       dailyTotal: _demoDailyTotal(productIds),
+      prepaidTotal: _demoDailyTotal(productIds) * plan.days,
+      billingMode: 'prepaid',
       comment: normalizedComment == null || normalizedComment.isEmpty
           ? null
           : normalizedComment,
     );
     return ApiResult<RecurringOrder?>.ok(serverRecurring);
+  }
+
+  @override
+  Future<ApiResult<RecurringOrder?>> patchCustomerRecurringOrder(
+    String accessToken,
+    String recurringId, {
+    List<String>? productIds,
+    String? time,
+    String? branchId,
+    RecurringPlan? plan,
+    DateTime? customUntil,
+    String? comment,
+    bool commentProvided = false,
+    int? baseVersion,
+    String? idempotencyKey,
+  }) async {
+    recurringPatchCalls.add({
+      'recurringId': recurringId,
+      'productIds': productIds,
+      'time': time,
+      'branchId': branchId,
+      'plan': plan,
+      'customUntil': customUntil,
+      if (commentProvided) 'comment': comment,
+      'baseVersion': baseVersion,
+    });
+    if (accessToken != 'good') {
+      return const ApiResult<RecurringOrder?>.rejected();
+    }
+    final index = serverRecurringOrders.indexWhere(
+      (item) => item.id == recurringId,
+    );
+    if (index < 0) return const ApiResult<RecurringOrder?>.unavailable();
+    final current = serverRecurringOrders[index];
+    final ids = productIds ?? current.productIds;
+    final nextPlan = plan ?? current.plan;
+    final normalizedComment = comment?.trim();
+    final updated = RecurringOrder(
+      id: current.id,
+      productIds: List.unmodifiable(ids),
+      items: current.items,
+      time: time ?? current.time,
+      branchId: branchId ?? current.branchId,
+      plan: nextPlan,
+      customUntil: nextPlan == RecurringPlan.custom
+          ? customUntil ?? current.customUntil
+          : null,
+      paidUntil: current.paidUntil,
+      dailyTotal: _demoDailyTotal(ids),
+      prepaidTotal: _demoDailyTotal(ids) * nextPlan.days,
+      version: current.version + 1,
+      billingMode: 'prepaid',
+      settlementMode: 'mock',
+      comment: commentProvided
+          ? (normalizedComment == null || normalizedComment.isEmpty
+                ? null
+                : normalizedComment)
+          : current.comment,
+    );
+    serverRecurringOrders[index] = updated;
+    return ApiResult<RecurringOrder?>.ok(updated);
   }
 
   @override
@@ -2492,6 +2937,17 @@ class _FakeAuthApiClient extends ApiClient {
           : current.comment,
     );
     return ApiResult<RecurringOrder?>.ok(serverRecurring);
+  }
+
+  @override
+  Future<ApiResult<bool>> deleteCustomerRecurringOrder(
+    String accessToken,
+    String recurringId,
+  ) async {
+    recurringDeleteCalls++;
+    if (accessToken != 'good') return const ApiResult<bool>.rejected();
+    serverRecurringOrders.removeWhere((item) => item.id == recurringId);
+    return const ApiResult<bool>.ok(true);
   }
 
   @override
@@ -2541,6 +2997,7 @@ class _CatalogAuthApiClient extends _FakeAuthApiClient {
     required super.profile,
     super.orders,
     super.recurring,
+    super.recurringOrders,
   });
 
   @override
@@ -2644,12 +3101,28 @@ class _ControlledRecurringApiClient extends _CatalogAuthApiClient {
       Completer<ApiResult<RecurringOrder?>>();
 
   @override
+  Future<ApiResult<RecurringOrder?>> createCustomerRecurringOrder(
+    String accessToken, {
+    required List<String> productIds,
+    required String time,
+    required String branchId,
+    required RecurringPlan plan,
+    DateTime? customUntil,
+    String? comment,
+    String? idempotencyKey,
+  }) {
+    recurringPutCalls.add(List.unmodifiable(productIds));
+    return _putCompleter.future;
+  }
+
+  @override
   Future<ApiResult<RecurringOrder?>> replaceCustomerRecurring(
     String accessToken, {
     required List<String> productIds,
     required String time,
     required String branchId,
     required RecurringPlan plan,
+    DateTime? customUntil,
     String? comment,
   }) {
     recurringPutCalls.add(List.unmodifiable(productIds));

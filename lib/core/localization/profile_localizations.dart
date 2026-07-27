@@ -477,6 +477,20 @@ extension ProfileLocalizations on AppLocalizations {
     'Set up a recurring order',
   );
 
+  String get recurringAddAnother => _pick(
+    'Добавить ещё постоянный заказ',
+    'Дагы туруктуу заказ кошуу',
+    'Add another recurring order',
+  );
+
+  String get recurringMultipleIntro => _pick(
+    'Каждый заказ работает отдельно: можно выбрать другой состав, филиал, время и срок оплаты.',
+    'Ар бир заказ өзүнчө иштейт: башка курамды, филиалды, убакытты жана төлөм мөөнөтүн тандай аласыз.',
+    'Each order is independent, with its own items, branch, time, and prepaid period.',
+  );
+
+  String get recurringEdit => _pick('Редактировать', 'Өзгөртүү', 'Edit');
+
   String recurringActiveLabel(RecurringPlan plan) => _pick(
     'Активен · ${recurringPlanLabel(plan)}',
     'Активдүү · ${recurringPlanLabel(plan)}',
@@ -490,7 +504,7 @@ extension ProfileLocalizations on AppLocalizations {
   );
 
   String recurringPaidUntil(DateTime value) {
-    final date = _profileLocalizedDate(value);
+    final date = _profileLocalizedDate(value.toLocal());
     return _pick(
       'Оплачено до $date',
       '$date чейин төлөндү',
@@ -506,6 +520,24 @@ extension ProfileLocalizations on AppLocalizations {
 
   String get recurringCancel => _pick('Отменить', 'Токтотуу', 'Cancel');
 
+  String recurringPrepaidTotal(String amount) => _pick(
+    'Предоплачено за период: $amount',
+    'Мөөнөт үчүн алдын ала төлөндү: $amount',
+    'Prepaid for the period: $amount',
+  );
+
+  String recurringDemoTopUp(String amount) => _pick(
+    'Последняя доплата: $amount (демо)',
+    'Акыркы кошумча төлөм: $amount (демо)',
+    'Latest top-up: $amount (demo)',
+  );
+
+  String recurringMoneyCredit(String amount) => _pick(
+    'Расчётный кредит после уменьшения: $amount (демо)',
+    'Азайткандан кийинки эсептик кредит: $amount (демо)',
+    'Calculated credit after reduction: $amount (demo)',
+  );
+
   String recurringProductUnavailable(String productId) => _pick(
     'Товар недоступен ($productId)',
     'Товар жеткиликсиз ($productId)',
@@ -518,11 +550,148 @@ extension ProfileLocalizations on AppLocalizations {
     'Could not cancel the recurring order. Check your connection and try again.',
   );
 
+  String get recurringCancellationQuoteFailed => _pick(
+    'Не удалось рассчитать возврат. Заказ не отменён — попробуйте ещё раз.',
+    'Кайтарууну эсептөө мүмкүн болгон жок. Заказ токтотулган жок — кайра аракет кылыңыз.',
+    'Could not calculate the refund. The order was not cancelled; try again.',
+  );
+
+  String recurringCancellationQuoteBody(
+    String amount,
+    int refundableOccurrences,
+    int nonRefundableOrders,
+    int cutoffMinutes,
+  ) => _pick(
+    'К возврату: $amount за $refundableOccurrences будущих выдач. '
+        'Заказов, которые уже готовятся или попали в окно менее $cutoffMinutes минут: '
+        '$nonRefundableOrders — они не войдут в возврат. После подтверждения отмену нельзя откатить.',
+    'Кайтарылуучу сумма: $amount, $refundableOccurrences келечектеги берүү үчүн. '
+        '$cutoffMinutes мүнөттөн аз калган же даярдалып жаткан заказдар: '
+        '$nonRefundableOrders — алар кайтарууга кирбейт. Ырастагандан кийин токтотууну артка кайтарууга болбойт.',
+    'Refund: $amount for $refundableOccurrences future occurrences. '
+        '$nonRefundableOrders order(s) are already being prepared or fall inside the '
+        '$cutoffMinutes-minute cutoff and are not refundable. Cancellation cannot be undone.',
+  );
+
+  String get recurringRefundHistory =>
+      _pick('Возвраты', 'Кайтаруулар', 'Refunds');
+
+  String recurringRefundAmount(String amount) =>
+      _pick('Возврат $amount', '$amount кайтаруу', 'Refund $amount');
+
+  String get recurringRefundReceiptTitle =>
+      _pick('Чек возврата', 'Кайтаруу чеги', 'Refund receipt');
+
+  String get recurringRefundStatusLabel => _pick('Статус', 'Абалы', 'Status');
+
+  String get recurringRefundAmountLabel => _pick('Сумма', 'Сумма', 'Amount');
+
+  String get recurringRefundMethodLabel =>
+      _pick('Способ оплаты', 'Төлөм ыкмасы', 'Payment method');
+
+  String get recurringRefundReferenceLabel =>
+      _pick('Номер операции', 'Операция номери', 'Reference');
+
+  String recurringRefundStatus(RecurringRefundStatus status) =>
+      switch (status) {
+        RecurringRefundStatus.pending => _pick(
+          'Ожидает отправки',
+          'Жөнөтүүнү күтүп жатат',
+          'Pending',
+        ),
+        RecurringRefundStatus.processing => _pick(
+          'Обрабатывается',
+          'Иштетилип жатат',
+          'Processing',
+        ),
+        RecurringRefundStatus.refunded => _pick(
+          'Возвращено',
+          'Кайтарылды',
+          'Refunded',
+        ),
+        RecurringRefundStatus.manualRequired => _pick(
+          'Нужна выдача менеджером',
+          'Менеджер бериши керек',
+          'Manual payout required',
+        ),
+        RecurringRefundStatus.manualPaid => _pick(
+          'Выдано менеджером',
+          'Менеджер берди',
+          'Paid manually',
+        ),
+        RecurringRefundStatus.failed => _pick(
+          'Нужна проверка поддержки',
+          'Колдоо кызматы текшериши керек',
+          'Support review required',
+        ),
+      };
+
+  String get recurringManualRefundInstruction => _pick(
+    'Покажите этот QR-код или код менеджеру. Он проверит сумму в админке, выдаст возврат и отметит операцию выполненной. Повторно погасить код нельзя.',
+    'Бул QR-кодду же кодду менеджерге көрсөтүңүз. Ал админкадан сумманы текшерип, кайтарууну берип, операцияны аткарылды деп белгилейт. Кодду кайра колдонууга болбойт.',
+    'Show this QR or code to a manager. They will verify the amount in the admin panel, pay it out, and mark the operation complete. The code cannot be redeemed twice.',
+  );
+
+  String recurringAutomaticRefundInstruction(RecurringRefundStatus status) =>
+      status == RecurringRefundStatus.refunded
+      ? _pick(
+          'Возврат отправлен на исходный способ оплаты. Срок зачисления зависит от банка.',
+          'Кайтаруу баштапкы төлөм ыкмасына жөнөтүлдү. Акчанын түшүү мөөнөтү банкка жараша.',
+          'The refund was sent to the original payment method. Bank posting time may vary.',
+        )
+      : _pick(
+          'Заявка сохранена на сервере и будет повторена автоматически, даже если провайдер временно недоступен.',
+          'Өтүнмө серверде сакталды жана провайдер убактылуу жеткиликсиз болсо да автоматтык түрдө кайталанат.',
+          'The request is stored on the server and will be retried automatically if the provider is temporarily unavailable.',
+        );
+
+  String recurringRefundProviderNote(String note) => _pick(
+    'Техническая пометка: $note',
+    'Техникалык белги: $note',
+    'Technical note: $note',
+  );
+
   String get recurringSheetIntro => _pick(
     'Оплатите любимые напитки вперёд — готовим каждый день к нужному часу.',
     'Сүйүктүү суусундуктарды алдын ала төлөңүз — күн сайын керектүү убакта даярдайбыз.',
     'Pay for your favorite drinks in advance, and we will prepare them at the right time every day.',
   );
+
+  String get recurringUnavailableForBranch => _pick(
+    'Один или несколько выбранных товаров недоступны в этом филиале.',
+    'Тандалган товарлардын бири же бир нечеси бул филиалда жеткиликсиз.',
+    'One or more selected items are unavailable at this branch.',
+  );
+
+  String recurringProductLimit(int limit) => _pick(
+    'В одном постоянном заказе можно выбрать не больше $limit товаров.',
+    'Бир туруктуу заказга $limit товардан ашык тандоого болбойт.',
+    'A recurring order can contain no more than $limit items.',
+  );
+
+  String get recurringClosedBranch => _pick(
+    'Выбранный филиал сейчас закрыт для заказов. Выберите другой филиал.',
+    'Тандалган филиал азыр заказ кабыл албайт. Башка филиалды тандаңыз.',
+    'The selected branch is closed for orders. Choose another branch.',
+  );
+
+  String get recurringCancelTitle => _pick(
+    'Отменить постоянный заказ?',
+    'Туруктуу заказды токтотосузбу?',
+    'Cancel this recurring order?',
+  );
+
+  String get recurringCancelBody => _pick(
+    'Уже сформированный заказ на сегодня останется. За оставшиеся ещё не созданные выдачи система запишет расчётный кредит (демо). Реальный возврат появится после подключения оплаты.',
+    'Бүгүн түзүлгөн заказ калат. Калган, али түзүлө элек заказдар үчүн система эсептик кредитти жазат (демо). Чыныгы кайтаруу төлөм системасы кошулгандан кийин иштейт.',
+    'Any order already generated for today will remain. The system records a calculated credit for future ungenerated orders (demo). Real refunds require a payment provider.',
+  );
+
+  String get recurringKeep =>
+      _pick('Оставить заказ', 'Заказды калтыруу', 'Keep order');
+
+  String get recurringConfirmCancel =>
+      _pick('Да, отменить', 'Ооба, токтотуу', 'Yes, cancel');
 
   String get recurringDrinksStep => _pick(
     '1. Напитки или комбо',
@@ -546,6 +715,11 @@ extension ProfileLocalizations on AppLocalizations {
     RecurringPlan.single => _pick('Один день', 'Бир күн', 'One day'),
     RecurringPlan.week => _pick('Неделя', 'Бир жума', 'One week'),
     RecurringPlan.month => _pick('Месяц', 'Бир ай', 'One month'),
+    RecurringPlan.custom => _pick(
+      'Своя дата',
+      'Өз күнүңүз',
+      'Custom date',
+    ),
   };
 
   String recurringPlanHint(RecurringPlan plan) => switch (plan) {
@@ -556,7 +730,24 @@ extension ProfileLocalizations on AppLocalizations {
     ),
     RecurringPlan.week => _pick('7 дней', '7 күн', '7 days'),
     RecurringPlan.month => _pick('30 дней', '30 күн', '30 days'),
+    RecurringPlan.custom => _pick(
+      'До выбранной даты',
+      'Тандалган күнгө чейин',
+      'Until a selected date',
+    ),
   };
+
+  String get recurringChooseEndDate => _pick(
+    'Выбрать дату окончания',
+    'Аяктоо күнүн тандоо',
+    'Choose end date',
+  );
+
+  String recurringCustomUntil(DateTime value) => _pick(
+    'Оплачено до ${_profileLocalizedDate(value)} включительно',
+    '${_profileLocalizedDate(value)} күнүнө чейин төлөндү',
+    'Paid through ${_profileLocalizedDate(value)}',
+  );
 
   String get recurringEnabledDemo => _pick(
     'Постоянный заказ включён (демо)',
@@ -565,9 +756,9 @@ extension ProfileLocalizations on AppLocalizations {
   );
 
   String get recurringSaveFailed => _pick(
-    'Не удалось сохранить постоянный заказ. Корзина и оплата не изменены.',
-    'Туруктуу заказды сактоо мүмкүн болгон жок. Себет жана төлөм өзгөргөн жок.',
-    'Could not save the recurring order. Your cart and payment were not changed.',
+    'Не удалось подтвердить сохранение. Обновите список постоянных заказов перед повторной попыткой.',
+    'Сакталганын ырастоо мүмкүн болгон жок. Кайра аракет кылардын алдында туруктуу заказдардын тизмесин жаңыртыңыз.',
+    'The save could not be confirmed. Refresh recurring orders before trying again.',
   );
 
   String recurringPayAndEnable(String total) => _pick(
@@ -576,22 +767,16 @@ extension ProfileLocalizations on AppLocalizations {
     'Pay $total and enable (demo)',
   );
 
-  String get recurringCommentLabel => _pick(
-    'Пожелания к заказу',
-    'Заказга каалоолор',
-    'Order preferences',
-  );
+  String get recurringCommentLabel =>
+      _pick('Пожелания к заказу', 'Заказга каалоолор', 'Order preferences');
 
-  String get recurringSaveChanges => _pick(
-    'Сохранить изменения',
-    'Өзгөртүүлөрдү сактоо',
-    'Save changes',
-  );
+  String get recurringSaveChanges =>
+      _pick('Сохранить изменения', 'Өзгөртүүлөрдү сактоо', 'Save changes');
 
   String get recurringChangesSaved => _pick(
-    'Изменения сохранены. Срок оплаты не изменился.',
-    'Өзгөртүүлөр сакталды. Төлөм мөөнөтү өзгөргөн жок.',
-    'Changes saved. Your paid period is unchanged.',
+    'Изменения постоянного заказа сохранены.',
+    'Туруктуу заказдын өзгөртүүлөрү сакталды.',
+    'Recurring-order changes saved.',
   );
 
   String recurringDailyPrice(String amount) => _pick(

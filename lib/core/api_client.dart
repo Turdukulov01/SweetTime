@@ -576,9 +576,53 @@ IceLevel? _iceLevel(dynamic raw) => switch (raw) {
   _ => null,
 };
 
+RecurringOrderItem? _parseRecurringOrderItem(dynamic raw) {
+  if (raw is! Map<String, dynamic>) return null;
+  final productId = _requiredString(raw['productId']);
+  final name = _localizedSnapshot(raw['name']);
+  final imageUrl = _resolvePublicUrl(raw['imageUrl']);
+  final sizeRaw = raw['size'];
+  final size = sizeRaw == null ? null : _localizedSnapshot(sizeRaw);
+  final unitPrice = _nonNegativeInt(raw['unitPrice']);
+  final quantity = raw['quantity'] is int && (raw['quantity'] as int) > 0
+      ? raw['quantity'] as int
+      : null;
+  final total = _nonNegativeInt(raw['total']);
+  if (productId == null ||
+      name == null ||
+      (sizeRaw != null && size == null) ||
+      unitPrice == null ||
+      quantity == null ||
+      total == null ||
+      total != unitPrice * quantity) {
+    return null;
+  }
+  return RecurringOrderItem(
+    productId: productId,
+    name: name,
+    imageUrl: imageUrl,
+    sizeId: _optionalString(raw['sizeId']),
+    size: size,
+    unitPrice: unitPrice,
+    quantity: quantity,
+    total: total,
+  );
+}
+
 RecurringOrder? parseCustomerRecurringOrder(dynamic raw) {
   if (raw is! Map<String, dynamic>) return null;
+  final id = _optionalString(raw['id']) ?? 'legacy-primary';
   final productIds = _stringList(raw['productIds']);
+  final itemsRaw = raw['items'];
+  final items = <RecurringOrderItem>[];
+  if (itemsRaw != null) {
+    if (itemsRaw is! List<dynamic>) return null;
+    for (final itemRaw in itemsRaw) {
+      final item = _parseRecurringOrderItem(itemRaw);
+      if (item == null) return null;
+      items.add(item);
+    }
+  }
   final time = _requiredString(raw['time']);
   final branchId = _requiredString(raw['branchId']);
   final plan = _recurringPlan(raw['plan']);
@@ -586,9 +630,33 @@ RecurringOrder? parseCustomerRecurringOrder(dynamic raw) {
   final paidUntil = paidUntilRaw is String
       ? DateTime.tryParse(paidUntilRaw)
       : null;
+  final customUntilRaw = raw['customUntil'];
+  final customUntil = customUntilRaw is String
+      ? DateTime.tryParse(customUntilRaw)
+      : null;
   // Актуальная цена дня — обязательное поле нового контракта: без него UI
   // не может честно показать сумму после смены состава или цен каталога.
   final dailyTotal = _nonNegativeInt(raw['dailyTotal']);
+  final prepaidTotal = raw.containsKey('prepaidTotal')
+      ? _nonNegativeInt(raw['prepaidTotal'])
+      : dailyTotal == null || plan == RecurringPlan.custom
+      ? null
+      : dailyTotal * (plan?.days ?? 0);
+  final version = raw['version'] is int && (raw['version'] as int) > 0
+      ? raw['version'] as int
+      : 1;
+  final lastAdjustment = raw['lastAdjustment'] is int
+      ? raw['lastAdjustment'] as int
+      : 0;
+  final billingMode = _optionalString(raw['billingMode']) ?? 'legacy_mock';
+  final settlementMode = _optionalString(raw['settlementMode']) ?? 'mock';
+  final paymentMethod = _paymentMethod(raw['paymentMethod'] ?? 'mock');
+  final createdAt = raw['createdAt'] is String
+      ? DateTime.tryParse(raw['createdAt'] as String)
+      : null;
+  final updatedAt = raw['updatedAt'] is String
+      ? DateTime.tryParse(raw['updatedAt'] as String)
+      : null;
   final commentRaw = raw['comment'];
   if (commentRaw != null && commentRaw is! String) return null;
   final comment = _optionalString(commentRaw);
@@ -600,18 +668,157 @@ RecurringOrder? parseCustomerRecurringOrder(dynamic raw) {
       branchId == null ||
       plan == null ||
       dailyTotal == null ||
+      prepaidTotal == null ||
+      paymentMethod == null ||
+      (items.isNotEmpty &&
+          (items.map((item) => item.productId).toList().join('\u0000') !=
+                  productIds.join('\u0000') ||
+              items.fold<int>(0, (sum, item) => sum + item.total) !=
+                  dailyTotal)) ||
       (paidUntilRaw != null && paidUntil == null) ||
+      (customUntilRaw != null && customUntil == null) ||
+      (plan == RecurringPlan.custom) != (customUntil != null) ||
       raw['active'] != true) {
     return null;
   }
   return RecurringOrder(
+    id: id,
     productIds: List.unmodifiable(productIds),
+    items: List.unmodifiable(items),
     time: time,
     branchId: branchId,
     plan: plan,
     paidUntil: paidUntil,
     dailyTotal: dailyTotal,
+    prepaidTotal: prepaidTotal,
+    version: version,
+    billingMode: billingMode,
+    settlementMode: settlementMode,
+    paymentMethod: paymentMethod,
+    customUntil: customUntil,
+    lastAdjustment: lastAdjustment,
+    createdAt: createdAt,
+    updatedAt: updatedAt,
     comment: comment,
+  );
+}
+
+RecurringRefundStatus? _recurringRefundStatus(dynamic raw) => switch (raw) {
+  'pending' => RecurringRefundStatus.pending,
+  'processing' => RecurringRefundStatus.processing,
+  'refunded' => RecurringRefundStatus.refunded,
+  'manual_required' => RecurringRefundStatus.manualRequired,
+  'manual_paid' => RecurringRefundStatus.manualPaid,
+  'failed' => RecurringRefundStatus.failed,
+  _ => null,
+};
+
+RecurringRefund? parseRecurringRefund(dynamic raw) {
+  if (raw is! Map<String, dynamic>) return null;
+  final id = _requiredString(raw['id']);
+  final recurringOrderId = _requiredString(raw['recurringOrderId']);
+  final amount = _nonNegativeInt(raw['amount']);
+  final currency = _requiredString(raw['currency']);
+  final paymentMethod = _paymentMethod(raw['paymentMethod']);
+  final status = _recurringRefundStatus(raw['status']);
+  final provider = _requiredString(raw['provider']);
+  final refundableOccurrences = _nonNegativeInt(raw['refundableOccurrences']);
+  final cancelledOrderIds = _stringList(raw['cancelledOrderIds']);
+  final nonRefundableOrderIds = _stringList(raw['nonRefundableOrderIds']);
+  final attemptCount = _nonNegativeInt(raw['attemptCount']);
+  final createdAt = raw['createdAt'] is String
+      ? DateTime.tryParse(raw['createdAt'] as String)
+      : null;
+  final updatedAt = raw['updatedAt'] is String
+      ? DateTime.tryParse(raw['updatedAt'] as String)
+      : null;
+  final manualCompletedAt = raw['manualCompletedAt'] is String
+      ? DateTime.tryParse(raw['manualCompletedAt'] as String)
+      : null;
+  if (id == null ||
+      recurringOrderId == null ||
+      amount == null ||
+      currency == null ||
+      paymentMethod == null ||
+      status == null ||
+      provider == null ||
+      refundableOccurrences == null ||
+      cancelledOrderIds == null ||
+      nonRefundableOrderIds == null ||
+      attemptCount == null ||
+      createdAt == null ||
+      updatedAt == null) {
+    return null;
+  }
+  return RecurringRefund(
+    id: id,
+    recurringOrderId: recurringOrderId,
+    amount: amount,
+    currency: currency,
+    paymentMethod: paymentMethod,
+    status: status,
+    provider: provider,
+    providerRefundId: _optionalString(raw['providerRefundId']),
+    refundableOccurrences: refundableOccurrences,
+    cancelledOrderIds: List.unmodifiable(cancelledOrderIds),
+    nonRefundableOrderIds: List.unmodifiable(nonRefundableOrderIds),
+    attemptCount: attemptCount,
+    failureCode: _optionalString(raw['failureCode']),
+    failureMessage: _optionalString(raw['failureMessage']),
+    claimCode: _optionalString(raw['claimCode']),
+    claimQrPayload: _optionalString(raw['claimQrPayload']),
+    manualCompletedAt: manualCompletedAt,
+    createdAt: createdAt,
+    updatedAt: updatedAt,
+  );
+}
+
+RecurringCancellationQuote? parseRecurringCancellationQuote(dynamic raw) {
+  if (raw is! Map<String, dynamic>) return null;
+  final recurringOrderId = _requiredString(raw['recurringOrderId']);
+  final refundAmount = _nonNegativeInt(raw['refundAmount']);
+  final currency = _requiredString(raw['currency']);
+  final refundableOccurrences = _nonNegativeInt(raw['refundableOccurrences']);
+  final cancelledOrderIds = _stringList(raw['cancelledOrderIds']);
+  final nonRefundableOrderIds = _stringList(raw['nonRefundableOrderIds']);
+  final paymentMethod = _paymentMethod(raw['paymentMethod']);
+  final cutoffMinutes = _nonNegativeInt(raw['cutoffMinutes']);
+  if (recurringOrderId == null ||
+      refundAmount == null ||
+      currency == null ||
+      refundableOccurrences == null ||
+      cancelledOrderIds == null ||
+      nonRefundableOrderIds == null ||
+      paymentMethod == null ||
+      cutoffMinutes == null) {
+    return null;
+  }
+  return RecurringCancellationQuote(
+    recurringOrderId: recurringOrderId,
+    refundAmount: refundAmount,
+    currency: currency,
+    refundableOccurrences: refundableOccurrences,
+    cancelledOrderIds: List.unmodifiable(cancelledOrderIds),
+    nonRefundableOrderIds: List.unmodifiable(nonRefundableOrderIds),
+    paymentMethod: paymentMethod,
+    cutoffMinutes: cutoffMinutes,
+  );
+}
+
+RecurringCancellation? parseRecurringCancellation(dynamic raw) {
+  if (raw is! Map<String, dynamic>) return null;
+  final recurringOrderId = _requiredString(raw['recurringOrderId']);
+  final cancelledAt = raw['cancelledAt'] is String
+      ? DateTime.tryParse(raw['cancelledAt'] as String)
+      : null;
+  final refund = parseRecurringRefund(raw['refund']);
+  if (recurringOrderId == null || cancelledAt == null || refund == null) {
+    return null;
+  }
+  return RecurringCancellation(
+    recurringOrderId: recurringOrderId,
+    cancelledAt: cancelledAt,
+    refund: refund,
   );
 }
 
@@ -619,6 +826,7 @@ RecurringPlan? _recurringPlan(dynamic raw) => switch (raw) {
   'single' => RecurringPlan.single,
   'week' => RecurringPlan.week,
   'month' => RecurringPlan.month,
+  'custom' => RecurringPlan.custom,
   _ => null,
 };
 
@@ -1178,8 +1386,270 @@ class ApiClient {
     }
   }
 
-  /// `GET /auth/customer/me/recurring` — `null` is the authoritative
-  /// no-active-subscription state.
+  /// V2 collection endpoint. Every subscription has a stable ID and may use
+  /// its own products, branch, time and prepaid period.
+  Future<ApiResult<List<RecurringOrder>>> fetchCustomerRecurringOrders(
+    String accessToken,
+  ) async {
+    try {
+      final response = await http
+          .get(
+            _uri('/auth/customer/me/recurring-orders'),
+            headers: _bearer(accessToken),
+          )
+          .timeout(_timeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<List<RecurringOrder>>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<List<RecurringOrder>>.unavailable();
+      }
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! List<dynamic>) {
+        return const ApiResult<List<RecurringOrder>>.unavailable();
+      }
+      final orders = <RecurringOrder>[];
+      for (final raw in decoded) {
+        final recurring = parseCustomerRecurringOrder(raw);
+        if (recurring == null || recurring.id == 'legacy-primary') {
+          return const ApiResult<List<RecurringOrder>>.unavailable();
+        }
+        orders.add(recurring);
+      }
+      return ApiResult<List<RecurringOrder>>.ok(List.unmodifiable(orders));
+    } catch (_) {
+      return const ApiResult<List<RecurringOrder>>.unavailable();
+    }
+  }
+
+  Future<ApiResult<RecurringOrder?>> createCustomerRecurringOrder(
+    String accessToken, {
+    required List<String> productIds,
+    required String time,
+    required String branchId,
+    required RecurringPlan plan,
+    DateTime? customUntil,
+    String? comment,
+    String? idempotencyKey,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            _uri('/auth/customer/me/recurring-orders'),
+            headers: {
+              ..._bearer(accessToken),
+              ..._jsonHeader,
+              'Idempotency-Key': ?idempotencyKey,
+            },
+            body: jsonEncode({
+              'productIds': productIds,
+              'time': time,
+              'branchId': branchId,
+              'plan': plan.name,
+              'customUntil': ?_dateOnly(customUntil),
+              'comment': _normalizedComment(comment),
+            }),
+          )
+          .timeout(_orderTimeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<RecurringOrder?>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<RecurringOrder?>.unavailable();
+      }
+      final recurring = parseCustomerRecurringOrder(
+        jsonDecode(utf8.decode(response.bodyBytes)),
+      );
+      return recurring == null || recurring.id == 'legacy-primary'
+          ? const ApiResult<RecurringOrder?>.unavailable()
+          : ApiResult<RecurringOrder?>.ok(recurring);
+    } catch (_) {
+      return const ApiResult<RecurringOrder?>.unavailable();
+    }
+  }
+
+  Future<ApiResult<RecurringOrder?>> patchCustomerRecurringOrder(
+    String accessToken,
+    String recurringId, {
+    List<String>? productIds,
+    String? time,
+    String? branchId,
+    RecurringPlan? plan,
+    DateTime? customUntil,
+    String? comment,
+    bool commentProvided = false,
+    int? baseVersion,
+    String? idempotencyKey,
+  }) async {
+    try {
+      final body = <String, Object?>{
+        'productIds': ?productIds,
+        'time': ?time,
+        'branchId': ?branchId,
+        'plan': ?plan?.name,
+        'customUntil': ?_dateOnly(customUntil),
+        'baseVersion': ?baseVersion,
+      };
+      if (commentProvided) body['comment'] = _normalizedComment(comment);
+      final response = await http
+          .patch(
+            _uri(
+              '/auth/customer/me/recurring-orders/'
+              '${Uri.encodeComponent(recurringId)}',
+            ),
+            headers: {
+              ..._bearer(accessToken),
+              ..._jsonHeader,
+              'Idempotency-Key': ?idempotencyKey,
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(_orderTimeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<RecurringOrder?>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<RecurringOrder?>.unavailable();
+      }
+      final recurring = parseCustomerRecurringOrder(
+        jsonDecode(utf8.decode(response.bodyBytes)),
+      );
+      return recurring == null || recurring.id == 'legacy-primary'
+          ? const ApiResult<RecurringOrder?>.unavailable()
+          : ApiResult<RecurringOrder?>.ok(recurring);
+    } catch (_) {
+      return const ApiResult<RecurringOrder?>.unavailable();
+    }
+  }
+
+  Future<ApiResult<bool>> deleteCustomerRecurringOrder(
+    String accessToken,
+    String recurringId,
+  ) async {
+    try {
+      final response = await http
+          .delete(
+            _uri(
+              '/auth/customer/me/recurring-orders/'
+              '${Uri.encodeComponent(recurringId)}',
+            ),
+            headers: _bearer(accessToken),
+          )
+          .timeout(_timeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<bool>.rejected();
+      }
+      if (response.statusCode != 204) {
+        return const ApiResult<bool>.unavailable();
+      }
+      return const ApiResult<bool>.ok(true);
+    } catch (_) {
+      return const ApiResult<bool>.unavailable();
+    }
+  }
+
+  Future<ApiResult<RecurringCancellationQuote>> fetchRecurringCancellationQuote(
+    String accessToken,
+    String recurringId,
+  ) async {
+    try {
+      final response = await http
+          .get(
+            _uri(
+              '/auth/customer/me/recurring-orders/'
+              '${Uri.encodeComponent(recurringId)}/cancellation-quote',
+            ),
+            headers: _bearer(accessToken),
+          )
+          .timeout(_timeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<RecurringCancellationQuote>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<RecurringCancellationQuote>.unavailable();
+      }
+      final quote = parseRecurringCancellationQuote(
+        jsonDecode(utf8.decode(response.bodyBytes)),
+      );
+      return quote == null
+          ? const ApiResult<RecurringCancellationQuote>.unavailable()
+          : ApiResult<RecurringCancellationQuote>.ok(quote);
+    } catch (_) {
+      return const ApiResult<RecurringCancellationQuote>.unavailable();
+    }
+  }
+
+  Future<ApiResult<RecurringCancellation>> cancelCustomerRecurringOrder(
+    String accessToken,
+    String recurringId, {
+    required String idempotencyKey,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            _uri(
+              '/auth/customer/me/recurring-orders/'
+              '${Uri.encodeComponent(recurringId)}/cancellations',
+            ),
+            headers: {
+              ..._bearer(accessToken),
+              ..._jsonHeader,
+              'Idempotency-Key': idempotencyKey,
+            },
+          )
+          .timeout(_orderTimeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<RecurringCancellation>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<RecurringCancellation>.unavailable();
+      }
+      final cancellation = parseRecurringCancellation(
+        jsonDecode(utf8.decode(response.bodyBytes)),
+      );
+      return cancellation == null
+          ? const ApiResult<RecurringCancellation>.unavailable()
+          : ApiResult<RecurringCancellation>.ok(cancellation);
+    } catch (_) {
+      return const ApiResult<RecurringCancellation>.unavailable();
+    }
+  }
+
+  Future<ApiResult<List<RecurringRefund>>> fetchCustomerRecurringRefunds(
+    String accessToken,
+  ) async {
+    try {
+      final response = await http
+          .get(
+            _uri('/auth/customer/me/recurring-refunds'),
+            headers: _bearer(accessToken),
+          )
+          .timeout(_timeout);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return const ApiResult<List<RecurringRefund>>.rejected();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const ApiResult<List<RecurringRefund>>.unavailable();
+      }
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! List<dynamic>) {
+        return const ApiResult<List<RecurringRefund>>.unavailable();
+      }
+      final refunds = <RecurringRefund>[];
+      for (final raw in decoded) {
+        final refund = parseRecurringRefund(raw);
+        if (refund == null) {
+          return const ApiResult<List<RecurringRefund>>.unavailable();
+        }
+        refunds.add(refund);
+      }
+      return ApiResult<List<RecurringRefund>>.ok(List.unmodifiable(refunds));
+    } catch (_) {
+      return const ApiResult<List<RecurringRefund>>.unavailable();
+    }
+  }
+
+  /// `GET /auth/customer/me/recurring` — legacy singleton compatibility.
   Future<ApiResult<RecurringOrder?>> fetchCustomerRecurring(
     String accessToken,
   ) async {
@@ -1215,6 +1685,7 @@ class ApiClient {
     required String time,
     required String branchId,
     required RecurringPlan plan,
+    DateTime? customUntil,
     String? comment,
   }) async {
     try {
@@ -1227,6 +1698,7 @@ class ApiClient {
               'time': time,
               'branchId': branchId,
               'plan': plan.name,
+              'customUntil': ?_dateOnly(customUntil),
               // PUT заменяет объект целиком: пустое пожелание — это null.
               'comment': _normalizedComment(comment),
             }),
@@ -1295,6 +1767,14 @@ class ApiClient {
   static String? _normalizedComment(String? comment) {
     final value = comment?.trim();
     return value == null || value.isEmpty ? null : value;
+  }
+
+  static String? _dateOnly(DateTime? value) {
+    if (value == null) return null;
+    final local = value.toLocal();
+    final month = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+    return '${local.year}-$month-$day';
   }
 
   Future<ApiResult<bool>> deleteCustomerRecurring(String accessToken) async {

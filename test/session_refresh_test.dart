@@ -280,6 +280,16 @@ class _SessionApi extends ApiClient {
   ) async => const ApiResult<RecurringOrder?>.ok(null);
 
   @override
+  Future<ApiResult<List<RecurringOrder>>> fetchCustomerRecurringOrders(
+    String accessToken,
+  ) async => const ApiResult<List<RecurringOrder>>.ok([]);
+
+  @override
+  Future<ApiResult<List<RecurringRefund>>> fetchCustomerRecurringRefunds(
+    String accessToken,
+  ) async => const ApiResult<List<RecurringRefund>>.ok([]);
+
+  @override
   Future<ApiResult<TokenPair>> refreshTokens(String refreshToken) async {
     refreshCalls++;
     final gate = refreshGate;

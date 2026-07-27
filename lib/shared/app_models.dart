@@ -632,34 +632,178 @@ enum ReferralResult {
 enum RecurringPlan {
   single(1),
   week(7),
-  month(30);
+  month(30),
+  custom(0);
 
   const RecurringPlan(this.days);
 
   final int days;
 }
 
+class RecurringOrderItem {
+  const RecurringOrderItem({
+    required this.productId,
+    required this.name,
+    required this.unitPrice,
+    required this.quantity,
+    required this.total,
+    this.imageUrl,
+    this.sizeId,
+    this.size,
+  });
+
+  final String productId;
+  final LocalizedText name;
+  final String? imageUrl;
+  final String? sizeId;
+  final LocalizedText? size;
+  final int unitPrice;
+  final int quantity;
+  final int total;
+}
+
 class RecurringOrder {
   const RecurringOrder({
+    this.id = 'legacy-primary',
     required this.productIds,
+    this.items = const [],
     required this.time,
     required this.branchId,
     required this.plan,
     required this.paidUntil,
     required this.dailyTotal,
+    this.prepaidTotal = 0,
+    this.version = 1,
+    this.billingMode = 'legacy_mock',
+    this.settlementMode = 'mock',
+    this.paymentMethod = PaymentMethod.mock,
+    this.customUntil,
+    this.lastAdjustment = 0,
+    this.createdAt,
+    this.updatedAt,
     this.comment,
   });
 
+  /// Stable server ID. Legacy singleton responses use `legacy-primary`.
+  final String id;
   final List<String> productIds;
+  final List<RecurringOrderItem> items;
   final String time;
   final String branchId;
   final RecurringPlan plan;
   final DateTime? paidUntil;
+  final DateTime? customUntil;
 
   /// Актуальная серверная цена набора за один день по текущему каталогу.
   /// После редактирования состава или смены цен сервер пересчитывает сумму.
   final int dailyTotal;
 
+  /// Amount fixed for the current prepaid period by the server.
+  final int prepaidTotal;
+
+  /// Optimistic-concurrency version used for targeted edits.
+  final int version;
+
+  /// `legacy_mock` for migrated subscriptions, `mock` until a real PSP is connected.
+  final String billingMode;
+  final String settlementMode;
+  final PaymentMethod paymentMethod;
+
+  /// Signed latest recalculation: positive = demo top-up, negative = money credit.
+  final int lastAdjustment;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+
   /// Пожелания клиента к каждому заказу (до 500 символов).
   final String? comment;
+}
+
+enum RecurringRefundStatus {
+  pending,
+  processing,
+  refunded,
+  manualRequired,
+  manualPaid,
+  failed,
+}
+
+class RecurringRefund {
+  const RecurringRefund({
+    required this.id,
+    required this.recurringOrderId,
+    required this.amount,
+    required this.currency,
+    required this.paymentMethod,
+    required this.status,
+    required this.provider,
+    required this.refundableOccurrences,
+    required this.cancelledOrderIds,
+    required this.nonRefundableOrderIds,
+    required this.attemptCount,
+    required this.createdAt,
+    required this.updatedAt,
+    this.providerRefundId,
+    this.failureCode,
+    this.failureMessage,
+    this.claimCode,
+    this.claimQrPayload,
+    this.manualCompletedAt,
+  });
+
+  final String id;
+  final String recurringOrderId;
+  final int amount;
+  final String currency;
+  final PaymentMethod paymentMethod;
+  final RecurringRefundStatus status;
+  final String provider;
+  final String? providerRefundId;
+  final int refundableOccurrences;
+  final List<String> cancelledOrderIds;
+  final List<String> nonRefundableOrderIds;
+  final int attemptCount;
+  final String? failureCode;
+  final String? failureMessage;
+  final String? claimCode;
+  final String? claimQrPayload;
+  final DateTime? manualCompletedAt;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  bool get requiresManualPayment =>
+      status == RecurringRefundStatus.manualRequired;
+}
+
+class RecurringCancellationQuote {
+  const RecurringCancellationQuote({
+    required this.recurringOrderId,
+    required this.refundAmount,
+    required this.currency,
+    required this.refundableOccurrences,
+    required this.cancelledOrderIds,
+    required this.nonRefundableOrderIds,
+    required this.paymentMethod,
+    required this.cutoffMinutes,
+  });
+
+  final String recurringOrderId;
+  final int refundAmount;
+  final String currency;
+  final int refundableOccurrences;
+  final List<String> cancelledOrderIds;
+  final List<String> nonRefundableOrderIds;
+  final PaymentMethod paymentMethod;
+  final int cutoffMinutes;
+}
+
+class RecurringCancellation {
+  const RecurringCancellation({
+    required this.recurringOrderId,
+    required this.cancelledAt,
+    required this.refund,
+  });
+
+  final String recurringOrderId;
+  final DateTime cancelledAt;
+  final RecurringRefund refund;
 }

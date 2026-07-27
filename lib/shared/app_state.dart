@@ -119,6 +119,20 @@ class SharedPreferencesLanguagePreferenceStore
   }
 }
 
+bool _validRecurringTerm(RecurringPlan plan, DateTime? customUntil) {
+  if (plan != RecurringPlan.custom) return customUntil == null;
+  if (customUntil == null) return false;
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final until = DateTime(
+    customUntil.year,
+    customUntil.month,
+    customUntil.day,
+  );
+  final daysAhead = until.difference(today).inDays;
+  return daysAhead >= 1 && daysAhead <= 366;
+}
+
 @immutable
 class AppState {
   const AppState({
@@ -165,7 +179,8 @@ class AppState {
     required this.orders,
     required this.hiddenOrderIds,
     required this.pointEvents,
-    required this.recurring,
+    required this.recurringOrders,
+    required this.recurringRefunds,
   });
 
   /// true, если при старте удалось достучаться до demo-API;
@@ -242,7 +257,12 @@ class AppState {
       .where((order) => !hiddenOrderIds.contains(order.id))
       .toList(growable: false);
   final List<PointEvent> pointEvents;
-  final RecurringOrder? recurring;
+  final List<RecurringOrder> recurringOrders;
+  final List<RecurringRefund> recurringRefunds;
+
+  /// Compatibility accessor for older widgets/tests while the collection API
+  /// is rolled out. New UI must render [recurringOrders], not only this item.
+  RecurringOrder? get recurring => recurringOrders.firstOrNull;
 
   int get cartCount => cart.fold(0, (sum, item) => sum + item.quantity);
 
@@ -318,6 +338,8 @@ class AppState {
     List<OrderHistoryEntry>? orders,
     Set<String>? hiddenOrderIds,
     List<PointEvent>? pointEvents,
+    List<RecurringOrder>? recurringOrders,
+    List<RecurringRefund>? recurringRefunds,
     RecurringOrder? recurring,
     bool clearBirthDate = false,
     bool clearAvatarUrl = false,
@@ -380,7 +402,15 @@ class AppState {
       orders: orders ?? this.orders,
       hiddenOrderIds: hiddenOrderIds ?? this.hiddenOrderIds,
       pointEvents: pointEvents ?? this.pointEvents,
-      recurring: clearRecurring ? null : (recurring ?? this.recurring),
+      recurringOrders: clearRecurring
+          ? const []
+          : (recurringOrders ??
+                (recurring == null
+                    ? this.recurringOrders
+                    : List.unmodifiable([recurring]))),
+      recurringRefunds: clearRecurring
+          ? const []
+          : (recurringRefunds ?? this.recurringRefunds),
     );
   }
 }
@@ -471,7 +501,8 @@ class AppStateController extends StateNotifier<AppState> {
            orders: const [],
            hiddenOrderIds: const {},
            pointEvents: DemoData.pointEvents,
-           recurring: null,
+           recurringOrders: const [],
+           recurringRefunds: const [],
          ),
        ) {
     // FCM ротирует device-токен: слушаем обновления и перерегистрируем токен,
@@ -519,6 +550,15 @@ class AppStateController extends StateNotifier<AppState> {
   bool _cartPersistDirty = false;
   Completer<void>? _cartPersistCompleter;
   int _recurringMutationRevision = 0;
+
+  String _recurringIdempotencyKey(
+    String customerId,
+    String operation,
+    int revision,
+  ) {
+    final instant = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
+    return 'mobile-$customerId-$operation-$instant-$revision';
+  }
 
   /// Подписка на onTokenRefresh FCM; отменяется в [dispose].
   StreamSubscription<String>? _pushTokenRefreshSubscription;
@@ -863,6 +903,7 @@ class AppStateController extends StateNotifier<AppState> {
           await _loadCustomerFavorites();
           await _loadCustomerOrders();
           await _loadCustomerRecurring();
+          await _loadCustomerRecurringRefunds();
           _syncPushTokenForCurrentCustomer();
         case ApiAuthStatus.rejected:
           _expireCustomerSession();
@@ -912,6 +953,8 @@ class AppStateController extends StateNotifier<AppState> {
         _applyCustomerProfile(result.value!);
         await _loadHiddenOrderIdsForCurrentCustomer();
         await _loadCustomerOrders();
+        await _loadCustomerRecurring();
+        await _loadCustomerRecurringRefunds();
         _syncPushTokenForCurrentCustomer();
         return CustomerSessionResumeResult.active;
       case ApiAuthStatus.rejected:
@@ -1063,17 +1106,40 @@ class AppStateController extends StateNotifier<AppState> {
     final epoch = _accountEpoch;
     final customerId = state.customerId;
     if (state.isGuest || customerId == null) return;
-    final result = await _withCustomerToken(_api.fetchCustomerRecurring);
+    final result = await _withCustomerToken(_api.fetchCustomerRecurringOrders);
     if (!result.isOk) return;
     if (epoch != _accountEpoch ||
         state.isGuest ||
         state.customerId != customerId) {
       return;
     }
-    final recurring = result.value;
-    state = recurring == null
-        ? state.copyWith(clearRecurring: true)
-        : state.copyWith(recurring: recurring);
+    state = state.copyWith(recurringOrders: List.unmodifiable(result.value!));
+  }
+
+  Future<void> _loadCustomerRecurringRefunds() async {
+    final epoch = _accountEpoch;
+    final customerId = state.customerId;
+    if (state.isGuest || customerId == null) return;
+    final result = await _withCustomerToken(_api.fetchCustomerRecurringRefunds);
+    if (!result.isOk) return;
+    if (epoch != _accountEpoch ||
+        state.isGuest ||
+        state.customerId != customerId) {
+      return;
+    }
+    state = state.copyWith(recurringRefunds: List.unmodifiable(result.value!));
+  }
+
+  /// Refreshes both subscriptions and their durable cancellation receipts.
+  /// The last successful state remains visible when the network is unavailable.
+  Future<bool> refreshCustomerRecurring() async {
+    if (state.isGuest || state.customerId == null) return false;
+    final beforeOrders = state.recurringOrders;
+    final beforeRefunds = state.recurringRefunds;
+    await _loadCustomerRecurring();
+    await _loadCustomerRecurringRefunds();
+    return !identical(beforeOrders, state.recurringOrders) ||
+        !identical(beforeRefunds, state.recurringRefunds);
   }
 
   /// Регистрирует device-токен FCM для авторизованного клиента (fire-and-forget).
@@ -1180,6 +1246,7 @@ class AppStateController extends StateNotifier<AppState> {
     await _loadCustomerFavorites();
     await _loadCustomerOrders();
     await _loadCustomerRecurring();
+    await _loadCustomerRecurringRefunds();
     _syncPushTokenForCurrentCustomer();
     return true;
   }
@@ -2055,18 +2122,22 @@ class AppStateController extends StateNotifier<AppState> {
     required String time,
     required Branch branch,
     required RecurringPlan plan,
+    DateTime? customUntil,
     String? comment,
+    String? idempotencyKey,
   }) async {
     if (state.isGuest ||
         !state.catalogAuthoritative ||
         products.isEmpty ||
+        products.length > 20 ||
+        !_validRecurringTerm(plan, customUntil) ||
         !RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(time)) {
       return false;
     }
     final currentBranch = state.branches
         .where((candidate) => candidate.id == branch.id)
         .firstOrNull;
-    if (currentBranch == null) return false;
+    if (currentBranch == null || !currentBranch.isOpen) return false;
     final productIds = <String>[];
     for (final requested in products) {
       final currentProduct = state.products
@@ -2085,45 +2156,74 @@ class AppStateController extends StateNotifier<AppState> {
     final customerId = state.customerId;
     if (customerId == null) return false;
     final result = await _withCustomerToken(
-      (token) => _api.replaceCustomerRecurring(
+      (token) => _api.createCustomerRecurringOrder(
         token,
         productIds: productIds,
         time: time,
         branchId: currentBranch.id,
         plan: plan,
+        customUntil: customUntil,
         comment: comment,
+        idempotencyKey:
+            idempotencyKey ??
+            _recurringIdempotencyKey(customerId, 'create', mutationRevision),
       ),
     );
     final recurring = result.value;
     if (!result.isOk ||
         recurring == null ||
-        mutationRevision != _recurringMutationRevision ||
         epoch != _accountEpoch ||
         state.isGuest ||
         state.customerId != customerId) {
       return false;
     }
-    state = state.copyWith(recurring: recurring);
+    state = state.copyWith(
+      recurringOrders: List.unmodifiable([
+        ...state.recurringOrders.where((item) => item.id != recurring.id),
+        recurring,
+      ]),
+    );
     return true;
   }
 
-  /// Редактирование активной подписки БЕЗ повторной оплаты (PATCH): состав,
-  /// время, филиал и пожелания меняются, тариф и `paidUntil` — нет.
+  /// Редактирование одной подписки по стабильному ID. Сервер пересчитывает
+  /// оставшиеся выдачи и возвращает signed demo-доплату/кредит.
   /// Отправляются только изменённые поля; null = «не менять».
   /// [commentProvided] = true передаёт `comment` явно (пустая строка очищает).
   Future<bool> editRecurring({
+    String? recurringId,
     List<Product>? products,
     String? time,
     Branch? branch,
+    RecurringPlan? plan,
+    DateTime? customUntil,
     String? comment,
     bool commentProvided = false,
+    String? idempotencyKey,
   }) async {
-    final current = state.recurring;
+    final current = recurringId == null
+        ? state.recurring
+        : state.recurringOrders
+              .where((candidate) => candidate.id == recurringId)
+              .firstOrNull;
     if (state.isGuest || current == null) return false;
     final hasChanges =
-        products != null || time != null || branch != null || commentProvided;
+        products != null ||
+        time != null ||
+        branch != null ||
+        plan != null ||
+        customUntil != null ||
+        commentProvided;
     if (!hasChanges) return false;
     if (time != null && !RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(time)) {
+      return false;
+    }
+    final targetPlan = plan ?? current.plan;
+    final targetCustomUntil = targetPlan == RecurringPlan.custom
+        ? customUntil ?? current.customUntil
+        : null;
+    if ((plan != null || customUntil != null) &&
+        !_validRecurringTerm(targetPlan, targetCustomUntil)) {
       return false;
     }
     Branch? currentBranch;
@@ -2131,12 +2231,20 @@ class AppStateController extends StateNotifier<AppState> {
       currentBranch = state.branches
           .where((candidate) => candidate.id == branch.id)
           .firstOrNull;
-      if (currentBranch == null) return false;
+      if (currentBranch == null || !currentBranch.isOpen) return false;
     }
     List<String>? productIds;
     if (products != null) {
-      if (!state.catalogAuthoritative || products.isEmpty) return false;
+      if (!state.catalogAuthoritative ||
+          products.isEmpty ||
+          products.length > 20) {
+        return false;
+      }
       final targetBranchId = currentBranch?.id ?? current.branchId;
+      final targetBranch = state.branches
+          .where((candidate) => candidate.id == targetBranchId)
+          .firstOrNull;
+      if (targetBranch == null || !targetBranch.isOpen) return false;
       productIds = <String>[];
       for (final requested in products) {
         final currentProduct = state.products
@@ -2156,44 +2264,115 @@ class AppStateController extends StateNotifier<AppState> {
     final customerId = state.customerId;
     if (customerId == null) return false;
     final result = await _withCustomerToken(
-      (token) => _api.patchCustomerRecurring(
+      (token) => _api.patchCustomerRecurringOrder(
         token,
+        current.id,
         productIds: productIds,
         time: time,
         branchId: currentBranch?.id,
+        plan: plan,
+        customUntil: customUntil,
         comment: comment,
         commentProvided: commentProvided,
+        baseVersion: current.version,
+        idempotencyKey:
+            idempotencyKey ??
+            _recurringIdempotencyKey(
+              customerId,
+              'edit-${current.id}',
+              mutationRevision,
+            ),
       ),
     );
     final recurring = result.value;
     if (!result.isOk ||
         recurring == null ||
-        mutationRevision != _recurringMutationRevision ||
         epoch != _accountEpoch ||
         state.isGuest ||
         state.customerId != customerId) {
       return false;
     }
-    state = state.copyWith(recurring: recurring);
+    state = state.copyWith(
+      recurringOrders: List.unmodifiable([
+        for (final item in state.recurringOrders)
+          if (item.id == current.id) recurring else item,
+      ]),
+    );
     return true;
   }
 
-  Future<bool> cancelRecurring() async {
-    if (state.isGuest || state.recurring == null) return false;
+  Future<RecurringCancellationQuote?> recurringCancellationQuote({
+    String? recurringId,
+  }) async {
+    final current = recurringId == null
+        ? state.recurring
+        : state.recurringOrders
+              .where((candidate) => candidate.id == recurringId)
+              .firstOrNull;
+    if (state.isGuest || current == null) return null;
     final epoch = _accountEpoch;
-    final mutationRevision = ++_recurringMutationRevision;
     final customerId = state.customerId;
-    if (customerId == null) return false;
-    final result = await _withCustomerToken(_api.deleteCustomerRecurring);
+    if (customerId == null) return null;
+    final result = await _withCustomerToken(
+      (token) => _api.fetchRecurringCancellationQuote(token, current.id),
+    );
     if (!result.isOk ||
-        mutationRevision != _recurringMutationRevision ||
+        result.value == null ||
         epoch != _accountEpoch ||
         state.isGuest ||
         state.customerId != customerId) {
-      return false;
+      return null;
     }
-    state = state.copyWith(clearRecurring: true);
-    return true;
+    return result.value;
+  }
+
+  Future<RecurringCancellation?> cancelRecurringWithResult({
+    String? recurringId,
+  }) async {
+    final current = recurringId == null
+        ? state.recurring
+        : state.recurringOrders
+              .where((candidate) => candidate.id == recurringId)
+              .firstOrNull;
+    if (state.isGuest || current == null) return null;
+    final epoch = _accountEpoch;
+    final customerId = state.customerId;
+    if (customerId == null) return null;
+    // Stable for the lifetime of this subscription. A timeout followed by a
+    // second tap therefore replays the original server result instead of
+    // creating a second refund.
+    final idempotencyKey = 'mobile:$customerId:cancel:${current.id}';
+    final result = await _withCustomerToken(
+      (token) => _api.cancelCustomerRecurringOrder(
+        token,
+        current.id,
+        idempotencyKey: idempotencyKey,
+      ),
+    );
+    final cancellation = result.value;
+    if (!result.isOk ||
+        cancellation == null ||
+        epoch != _accountEpoch ||
+        state.isGuest ||
+        state.customerId != customerId) {
+      return null;
+    }
+    state = state.copyWith(
+      recurringOrders: List.unmodifiable(
+        state.recurringOrders.where((item) => item.id != current.id),
+      ),
+      recurringRefunds: List.unmodifiable([
+        cancellation.refund,
+        ...state.recurringRefunds.where(
+          (item) => item.id != cancellation.refund.id,
+        ),
+      ]),
+    );
+    return cancellation;
+  }
+
+  Future<bool> cancelRecurring({String? recurringId}) async {
+    return await cancelRecurringWithResult(recurringId: recurringId) != null;
   }
 
   /// Keeps an invitation through Google sign-in, contact-phone completion and
