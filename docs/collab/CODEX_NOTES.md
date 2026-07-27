@@ -1699,3 +1699,61 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
   Код требует production rollout и физической приёмки; канонический статус обновлён в
   `docs/TASKS.md`. Не считать staff/schedule production-ready только по наличию UI.
 - Не добавлять в commit `.codex-phone-install.png`: это локальный артефакт инструмента/пользователя.
+
+## 2026-07-27 — постоянные заказы V2: несколько подписок, редактирование и аналитика
+
+- По прямому запросу владельца завершён локальный этап Recurring Orders V2. Клиент может иметь
+  до 20 независимых активных постоянных заказов; каждый имеет стабильный ID, отдельные товары,
+  филиал, время, комментарий и период 1/7/30 дней. Flutter показывает все подписки, добавляет
+  новую, редактирует только выбранную, подтверждает отмену и обновляет список после resume.
+- Backend добавляет plural CRUD, optimistic `baseVersion`, `Idempotency-Key`, locked snapshot
+  состава/названий/фото/размера/цены и журнал signed корректировок. Изменение состава или срока
+  пересчитывает только будущие ещё не сгенерированные выдачи. Уже созданный заказ на сегодня
+  сохраняется; отмена записывает отрицательную корректировку только за оставшийся период.
+- Планировщик теперь строит ежедневный заказ из locked snapshot и fail-closed проверяет сумму.
+  Текущий каталог используется только для legacy-строк без snapshot. Legacy PATCH делегирован
+  V2-расчёту, чтобы старый APK не мог бесплатно увеличить оплаченный состав.
+- В админ-дашборд владельца/менеджера добавлена карточка и подробная сводка: активные подписки,
+  сгенерированные/завершённые сегодня, сегодняшние положительные корректировки, обязательная
+  дневная сумма, клиент, товары и фото, филиал, время, период, paidUntil, daily/prepaid amount,
+  последняя корректировка и заказ на сегодня. Есть 30-секундное/focus/online обновление.
+- CoffeeGo bootstrap теперь создаёт и при повторном запуске ремонтирует locked snapshot demo-
+  подписки без дублей. Миграция: `9d3f1c7a2b60`; Alembic head одна.
+- Важное ограничение: `settlementMode=mock`. Доплата/кредит рассчитываются и журналируются, но
+  реальные деньги пока не списываются/возвращаются. UI явно говорит «демо». Для production-money
+  нужен PSP/bank intent+refund+webhook и постоянный mobile outbox.
+- Документация: `docs/design/RECURRING_ORDERS_V2.md`; V1 помечен ссылкой на V2;
+  канонический статус обновлён в `docs/TASKS.md`.
+- Проверки: backend `110 passed`, compileall, одна Alembic head; Flutter `109 passed`,
+  `flutter analyze --no-pub` чист; admin typecheck и 15/15 tests; `git diff --check` чист.
+- Production не менялся. Следующий отдельный этап после разрешения владельца: backup,
+  backend/admin build, `alembic upgrade head`, smoke/RBAC, затем release APK и физическая
+  проверка двух подписок с edit/reprice/cancel/dashboard.
+- Не включать `.codex-phone-install.png` в commit. В `backend/api/recurring.py` до этапа уже был
+  незакоммиченный рефакторинг Claude; V2 snapshot-фикс объединён поверх него и покрыт тестами.
+ 
+### 2026-07-27 rollout package
+
+- Prepared local deployment archive for Recurring Orders V2:
+  `dist/sweettime-recurring-v2-9d3f1c7.tar.gz`.
+- SHA-256: `aa9930692b78e7bae1a4271ad6774e970809fc3bd34b0e11eba33939443de3b2`;
+  size: `19251068` bytes.
+- Archive includes tracked files plus new untracked V2 files, and excludes `.git`, env files,
+  local signing files, build/dist outputs, dependency caches, and `.codex-phone-install.png`.
+- Production has still not been changed in this turn. Next step: upload archive, create verified
+  production backup, extract while preserving `.env`, build backend/admin, run Alembic to
+  `9d3f1c7a2b60`, smoke endpoints, then build/install APK and run physical-device acceptance.
+ 
+### 2026-07-27 production rollout and APK install
+
+- Owner-provided production output verified: Alembic upgraded `f7b9d4e82c15 -> 9d3f1c7a2b60`,
+  backend/admin healthy, `/ready` 200, `/login` 200, company config 200, recurring analytics
+  without token 401 as expected.
+- Built release APK locally with production API and Google Web client ID. Output:
+  `build/app/outputs/flutter-apk/app-release.apk`, size `82471129` bytes,
+  SHA-256 `D53E632AAA3D89D4629AC9866C5BE149FAA8ED22B0702D8093B52AE48FCC09F7`.
+- Installed APK on connected Android device `f3bff2a5` with `adb install -r`: Success.
+  Launch smoke via `adb shell monkey -p kg.sweettime.app 1` succeeded; focused app is
+  `kg.sweettime.app/.MainActivity`; no recent `AndroidRuntime`/`FATAL EXCEPTION`/Flutter crash lines.
+- Remaining acceptance: manual phone QA for multiple recurring orders, edit/reprice/cancel, and
+  admin recurring dashboard visibility with real logged-in owner session.

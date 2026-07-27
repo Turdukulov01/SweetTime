@@ -1,6 +1,6 @@
 # SweetTime Status Backlog
 
-Updated: 2026-07-24. Work is sequential unless the owner explicitly approves a skip.
+Updated: 2026-07-27. Work is sequential unless the owner explicitly approves a skip.
 
 ## Status Rules
 
@@ -16,6 +16,21 @@ Updated: 2026-07-24. Work is sequential unless the owner explicitly approves a s
 This is the short operational list shared by Claude Code and Codex. Detailed phase acceptance
 below remains authoritative; this section records the current execution order.
 
+- [ ] **Recurring Orders V2: multiple subscriptions, editing and dashboard.**
+  **[partial—verified locally; rollout and device acceptance pending]**
+  A customer can keep up to 20 independent prepaid recurring orders with separate products,
+  branch, time and 1/7/30-day period. Flutter lists every order, creates another, edits one by
+  stable ID, confirms cancellation and refreshes the list on session resume. Backend locks item
+  names/media/size/prices, versions edits, calculates signed mock top-up/credit only for future
+  ungenerated occurrences, keeps an already generated today order, and prevents old APK PATCH
+  from bypassing settlement. Owner/manager analytics expose active count, today's generated and
+  completed recurring orders, today's positive adjustments, committed daily amount and customer/
+  item/branch/time/term/payment details. Migration: `9d3f1c7a2b60`. Real money is deliberately
+  not claimed: `settlementMode=mock` remains until a bank/PSP with webhook/refund support is
+  integrated. Local acceptance: backend 110/110, Flutter 109/109 plus clean analyze, admin
+  typecheck and 15/15 tests, one Alembic head and clean diff check. Remaining acceptance:
+  deploy/migrate after a backup, verify owner/manager permissions, then perform multi-order
+  edit/reprice/cancel/dashboard checks on the physical Android pilot.
 - [ ] **Scheduled stories/news publication.** **[partial—verified locally; production rollout
   and device acceptance pending]** Story and feed editors can publish immediately or choose an exact
   local date, hour and minute. The API keeps future content hidden until `published_at <= now`;
