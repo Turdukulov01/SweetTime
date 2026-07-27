@@ -8,7 +8,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CircleDollarSign,
   CreditCard,
+  Package2,
   ReceiptText,
+  RefreshCw,
+  Repeat2,
   ShoppingBag,
   Sparkles,
   UserPlus,
@@ -19,16 +22,35 @@ import {
 } from "lucide-react";
 import { RoleGate } from "@/components/role-gate";
 import { StatusBadge } from "@/components/status-badge";
+import {
+  apiCompleteManualRecurringRefund,
+  apiFetchRecurringAnalytics,
+  describeApiError
+} from "@/lib/api";
 import { useCompanyStore } from "@/lib/company-store";
-import { ORDER_TYPE_LABELS } from "@/lib/labels";
+import { ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from "@/lib/labels";
 import { useOrders } from "@/lib/orders-store";
-import type { Order, PaymentMethod } from "@/lib/types";
-import { formatCurrency, formatDateTime, isToday } from "@/lib/utils";
+import type {
+  LocalizedText,
+  Order,
+  PaymentMethod,
+  RecurringOrderAnalytics,
+  RecurringPlan,
+  RecurringRefundStatus
+} from "@/lib/types";
+import {
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  isToday
+} from "@/lib/utils";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const RECURRING_REFRESH_MS = 30_000;
 
 type DetailKey =
   | "orders"
+  | "recurring"
   | "revenue"
   | "average"
   | "payments"
@@ -63,6 +85,35 @@ const PAYMENT_LABELS: Record<PaymentBucket, string> = {
   qr: "QR",
   unknown: "Не указано"
 };
+
+const RECURRING_PLAN_LABELS: Record<RecurringPlan, string> = {
+  single: "Один день",
+  week: "Неделя",
+  month: "Месяц",
+  custom: "Свой срок"
+};
+
+const REFUND_STATUS_LABELS: Record<RecurringRefundStatus, string> = {
+  pending: "Ожидает отправки",
+  processing: "Обрабатывается",
+  refunded: "Возвращено автоматически",
+  manual_required: "Нужна ручная выдача",
+  manual_paid: "Выдано вручную",
+  failed: "Нужна проверка"
+};
+
+function localizedLabel(
+  value: string | LocalizedText | null | undefined,
+  fallback = "Без названия"
+): string {
+  if (typeof value === "string") return value.trim() || fallback;
+  return (
+    value?.ru?.trim() ||
+    value?.ky?.trim() ||
+    value?.en?.trim() ||
+    fallback
+  );
+}
 
 function startOfToday(now: number): number {
   const date = new Date(now);
@@ -163,11 +214,17 @@ function EmptyDetail({ children }: { children: ReactNode }) {
 function AnalyticsDrawer({
   title,
   onClose,
-  children
+  children,
+  wide = false,
+  eyebrow = "Demo-аналитика",
+  footer
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  wide?: boolean;
+  eyebrow?: string;
+  footer?: ReactNode;
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -217,12 +274,14 @@ function AnalyticsDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="analytics-title"
-        className="relative flex h-full w-full max-w-xl flex-col bg-cream-50 shadow-2xl dark:bg-[#171315]"
+        className={`relative flex h-full w-full flex-col bg-cream-50 shadow-2xl dark:bg-[#171315] ${
+          wide ? "max-w-6xl" : "max-w-xl"
+        }`}
       >
         <header className="flex items-center justify-between border-b border-coffee-900/10 px-6 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-accent">
-              Demo-аналитика
+              {eyebrow}
             </p>
             <h2 id="analytics-title" className="mt-1 text-xl">
               {title}
@@ -240,7 +299,8 @@ function AnalyticsDrawer({
         </header>
         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">{children}</div>
         <footer className="border-t border-coffee-900/10 px-6 py-4 text-xs text-coffee-500">
-          Клиенты считаются по имени. Для точной production-аналитики нужен customerId.
+          {footer ??
+            "Клиенты считаются по имени. Для точной production-аналитики нужен customerId."}
         </footer>
       </aside>
     </div>
@@ -251,6 +311,112 @@ function DashboardContent() {
   const { company, branches } = useCompanyStore();
   const { orders } = useOrders();
   const [selectedDetail, setSelectedDetail] = useState<DetailKey | null>(null);
+  const [recurringAnalytics, setRecurringAnalytics] =
+    useState<RecurringOrderAnalytics | null>(null);
+  const [recurringLoading, setRecurringLoading] = useState(true);
+  const [recurringError, setRecurringError] = useState<string | null>(null);
+  const [recurringRefreshKey, setRecurringRefreshKey] = useState(0);
+  const [manualRefundClaim, setManualRefundClaim] = useState("");
+  const [manualRefundPending, setManualRefundPending] = useState(false);
+  const [manualRefundMessage, setManualRefundMessage] = useState<string | null>(
+    null
+  );
+  const [manualRefundError, setManualRefundError] = useState<string | null>(
+    null
+  );
+  const manualRefundKeyRef = useRef<{
+    claim: string;
+    key: string;
+  } | null>(null);
+
+  const completeManualRefund = async () => {
+    const claim = manualRefundClaim.trim();
+    if (!claim || manualRefundPending) return;
+    const previous = manualRefundKeyRef.current;
+    const key =
+      previous?.claim === claim
+        ? previous.key
+        : `admin-manual-refund:${crypto.randomUUID()}`;
+    manualRefundKeyRef.current = { claim, key };
+    setManualRefundPending(true);
+    setManualRefundMessage(null);
+    setManualRefundError(null);
+    try {
+      const refund = await apiCompleteManualRecurringRefund(
+        company.id,
+        claim,
+        key
+      );
+      setManualRefundMessage(
+        `Возврат ${formatCurrency(
+          refund.amount,
+          refund.currency
+        )} отмечен как выданный.`
+      );
+      setManualRefundClaim("");
+      manualRefundKeyRef.current = null;
+      setRecurringRefreshKey((value) => value + 1);
+    } catch (error) {
+      // Keep the same idempotency key. If the response was lost after a
+      // successful payout confirmation, Retry receives the original result.
+      setManualRefundError(describeApiError(error));
+    } finally {
+      setManualRefundPending(false);
+    }
+  };
+
+  useEffect(() => {
+    let disposed = false;
+    let inFlight = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+    setRecurringAnalytics(null);
+    setRecurringError(null);
+    setRecurringLoading(true);
+
+    const scheduleRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        void load(false);
+      }, RECURRING_REFRESH_MS);
+    };
+
+    const load = async (initial: boolean) => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+      if (initial) setRecurringLoading(true);
+      try {
+        const next = await apiFetchRecurringAnalytics(company.id);
+        if (disposed) return;
+        setRecurringAnalytics(next);
+        setRecurringError(null);
+      } catch (error) {
+        if (!disposed) setRecurringError(describeApiError(error));
+      } finally {
+        inFlight = false;
+        if (!disposed) {
+          setRecurringLoading(false);
+          scheduleRefresh();
+        }
+      }
+    };
+
+    const refreshWhenActive = () => {
+      if (document.visibilityState === "visible") void load(false);
+    };
+
+    void load(true);
+    window.addEventListener("focus", refreshWhenActive);
+    window.addEventListener("online", refreshWhenActive);
+    document.addEventListener("visibilitychange", refreshWhenActive);
+    return () => {
+      disposed = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      window.removeEventListener("focus", refreshWhenActive);
+      window.removeEventListener("online", refreshWhenActive);
+      document.removeEventListener("visibilitychange", refreshWhenActive);
+    };
+  }, [company.id, recurringRefreshKey]);
 
   const now = Date.now();
   const periods: PeriodDefinition[] = [
@@ -324,6 +490,21 @@ function DashboardContent() {
       value: String(todayOrders.length),
       hint: "Нажмите для состава и типов",
       icon: ShoppingBag
+    },
+    {
+      key: "recurring",
+      label: "Постоянные заказы",
+      value: recurringAnalytics
+        ? String(recurringAnalytics.activeCount)
+        : recurringLoading
+          ? "Загрузка…"
+          : "Недоступно",
+      hint: recurringAnalytics
+        ? `Сегодня покупок: ${recurringAnalytics.purchasesToday} · создано: ${recurringAnalytics.generatedToday}`
+        : recurringError
+          ? "Не удалось обновить — откройте детали"
+          : "Сводка по активным подпискам",
+      icon: Repeat2
     },
     {
       key: "revenue",
@@ -414,6 +595,382 @@ function DashboardContent() {
             </DetailSection>
           </>
         );
+      case "recurring": {
+        const summary = recurringAnalytics
+          ? [
+              {
+                label: "Активных",
+                value: String(recurringAnalytics.activeCount)
+              },
+              {
+                label: "Создано сегодня",
+                value: String(recurringAnalytics.generatedToday)
+              },
+              {
+                label: "Завершено сегодня",
+                value: String(recurringAnalytics.completedToday)
+              },
+              {
+                label: "Покупок сегодня",
+                value: String(recurringAnalytics.purchasesToday)
+              },
+              {
+                label: "Сумма одного дня",
+                value: formatCurrency(
+                  recurringAnalytics.committedDailyAmount,
+                  company.currency
+                )
+              }
+            ]
+          : [];
+
+        return (
+          <>
+            <div aria-live="polite">
+              {recurringLoading && !recurringAnalytics ? (
+                <EmptyDetail>Загружаем постоянные заказы…</EmptyDetail>
+              ) : null}
+              {recurringError ? (
+                <div
+                  role="alert"
+                  className="flex flex-col gap-3 rounded-xl border border-red-500/25 bg-red-500/5 px-4 py-3 text-sm text-red-700 sm:flex-row sm:items-center sm:justify-between dark:text-red-300"
+                >
+                  <span>{recurringError}</span>
+                  <button
+                    type="button"
+                    onClick={() => setRecurringRefreshKey((value) => value + 1)}
+                    className="focus-ring inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-red-500/30 px-3 font-semibold transition hover:bg-red-500/10"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    Повторить
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            {recurringAnalytics ? (
+              <>
+                <DetailSection title="Сводка">
+                  <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
+                    {summary.map((item) => (
+                      <div
+                        key={item.label}
+                        className="rounded-xl bg-cream-100 px-4 py-3 dark:bg-white/5"
+                      >
+                        <p className="text-xs text-coffee-500">{item.label}</p>
+                        <p className="mt-1 text-lg font-semibold text-coffee-900">
+                          {item.value}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </DetailSection>
+
+                <DetailSection title="Возвраты по отменённым постоянным заказам">
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+                    <div className="space-y-2">
+                      {recurringAnalytics.refunds.length === 0 ? (
+                        <EmptyDetail>Возвратов пока нет.</EmptyDetail>
+                      ) : (
+                        recurringAnalytics.refunds.map((refund) => (
+                          <div
+                            key={refund.id}
+                            className="flex flex-col gap-2 rounded-xl border border-coffee-900/10 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                          >
+                            <div>
+                              <p className="font-semibold text-coffee-900">
+                                {formatCurrency(refund.amount, refund.currency)}
+                                {" · "}
+                                {REFUND_STATUS_LABELS[refund.status]}
+                              </p>
+                              <p className="mt-1 text-xs text-coffee-500">
+                                {formatDateTime(refund.createdAt)}
+                                {" · "}
+                                {refund.paymentMethod === "cash"
+                                  ? "Наличные"
+                                  : refund.paymentMethod === "qr"
+                                    ? "QR-оплата"
+                                    : "Демо-оплата"}
+                                {" · "}
+                                {refund.refundableOccurrences} будущих выдач
+                              </p>
+                              {refund.claimCode ? (
+                                <p className="mt-1 font-mono text-xs font-semibold text-coffee-900">
+                                  {refund.claimCode}
+                                </p>
+                              ) : null}
+                            </div>
+                            <span
+                              className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                refund.status === "manual_required"
+                                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                                  : refund.status === "refunded" ||
+                                      refund.status === "manual_paid"
+                                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                                    : "bg-coffee-900/5 text-coffee-500 dark:bg-white/10"
+                              }`}
+                            >
+                              {REFUND_STATUS_LABELS[refund.status]}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <form
+                      className="rounded-xl border border-coffee-900/10 bg-cream-100 p-4 dark:bg-white/5"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void completeManualRefund();
+                      }}
+                    >
+                      <h4 className="font-semibold text-coffee-900">
+                        Подтвердить ручную выдачу
+                      </h4>
+                      <p className="mt-1 text-xs leading-5 text-coffee-500">
+                        Для наличных или недоступного платёжного провайдера.
+                        Сначала выдайте клиенту указанную сумму, затем введите
+                        код из его приложения. Один код нельзя погасить дважды.
+                      </p>
+                      <label className="mt-3 block text-xs font-semibold text-coffee-700">
+                        QR-ссылка или код RF-…
+                        <textarea
+                          value={manualRefundClaim}
+                          onChange={(event) => {
+                            setManualRefundClaim(event.target.value);
+                            setManualRefundMessage(null);
+                            setManualRefundError(null);
+                            if (
+                              manualRefundKeyRef.current?.claim !==
+                              event.target.value.trim()
+                            ) {
+                              manualRefundKeyRef.current = null;
+                            }
+                          }}
+                          rows={3}
+                          className="focus-ring mt-1 w-full resize-y rounded-xl border border-coffee-900/15 bg-white px-3 py-2 font-mono text-sm font-normal text-coffee-900 dark:bg-coffee-950"
+                          placeholder="RF-1234-ABCD-5678"
+                        />
+                      </label>
+                      {manualRefundError ? (
+                        <p role="alert" className="mt-2 text-xs text-red-600">
+                          {manualRefundError}
+                        </p>
+                      ) : null}
+                      {manualRefundMessage ? (
+                        <p
+                          role="status"
+                          className="mt-2 text-xs text-emerald-700 dark:text-emerald-300"
+                        >
+                          {manualRefundMessage}
+                        </p>
+                      ) : null}
+                      <button
+                        type="submit"
+                        disabled={
+                          manualRefundPending || !manualRefundClaim.trim()
+                        }
+                        className="focus-ring mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {manualRefundPending ? (
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <ReceiptText className="h-4 w-4" />
+                        )}
+                        {manualRefundPending
+                          ? "Проверяем…"
+                          : "Возврат выдан"}
+                      </button>
+                    </form>
+                  </div>
+                </DetailSection>
+
+                <DetailSection title="Подключённые постоянные заказы">
+                  {recurringAnalytics.rows.length === 0 ? (
+                    <EmptyDetail>
+                      Активных постоянных заказов пока нет.
+                    </EmptyDetail>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-coffee-900/10">
+                      <table className="min-w-[1120px] w-full text-left text-sm">
+                        <caption className="sr-only">
+                          Клиенты, состав, филиал, срок, суммы и сегодняшний
+                          статус постоянных заказов
+                        </caption>
+                        <thead className="bg-cream-100 text-xs uppercase tracking-wide text-coffee-500 dark:bg-white/5">
+                          <tr>
+                            <th scope="col" className="px-4 py-3 font-semibold">
+                              Клиент
+                            </th>
+                            <th scope="col" className="px-4 py-3 font-semibold">
+                              Товары
+                            </th>
+                            <th scope="col" className="px-4 py-3 font-semibold">
+                              Филиал и время
+                            </th>
+                            <th scope="col" className="px-4 py-3 font-semibold">
+                              Срок
+                            </th>
+                            <th scope="col" className="px-4 py-3 font-semibold">
+                              Сумма
+                            </th>
+                            <th scope="col" className="px-4 py-3 font-semibold">
+                              Сегодня
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {recurringAnalytics.rows.map((recurring) => (
+                            <tr
+                              key={recurring.id}
+                              className="border-t border-coffee-900/10 align-top"
+                            >
+                              <td className="px-4 py-4">
+                                <p className="font-semibold text-coffee-900">
+                                  {recurring.customer.name || "Без имени"}
+                                </p>
+                                <p className="mt-1 text-xs text-coffee-500">
+                                  {recurring.customer.phone ??
+                                    "Телефон не указан"}
+                                </p>
+                              </td>
+                              <td className="max-w-sm px-4 py-4">
+                                <div className="space-y-2">
+                                  {recurring.items.map((item) => (
+                                    <div
+                                      key={`${recurring.id}-${item.productId}-${
+                                        item.sizeId ?? "base"
+                                      }`}
+                                      className="flex min-w-64 items-center gap-3"
+                                    >
+                                      {item.imageUrl ? (
+                                        <img
+                                          src={item.imageUrl}
+                                          alt=""
+                                          loading="lazy"
+                                          className="h-11 w-11 shrink-0 rounded-lg object-cover"
+                                        />
+                                      ) : (
+                                        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-cream-100 text-coffee-500 dark:bg-white/5">
+                                          <Package2 className="h-5 w-5" />
+                                        </span>
+                                      )}
+                                      <span className="min-w-0">
+                                        <span className="block font-medium text-coffee-900">
+                                          {item.quantity} × {localizedLabel(item.name)}
+                                        </span>
+                                        <span className="mt-0.5 block text-xs text-coffee-500">
+                                          {item.size
+                                            ? `${localizedLabel(item.size)} · `
+                                            : ""}
+                                          {formatCurrency(
+                                            item.total,
+                                            company.currency
+                                          )}
+                                        </span>
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="px-4 py-4">
+                                <p className="font-medium text-coffee-900">
+                                  {recurring.branchName}
+                                </p>
+                                <p className="mt-1 text-xs text-coffee-500">
+                                  Каждый день к {recurring.time}
+                                </p>
+                              </td>
+                              <td className="px-4 py-4">
+                                <p className="font-medium text-coffee-900">
+                                  {RECURRING_PLAN_LABELS[recurring.plan]}
+                                </p>
+                                <p className="mt-1 text-xs text-coffee-500">
+                                  {recurring.paidUntil
+                                    ? `Оплачено до ${formatDate(recurring.paidUntil)}`
+                                    : "Дата окончания не указана"}
+                                </p>
+                              </td>
+                              <td className="px-4 py-4">
+                                <p className="font-medium text-coffee-900">
+                                  {formatCurrency(
+                                    recurring.dailyTotal,
+                                    company.currency
+                                  )}{" "}
+                                  / день
+                                </p>
+                                <p className="mt-1 text-xs text-coffee-500">
+                                  Предоплата:{" "}
+                                  {formatCurrency(
+                                    recurring.prepaidTotal,
+                                    company.currency
+                                  )}
+                                </p>
+                                {recurring.lastAdjustment ? (
+                                  <p className="mt-1 text-xs text-coffee-500">
+                                    {recurring.lastAdjustment.amount >= 0
+                                      ? "Доплата"
+                                      : "Кредит"}
+                                    :{" "}
+                                    {formatCurrency(
+                                      Math.abs(recurring.lastAdjustment.amount),
+                                      company.currency
+                                    )}{" "}
+                                    ·{" "}
+                                    {formatDateTime(
+                                      recurring.lastAdjustment.createdAt
+                                    )}
+                                  </p>
+                                ) : null}
+                              </td>
+                              <td className="px-4 py-4">
+                                {recurring.todayOrder ? (
+                                  <div className="space-y-2">
+                                    <p className="font-semibold text-coffee-900">
+                                      {recurring.todayOrder.number}
+                                    </p>
+                                    <StatusBadge
+                                      status={recurring.todayOrder.status}
+                                    />
+                                    <p className="text-xs text-coffee-500">
+                                      {
+                                        ORDER_STATUS_LABELS[
+                                          recurring.todayOrder.status
+                                        ]
+                                      }{" "}
+                                      ·{" "}
+                                      {formatCurrency(
+                                        recurring.todayOrder.total,
+                                        company.currency
+                                      )}
+                                    </p>
+                                    {recurring.todayOrder.scheduledFor ? (
+                                      <p className="text-xs text-coffee-500">
+                                        К{" "}
+                                        {formatDateTime(
+                                          recurring.todayOrder.scheduledFor
+                                        )}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-coffee-500">
+                                    Сегодня ещё не создан
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </DetailSection>
+              </>
+            ) : null}
+          </>
+        );
+      }
       case "revenue":
       case "average":
         return (
@@ -595,7 +1152,21 @@ function DashboardContent() {
       </div>
 
       {selectedDetail && selectedTitle && (
-        <AnalyticsDrawer title={selectedTitle} onClose={() => setSelectedDetail(null)}>
+        <AnalyticsDrawer
+          title={selectedTitle}
+          onClose={() => setSelectedDetail(null)}
+          wide={selectedDetail === "recurring"}
+          eyebrow={
+            selectedDetail === "recurring"
+              ? "Серверная аналитика"
+              : "Demo-аналитика"
+          }
+          footer={
+            selectedDetail === "recurring"
+              ? "Сервер считает активность и сегодняшний день в часовом поясе бизнеса. Сводка обновляется автоматически каждые 30 секунд."
+              : undefined
+          }
+        >
           {renderDetail()}
         </AnalyticsDrawer>
       )}

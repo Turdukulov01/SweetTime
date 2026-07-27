@@ -14,6 +14,7 @@ import {
   LogOut,
   MapPin,
   Newspaper,
+  Repeat2,
   Settings,
   Store,
   Tag,
@@ -46,6 +47,12 @@ const NAV_ITEMS: Array<{
     label: "Заказы",
     icon: ClipboardList,
     roles: ["owner", "manager", "barista"]
+  },
+  {
+    href: "/recurring-orders",
+    label: "Постоянные заказы",
+    icon: Repeat2,
+    roles: ["owner", "manager"]
   },
   { href: "/menu", label: "Меню", icon: CupSoda, roles: ["owner", "manager"] },
   {

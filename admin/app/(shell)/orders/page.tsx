@@ -31,6 +31,7 @@ import type { Order, OrderStatus } from "@/lib/types";
 import { cn, formatCurrency, formatTime } from "@/lib/utils";
 
 const BOARD_COLUMNS: OrderStatus[] = ["new", "preparing", "ready", "done"];
+const BUSINESS_TIME_ZONE = "Asia/Bishkek";
 
 const NEXT_ACTION: Partial<
   Record<OrderStatus, { next: OrderStatus; label: string }>
@@ -44,6 +45,25 @@ const NEXT_ACTION: Partial<
 function planTime(order: Order): string {
   if (order.readyTime) return order.readyTime;
   return order.scheduledFor ? formatTime(order.scheduledFor) : "—";
+}
+
+/** Локальная дата кофейни, не дата компьютера открывшего админку. */
+function businessDate(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date);
+}
+
+function isTodayRecurringPlan(order: Order, today: string): boolean {
+  if (order.status !== "scheduled" || order.isRecurring === false) return false;
+  // Current API always sends scheduledFor. createdAt keeps the filter safe
+  // during a rolling deploy against an older API response.
+  return businessDate(order.scheduledFor ?? order.createdAt) === today;
 }
 
 /** «Клубничный моти-кап + Матча» — состав одной строкой для плана дня */
@@ -66,11 +86,13 @@ function planItems(order: Order): string {
 function RecurringSchedule({
   orders,
   branchName,
-  showBranch
+  showBranch,
+  onDetails
 }: {
   orders: Order[];
   branchName: (branchId: string) => string;
   showBranch: boolean;
+  onDetails: (orderId: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -109,38 +131,53 @@ function RecurringSchedule({
           {orders.map((order) => (
             <li
               key={order.id}
-              className="border-b border-coffee-900/5 px-5 py-2.5 last:border-0"
+              className="border-b border-coffee-900/5 last:border-0"
             >
-              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
-                <span className="font-semibold tabular-nums text-coffee-900">
-                  {planTime(order)}
-                </span>
-                <span className="text-coffee-500">·</span>
-                <span className="font-medium text-coffee-700">
-                  {order.number}
-                </span>
-                <span className="text-coffee-500">·</span>
-                <span className="text-coffee-700">{order.customerName}</span>
-                <span className="text-coffee-500">·</span>
-                <span className="min-w-0 text-coffee-700">
-                  {planItems(order)}
-                </span>
-                {showBranch && (
-                  <>
-                    <span className="text-coffee-500">·</span>
-                    <span className="inline-flex items-center gap-1 text-xs text-coffee-500">
-                      <MapPin className="h-3 w-3" />
-                      {branchName(order.branchId)}
+              <button
+                type="button"
+                onClick={() => onDetails(order.id)}
+                aria-label={`Открыть подробности заказа ${order.number}`}
+                className="focus-ring group flex w-full items-center gap-3 px-5 py-2.5 text-left transition hover:bg-coffee-900/[0.03] dark:hover:bg-white/5"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
+                    <span className="font-semibold tabular-nums text-coffee-900">
+                      {planTime(order)}
                     </span>
-                  </>
-                )}
-              </div>
-              {order.comment && (
-                <p className="mt-1 flex items-start gap-1.5 text-xs text-coffee-500">
-                  <MessageSquareText className="mt-0.5 h-3 w-3 shrink-0 text-accent" />
-                  {order.comment}
-                </p>
-              )}
+                    <span className="text-coffee-500">·</span>
+                    <span className="font-medium text-coffee-700">
+                      {order.number}
+                    </span>
+                    <span className="text-coffee-500">·</span>
+                    <span className="text-coffee-700">
+                      {order.customerName}
+                    </span>
+                    <span className="text-coffee-500">·</span>
+                    <span className="min-w-0 text-coffee-700">
+                      {planItems(order)}
+                    </span>
+                    {showBranch && (
+                      <>
+                        <span className="text-coffee-500">·</span>
+                        <span className="inline-flex items-center gap-1 text-xs text-coffee-500">
+                          <MapPin className="h-3 w-3" />
+                          {branchName(order.branchId)}
+                        </span>
+                      </>
+                    )}
+                  </span>
+                  {order.comment && (
+                    <span className="mt-1 flex items-start gap-1.5 text-xs text-coffee-500">
+                      <MessageSquareText className="mt-0.5 h-3 w-3 shrink-0 text-accent" />
+                      {order.comment}
+                    </span>
+                  )}
+                </span>
+                <ChevronRight
+                  aria-hidden="true"
+                  className="h-4 w-4 shrink-0 text-coffee-400 transition group-hover:translate-x-0.5 group-hover:text-accent"
+                />
+              </button>
             </li>
           ))}
         </ul>
@@ -314,8 +351,9 @@ export default function OrdersPage() {
 
   // План постоянных заказов на сегодня: статус "scheduled" не попадает в
   // колонки доски (byStatus фильтрует явно), сортировка по времени выдачи.
+  const today = businessDate(new Date());
   const scheduledPlan = visibleOrders
-    .filter((o) => o.status === "scheduled")
+    .filter((order) => isTodayRecurringPlan(order, today))
     .sort((a, b) => planTime(a).localeCompare(planTime(b), "ru"));
 
   return (
@@ -388,6 +426,7 @@ export default function OrdersPage() {
           orders={scheduledPlan}
           branchName={branchName}
           showBranch={!isBarista && effectiveBranch === "all"}
+          onDetails={setSelectedOrderId}
         />
       )}
 

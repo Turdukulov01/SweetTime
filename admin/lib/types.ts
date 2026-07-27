@@ -269,7 +269,36 @@ export interface Promotion {
   thumbnailUrl: string | null;
 }
 
-export type RecurringPlan = "week" | "month";
+export type RecurringPlan = "single" | "week" | "month" | "custom";
+export type RecurringRefundStatus =
+  | "pending"
+  | "processing"
+  | "refunded"
+  | "manual_required"
+  | "manual_paid"
+  | "failed";
+
+export interface RecurringRefund {
+  id: string;
+  recurringOrderId: string;
+  amount: number;
+  currency: string;
+  paymentMethod: PaymentMethod;
+  status: RecurringRefundStatus;
+  provider: string;
+  providerRefundId: string | null;
+  refundableOccurrences: number;
+  cancelledOrderIds: string[];
+  nonRefundableOrderIds: string[];
+  attemptCount: number;
+  failureCode: string | null;
+  failureMessage: string | null;
+  claimCode: string | null;
+  claimQrPayload: string | null;
+  manualCompletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 /** «Постоянный заказ» — предоплаченный любимый напиток к нужному времени */
 export interface RecurringOrder {
@@ -286,6 +315,115 @@ export interface RecurringOrder {
   paidUntil: string;
   /** Активна ли подписка сейчас */
   active: boolean;
+}
+
+/** Серверная сводка по активным постоянным заказам для дашборда. */
+export interface RecurringOrderAnalytics {
+  activeCount: number;
+  generatedToday: number;
+  completedToday: number;
+  purchasesToday: number;
+  /** Текущая сумма одного дня по всем активным постоянным заказам. */
+  committedDailyAmount: number;
+  rows: RecurringOrderAnalyticsRow[];
+  refunds: RecurringRefund[];
+}
+
+export interface RecurringOrderAnalyticsRow {
+  id: string;
+  customer: {
+    id: string;
+    name: string;
+    phone: string | null;
+  };
+  items: RecurringOrderAnalyticsItem[];
+  branchId: string;
+  branchName: string;
+  /** Локальное время готовности филиала, HH:mm. */
+  time: string;
+  plan: RecurringPlan;
+  /** Включительно, только для произвольного срока. */
+  customUntil: string | null;
+  paidUntil: string | null;
+  dailyTotal: number;
+  prepaidTotal: number;
+  /** Знаковая корректировка: плюс — доплата, минус — кредит клиенту. */
+  lastAdjustment: {
+    amount: number;
+    settlementMode: "mock";
+    createdAt: string;
+  } | null;
+  todayOrder: {
+    id: string;
+    number: string;
+    status: OrderStatus;
+    total: number;
+    scheduledFor: string | null;
+  } | null;
+}
+
+export interface RecurringOrderAnalyticsItem {
+  productId: string;
+  name: string | LocalizedText;
+  description: string | LocalizedText;
+  imageUrl: string | null;
+  sizeId: string | null;
+  size: string | LocalizedText | null;
+  unitPrice: number;
+  quantity: number;
+  total: number;
+}
+
+export type RecurringRegistryStatus =
+  | "active"
+  | "completed"
+  | "cancelled";
+
+/** Полная строка архивного реестра постоянных заказов. */
+export interface RecurringRegistryRow {
+  id: string;
+  status: RecurringRegistryStatus;
+  customer: {
+    /** Может быть null у архивной строки после удаления аккаунта клиента. */
+    id: string | null;
+    name: string;
+    phone: string | null;
+  };
+  items: RecurringOrderAnalyticsItem[];
+  branchId: string;
+  branchName: string;
+  time: string;
+  plan: RecurringPlan;
+  /** Включительно, только для произвольного срока. */
+  customUntil: string | null;
+  paidUntil: string | null;
+  dailyTotal: number;
+  prepaidTotal: number;
+  createdAt: string;
+  updatedAt: string;
+  lastAdjustment: {
+    amount: number;
+    settlementMode: "mock";
+    createdAt: string;
+  } | null;
+  todayOrder: {
+    id: string;
+    number: string;
+    status: OrderStatus;
+    total: number;
+    scheduledFor: string | null;
+  } | null;
+}
+
+/** Сводка и одна страница полного реестра постоянных заказов. */
+export interface RecurringOrderRegistry {
+  /** Количество строк с учётом текущих фильтров. */
+  total: number;
+  /** Общие счётчики компании, без поискового и временного фильтра. */
+  activeCount: number;
+  completedCount: number;
+  cancelledCount: number;
+  items: RecurringRegistryRow[];
 }
 
 export type OrderType = "pickup" | "scheduled" | "qr";

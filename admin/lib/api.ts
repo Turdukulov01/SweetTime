@@ -37,6 +37,10 @@ import type {
   StoryCollection,
   NewsPost,
   Order,
+  RecurringOrderAnalytics,
+  RecurringOrderRegistry,
+  RecurringRegistryStatus,
+  RecurringRefund,
   OrderStatus,
   OrderType,
   Product,
@@ -901,6 +905,65 @@ export async function apiFetchOrders(companyId: string): Promise<Order[]> {
     `/api/companies/${companyId}/orders`
   );
   return orders.map((order) => mapApiOrder(companyId, order));
+}
+
+/**
+ * Серверная аналитика постоянных заказов.
+ *
+ * Бизнес-дата, активность подписок и сегодняшний сгенерированный заказ
+ * определяются backend-ом: дашборд не пересчитывает их из локальной истории.
+ */
+export async function apiFetchRecurringAnalytics(
+  companyId: string
+): Promise<RecurringOrderAnalytics> {
+  return request<RecurringOrderAnalytics>(
+    `/api/companies/${companyId}/analytics/recurring-orders`
+  );
+}
+
+export interface RecurringRegistryFilters {
+  search?: string;
+  status?: "all" | RecurringRegistryStatus;
+  createdFrom?: string;
+  createdTo?: string;
+  offset?: number;
+  limit?: number;
+}
+
+/** Полный read-only реестр подписок; оперативное расписание остаётся в /orders. */
+export async function apiFetchRecurringRegistry(
+  companyId: string,
+  filters: RecurringRegistryFilters = {}
+): Promise<RecurringOrderRegistry> {
+  const query = new URLSearchParams();
+  const search = filters.search?.trim();
+  if (search) query.set("search", search);
+  if (filters.status && filters.status !== "all") {
+    query.set("status", filters.status);
+  }
+  if (filters.createdFrom) query.set("createdFrom", filters.createdFrom);
+  if (filters.createdTo) query.set("createdTo", filters.createdTo);
+  query.set("offset", String(filters.offset ?? 0));
+  query.set("limit", String(filters.limit ?? 50));
+  return request<RecurringOrderRegistry>(
+    `/api/companies/${companyId}/analytics/recurring-orders/registry?${query.toString()}`
+  );
+}
+
+/** One-time manager confirmation after cash/manual recurring refund payout. */
+export async function apiCompleteManualRecurringRefund(
+  companyId: string,
+  claim: string,
+  idempotencyKey: string
+): Promise<RecurringRefund> {
+  return request<RecurringRefund>(
+    `/api/companies/${companyId}/analytics/recurring-refunds/manual-complete`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ claim })
+    }
+  );
 }
 
 export type OrderStreamEventType =
