@@ -265,7 +265,7 @@ class _TappableLogo extends ConsumerWidget {
           color: Theme.of(context).colorScheme.primary,
         ),
       ),
-      child: const AppLogo(size: 48, showWordmark: true),
+      child: const AppLogo(size: 40, showWordmark: true),
     );
   }
 }

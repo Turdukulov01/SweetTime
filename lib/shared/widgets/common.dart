@@ -13,19 +13,18 @@ class AppLogo extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Для марки берём полноразмерный логотип, а не миниатюру: миниатюра мелкая и
-    // на плотных экранах выглядит замыленной. Файл логотипа лёгкий, так дешевле
-    // качества почти не теряем.
+    // Марка использует миниатюру (thumbnail): она квадратная и лёгкая.
+    // НЕ задавать cacheWidth/cacheHeight: принудительный квадратный decode
+    // искажает пропорции не-квадратного исходника (проверено владельцем —
+    // лого «растянулось вширь»). Полноразмерный файл — только в полноэкранном
+    // просмотре (_TappableLogo).
     final branding = ref.watch(
       appStateProvider.select(
-        (s) => (appName: s.appName, logoUrl: s.logoUrl ?? s.logoThumbnailUrl),
+        (s) => (appName: s.appName, logoUrl: s.logoThumbnailUrl ?? s.logoUrl),
       ),
     );
     final appName = branding.appName;
     final theme = Theme.of(context);
-    // Декодируем ровно под физический размер на этом экране — резко и без лишней
-    // памяти (иначе Flutter масштабирует уже растянутую миниатюру).
-    final decodePx = (size * MediaQuery.devicePixelRatioOf(context)).round();
     final mark = Container(
       width: size,
       height: size,
@@ -53,9 +52,6 @@ class AppLogo extends ConsumerWidget {
               width: size,
               height: size,
               fit: BoxFit.cover,
-              filterQuality: FilterQuality.medium,
-              cacheWidth: decodePx,
-              cacheHeight: decodePx,
               errorBuilder: (_, _, _) => Icon(
                 Icons.storefront_rounded,
                 color: Colors.white,
