@@ -185,8 +185,9 @@ class _TopBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
       child: Row(
         children: [
-          const _TappableLogo(),
-          const Spacer(),
+          // Expanded (вместо Spacer): логотип+название занимают левую зону и
+          // сжимаются, когда её мало, а язык/тема прижаты вправо как раньше.
+          const Expanded(child: _TappableLogo()),
           PopupMenuButton<AppLanguage>(
             tooltip: strings.interfaceLanguage,
             initialValue: language,
@@ -438,7 +439,9 @@ class _PromoRail extends StatelessWidget {
   Widget build(BuildContext context) {
     final language = AppLocalizations.of(context).language;
     return SizedBox(
-      height: 168,
+      // Высота рельсы растёт с крупным шрифтом (кламп 0.9–1.3 в main), но не
+      // сжимается ниже базовой — иначе текст акции переполняет карточку.
+      height: 168 * MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.3),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -748,7 +751,8 @@ class _NewsStoryRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 124,
+      // Высота растёт с крупным шрифтом, но не сжимается ниже базовой.
+      height: 124 * MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.3),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),

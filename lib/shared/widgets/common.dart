@@ -69,7 +69,17 @@ class AppLogo extends ConsumerWidget {
       children: [
         mark,
         const SizedBox(width: 10),
-        Text(appName, style: theme.textTheme.titleLarge),
+        // Сжимаемо: на узком экране/крупном шрифте название сокращается
+        // многоточием, а не переполняет шапку (используется только в _TopBar,
+        // где родитель даёт ограниченную ширину).
+        Flexible(
+          child: Text(
+            appName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleLarge,
+          ),
+        ),
       ],
     );
   }

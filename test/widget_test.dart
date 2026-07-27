@@ -1990,6 +1990,39 @@ void main() {
     expect(tester.widget<FilterChip>(fruitFinder).selected, isFalse);
     expect(tester.widget<ChoiceChip>(allFinder).selected, isTrue);
   });
+
+  testWidgets('layouts survive a 320dp screen at maximum (clamped) text scale', (
+    WidgetTester tester,
+  ) async {
+    // Старый/маленький телефон с крупным системным шрифтом: худший случай,
+    // который допускает наш кламп (1.3×), на узком экране 320dp. Ничего не
+    // должно давать RenderFlex overflow — иначе тест поймает исключение.
+    tester.view.physicalSize = const Size(320 * 2, 640 * 2);
+    tester.view.devicePixelRatio = 2.0;
+    // Система просит 2.0; MaterialApp.builder клампит до 1.3.
+    tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+    await tester.pumpWidget(_testApp());
+    await tester.pump(const Duration(milliseconds: 900));
+    expect(tester.takeException(), isNull, reason: 'Home (верх) overflow');
+
+    // Прокручиваем всю ленту Home, чтобы построились акции, новости и хиты.
+    final homeScroll = find.byType(CustomScrollView).first;
+    for (var step = 0; step < 6; step++) {
+      await tester.drag(homeScroll, const Offset(0, -420));
+      await tester.pump();
+      expect(tester.takeException(), isNull, reason: 'Home скролл $step overflow');
+    }
+
+    // Проходим остальные основные вкладки.
+    for (final label in const ['Каталог', 'Корзина', 'Профиль']) {
+      await _openNavigationTab(tester, label);
+      expect(tester.takeException(), isNull, reason: '$label overflow');
+    }
+  });
 }
 
 String _regularSpaces(String value) =>

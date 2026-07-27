@@ -131,15 +131,27 @@ class ProductCard extends ConsumerWidget {
                         color: product.accentColor,
                       ),
                       const SizedBox(width: 2),
-                      Text(
-                        product.rating.toString(),
-                        style: theme.textTheme.labelMedium,
+                      // Expanded вместо Spacer: занимает слабину (цена вправо,
+                      // как раньше), но на узкой карточке/крупном шрифте
+                      // сжимается, а не переполняет ряд.
+                      Expanded(
+                        child: Text(
+                          product.rating.toString(),
+                          style: theme.textTheme.labelMedium,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      const Spacer(),
-                      Text(
-                        formatSom(product.startingPrice, strings.language),
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: theme.colorScheme.onSurface,
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          formatSom(product.startingPrice, strings.language),
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: theme.colorScheme.onSurface,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.end,
                         ),
                       ),
                     ],
