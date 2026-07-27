@@ -15,6 +15,7 @@ import '../features/profile/loyalty_page.dart';
 import '../features/profile/order_history_page.dart';
 import '../features/profile/profile_edit_page.dart';
 import '../features/profile/profile_page.dart';
+import '../features/profile/recurring_orders_page.dart';
 import '../features/profile/support_page.dart';
 import '../features/qr/qr_page.dart';
 import '../features/qr/referral_invite_page.dart';
@@ -141,6 +142,12 @@ final appRouter = GoRouter(
       parentNavigatorKey: _rootKey,
       builder: (context, state) =>
           const _ProtectedProfileRoute(child: OrderHistoryPage()),
+    ),
+    GoRoute(
+      path: '/profile/recurring',
+      parentNavigatorKey: _rootKey,
+      builder: (context, state) =>
+          const _ProtectedProfileRoute(child: RecurringOrdersPage()),
     ),
     GoRoute(
       path: '/profile/support',

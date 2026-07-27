@@ -1953,8 +1953,8 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
 
-    await _scrollToText(tester, 'Recurring order');
-    expect(find.text('Recurring order'), findsOneWidget);
+    await _scrollToText(tester, 'Recurring orders');
+    expect(find.text('Recurring orders'), findsOneWidget);
     await _scrollToText(tester, 'Order history');
     expect(find.text('Order history'), findsOneWidget);
     await _scrollToText(tester, 'Our branches');
@@ -1985,6 +1985,19 @@ void main() {
       await tester.pump(const Duration(milliseconds: 900));
 
       await _openNavigationTab(tester, 'Профиль');
+
+      // Постоянные заказы теперь живут на отдельном экране — открываем его
+      // строкой-меню, как «Баллы».
+      final recurringEntry = find.text('Постоянные заказы');
+      await tester.scrollUntilVisible(
+        recurringEntry,
+        260,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(recurringEntry);
+      await tester.pumpAndSettle();
+
       final recurringEdit = find.byKey(
         const ValueKey('recurring-edit-legacy-primary'),
       );

@@ -785,6 +785,26 @@ extension ProfileLocalizations on AppLocalizations {
     'Daily set: $amount',
   );
 
+  String get recurringOrdersPageTitle => _pick(
+    'Постоянные заказы',
+    'Туруктуу заказдар',
+    'Recurring orders',
+  );
+
+  /// Подпись строки-меню на Профиле: сводка по активным подпискам или призыв
+  /// настроить первую, если их ещё нет.
+  String recurringEntrySummary(int count) => count == 0
+      ? _pick(
+          'Настроить постоянный заказ',
+          'Туруктуу заказды жөндөө',
+          'Set up a recurring order',
+        )
+      : _pick(
+          '$count ${_russianActiveWord(count)}',
+          '$count активдүү',
+          '$count active',
+        );
+
   String _profileLocalizedDate(DateTime value) {
     final day = value.day.toString().padLeft(2, '0');
     final month = value.month.toString().padLeft(2, '0');
@@ -794,4 +814,13 @@ extension ProfileLocalizations on AppLocalizations {
       '${value.year}-$month-$day',
     );
   }
+}
+
+/// Русская форма прилагательного «активный» для счётной подписи:
+/// 1 → «активный», иначе → «активных».
+String _russianActiveWord(int value) {
+  final lastTwo = value.abs() % 100;
+  final lastOne = value.abs() % 10;
+  if (lastOne == 1 && lastTwo != 11) return 'активный';
+  return 'активных';
 }
