@@ -30,6 +30,21 @@
 	<string>SweetTime uses the camera to scan QR codes and take a profile photo.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>SweetTime uses your photo library when you choose a profile photo.</string>
+	<!-- Google Sign-In (iOS): плагин google_sign_in читает iOS client ID отсюда. -->
+	<key>GIDClientID</key>
+	<string>23205820785-463eql7n3d8un18e805kqfbb9lmgedbb.apps.googleusercontent.com</string>
+	<!-- OAuth callback: reversed iOS client ID как URL scheme. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.23205820785-463eql7n3d8un18e805kqfbb9lmgedbb</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
