@@ -10,11 +10,11 @@ class SceneDelegate: FlutterSceneDelegate {
     _ scene: UIScene,
     openURLContexts URLContexts: Set<UIOpenURLContext>
   ) {
-    super.scene(scene, openURLContexts: URLContexts)
     for context in URLContexts {
       if GIDSignIn.sharedInstance.handle(context.url) {
         return
       }
     }
+    super.scene(scene, openURLContexts: URLContexts)
   }
 }

@@ -1,4 +1,5 @@
 import Flutter
+import GoogleSignIn
 import UIKit
 
 @main
@@ -12,5 +13,18 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+  }
+
+  // Legacy/non-scene fallback. With UIScene enabled the same callback is
+  // handled in SceneDelegate, while older iOS lifecycle paths arrive here.
+  override func application(
+    _ app: UIApplication,
+    open url: URL,
+    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+  ) -> Bool {
+    if GIDSignIn.sharedInstance.handle(url) {
+      return true
+    }
+    return super.application(app, open: url, options: options)
   }
 }

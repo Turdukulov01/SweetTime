@@ -1,9 +1,16 @@
+import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 const String googleWebClientId = String.fromEnvironment(
   'GOOGLE_WEB_CLIENT_ID',
   defaultValue:
       '23205820785-ap4kgng4fef97ie9l69e5erlufjc8v2i.apps.googleusercontent.com',
+);
+
+const String googleIosClientId = String.fromEnvironment(
+  'GOOGLE_IOS_CLIENT_ID',
+  defaultValue:
+      '23205820785-463eql7n3d8un18e805kqfbb9lmgedbb.apps.googleusercontent.com',
 );
 
 enum GoogleIdentityStatus { success, cancelled, notConfigured, unavailable }
@@ -35,17 +42,25 @@ abstract interface class GoogleIdentityProvider {
 /// Google Sign-In v7 adapter. The app sends only the ID token to SweetTime's
 /// backend; device-provided email/name are never accepted as account identity.
 class PluginGoogleIdentityProvider implements GoogleIdentityProvider {
-  PluginGoogleIdentityProvider({String webClientId = googleWebClientId})
-    : _webClientId = webClientId.trim();
+  PluginGoogleIdentityProvider({
+    String webClientId = googleWebClientId,
+    String iosClientId = googleIosClientId,
+  }) : _webClientId = webClientId.trim(),
+       _iosClientId = iosClientId.trim();
 
   final String _webClientId;
+  final String _iosClientId;
   Future<void>? _initialization;
 
   @override
   bool get isConfigured => _webClientId.isNotEmpty;
 
   Future<void> _initialize() {
+    final isApple =
+        defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.macOS;
     return _initialization ??= GoogleSignIn.instance.initialize(
+      clientId: isApple && _iosClientId.isNotEmpty ? _iosClientId : null,
       serverClientId: _webClientId,
     );
   }

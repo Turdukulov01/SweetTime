@@ -485,6 +485,15 @@ below remains authoritative; this section records the current execution order.
   video gradient; tapping it expands the localized description and date. Existing play/pause, sound toggle,
   close and Android Back behavior remains. Flutter analyze and 84/84 tests pass; release APK is built, but the
   target Redmi disconnected from ADB before installation.
+- [ ] **[implemented locally 2026-07-29; production rollout and iPhone acceptance pending]
+  iOS Google Sign-In and cross-platform video compatibility.** iOS OAuth now declares both the native
+  and backend OAuth client IDs, passes both explicitly to `google_sign_in`, and handles the reversed-client
+  callback in scene and legacy app lifecycles before Flutter routing. Content uploads are normalized by the
+  backend to H.264/yuv420p + AAC with `faststart`; a real WebP preview, duration and dimensions are stored
+  for stories/news. A one-time command creates new immutable URLs for legacy VP9 videos so the 30-day media
+  cache cannot preserve black frames. Flutter analyze and 109/109 tests pass. Remaining acceptance requires
+  backend image build/tests, production backup/deploy, `python -m api.normalize_existing_videos --tenant
+  sweettime`, a fresh Codemagic IPA, Sideloadly installation and physical iPhone Google/video verification.
 - [ ] **[mobile verified 2026-07-22; server rollout and two-account acceptance pending]
   Referral invite links and purpose-specific QR codes.** The loyalty QR now has a barista-only payload;
   a separate invitation tab creates a verified HTTPS App Link with native share/copy actions; scanning

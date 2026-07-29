@@ -11,10 +11,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 from io import BytesIO
+import json
 from pathlib import Path, PurePosixPath
 import re
 import shutil
-from typing import BinaryIO
+import subprocess
+from typing import BinaryIO, Protocol
 from uuid import uuid4
 import warnings
 
@@ -74,6 +76,185 @@ class SavedVideo:
     storage_key: str
     size_bytes: int
     checksum_sha256: str
+    width: int
+    height: int
+    duration_ms: int
+    thumbnail: SavedVariant
+
+
+@dataclass(frozen=True)
+class ProcessedVideo:
+    width: int
+    height: int
+    duration_ms: int
+    thumbnail_width: int
+    thumbnail_height: int
+
+
+class VideoProcessor(Protocol):
+    def process(
+        self,
+        *,
+        source_path: Path,
+        video_path: Path,
+        thumbnail_path: Path,
+    ) -> ProcessedVideo: ...
+
+
+class FfmpegVideoProcessor:
+    """Normalize arbitrary MP4 uploads for AVFoundation and Android.
+
+    An MP4 container does not imply an iOS-compatible video codec. In
+    particular, AVFoundation can initialize VP9-in-MP4 and play its audio while
+    producing only black frames. Every upload is therefore normalized to
+    H.264/yuv420p + AAC and a WebP preview is generated from the normalized
+    result.
+    """
+
+    def __init__(self, *, timeout_seconds: int = 300) -> None:
+        self.timeout_seconds = timeout_seconds
+
+    def process(
+        self,
+        *,
+        source_path: Path,
+        video_path: Path,
+        thumbnail_path: Path,
+    ) -> ProcessedVideo:
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-nostdin",
+                    "-y",
+                    "-i",
+                    str(source_path),
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "0:a:0?",
+                    "-vf",
+                    (
+                        "scale=1080:1920:"
+                        "force_original_aspect_ratio=decrease:"
+                        "force_divisible_by=2,format=yuv420p"
+                    ),
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "23",
+                    "-profile:v",
+                    "high",
+                    "-level:v",
+                    "4.1",
+                    "-r",
+                    "30",
+                    "-threads",
+                    "4",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "128k",
+                    "-ac",
+                    "2",
+                    "-movflags",
+                    "+faststart",
+                    str(video_path),
+                ],
+                check=True,
+                timeout=self.timeout_seconds,
+                capture_output=True,
+            )
+            probe = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=codec_name,pix_fmt,width,height:format=duration",
+                    "-of",
+                    "json",
+                    str(video_path),
+                ],
+                check=True,
+                timeout=30,
+                capture_output=True,
+                text=True,
+            )
+            metadata = json.loads(probe.stdout)
+            streams = metadata.get("streams") or []
+            if not streams:
+                raise StorageValidationError("Video stream is missing")
+            stream = streams[0]
+            if stream.get("codec_name") != "h264" or stream.get("pix_fmt") != "yuv420p":
+                raise StorageValidationError("Video normalization produced an unsafe codec")
+            width = int(stream.get("width") or 0)
+            height = int(stream.get("height") or 0)
+            duration_ms = round(
+                float((metadata.get("format") or {}).get("duration") or 0) * 1000
+            )
+            if width <= 0 or height <= 0 or duration_ms <= 0:
+                raise StorageValidationError("Video metadata is invalid")
+
+            preview_png = thumbnail_path.with_suffix(".png")
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-nostdin",
+                    "-y",
+                    "-ss",
+                    "0.1",
+                    "-i",
+                    str(video_path),
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale=720:720:force_original_aspect_ratio=decrease",
+                    str(preview_png),
+                ],
+                check=True,
+                timeout=60,
+                capture_output=True,
+            )
+            with Image.open(preview_png) as preview:
+                preview.load()
+                preview.save(thumbnail_path, "WEBP", quality=82, method=6)
+            preview_png.unlink(missing_ok=True)
+            with Image.open(thumbnail_path) as saved_preview:
+                thumbnail_width, thumbnail_height = saved_preview.size
+            return ProcessedVideo(
+                width=width,
+                height=height,
+                duration_ms=duration_ms,
+                thumbnail_width=thumbnail_width,
+                thumbnail_height=thumbnail_height,
+            )
+        except StorageValidationError:
+            raise
+        except FileNotFoundError as exc:
+            raise StorageValidationError(
+                "Video processing is temporarily unavailable"
+            ) from exc
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            json.JSONDecodeError,
+            OSError,
+            ValueError,
+        ) as exc:
+            raise StorageValidationError(
+                "Video could not be converted to a supported format"
+            ) from exc
 
 
 class StorageService:
@@ -87,12 +268,14 @@ class StorageService:
         max_image_bytes: int,
         max_image_pixels: int,
         max_video_bytes: int = 50 * 1024 * 1024,
+        video_processor: VideoProcessor | None = None,
     ) -> None:
         self.media_root = media_root
         self.public_base_url = public_base_url.rstrip("/")
         self.max_image_bytes = max_image_bytes
         self.max_image_pixels = max_image_pixels
         self.max_video_bytes = max_video_bytes
+        self.video_processor = video_processor or FfmpegVideoProcessor()
 
     def build_storage_key(
         self,
@@ -224,11 +407,7 @@ class StorageService:
         original_filename: str | None,
         declared_content_type: str | None,
     ) -> SavedVideo:
-        """Stream a signature-validated MP4 into a controlled storage key.
-
-        This deliberately does not claim codec validation or transcoding. The
-        admin contract must require an H.264/AAC MP4 from the operator.
-        """
+        """Store a normalized, cross-platform MP4 and generated preview."""
 
         if declared_content_type != "video/mp4":
             raise StorageValidationError("Only video/mp4 is supported")
@@ -243,14 +422,15 @@ class StorageService:
         )
         final_path = self._safe_path(storage_key)
         temp_dir = self.media_root / "temp" / video_id
+        source_path = temp_dir / "upload.mp4"
         temp_path = temp_dir / "video.mp4"
-        digest = sha256()
+        thumbnail_path = temp_dir / "thumbnail.webp"
         size_bytes = 0
         signature = bytearray()
 
         try:
             temp_dir.mkdir(parents=True, exist_ok=False)
-            with temp_path.open("xb") as destination:
+            with source_path.open("xb") as destination:
                 while True:
                     chunk = file_object.read(1024 * 1024)
                     if not chunk:
@@ -260,12 +440,23 @@ class StorageService:
                         raise StorageValidationError("Video file is too large")
                     if len(signature) < 32:
                         signature.extend(chunk[: 32 - len(signature)])
-                    digest.update(chunk)
                     destination.write(chunk)
 
             if not size_bytes:
                 raise StorageValidationError("Video file is empty")
             self._validate_mp4_signature(bytes(signature), size_bytes)
+            processed = self.video_processor.process(
+                source_path=source_path,
+                video_path=temp_path,
+                thumbnail_path=thumbnail_path,
+            )
+            source_path.unlink(missing_ok=True)
+            normalized_size = temp_path.stat().st_size
+            if normalized_size <= 0 or normalized_size > self.max_video_bytes:
+                raise StorageValidationError("Converted video is too large")
+            thumbnail_size = thumbnail_path.stat().st_size
+            with temp_path.open("rb") as normalized:
+                checksum = sha256(normalized.read()).hexdigest()
 
             final_path.parent.parent.mkdir(parents=True, exist_ok=True)
             temp_dir.replace(final_path.parent)
@@ -279,8 +470,24 @@ class StorageService:
             video_id=video_id,
             original_filename=self._safe_filename(original_filename),
             storage_key=storage_key,
-            size_bytes=size_bytes,
-            checksum_sha256=digest.hexdigest(),
+            size_bytes=normalized_size,
+            checksum_sha256=checksum,
+            width=processed.width,
+            height=processed.height,
+            duration_ms=processed.duration_ms,
+            thumbnail=SavedVariant(
+                variant="thumbnail",
+                storage_key=self.build_storage_key(
+                    tenant_slug=tenant_slug,
+                    media_kind=media_kind,
+                    image_id=video_id,
+                    variant="thumbnail",
+                    created_at=created_at,
+                ),
+                size_bytes=thumbnail_size,
+                width=processed.thumbnail_width,
+                height=processed.thumbnail_height,
+            ),
         )
 
     def delete_file(self, storage_key: str) -> None:

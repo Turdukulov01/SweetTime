@@ -28,7 +28,8 @@ workflows:
         script: |
           flutter build ios --release --no-codesign \
             --dart-define=API_BASE=https://lnp-corporation.duckdns.org \
-            --dart-define=GOOGLE_WEB_CLIENT_ID=23205820785-ap4kgng4fef97ie9l69e5erlufjc8v2i.apps.googleusercontent.com
+            --dart-define=GOOGLE_WEB_CLIENT_ID=23205820785-ap4kgng4fef97ie9l69e5erlufjc8v2i.apps.googleusercontent.com \
+            --dart-define=GOOGLE_IOS_CLIENT_ID=23205820785-463eql7n3d8un18e805kqfbb9lmgedbb.apps.googleusercontent.com
       - name: Package unsigned IPA
         script: |
           cd build/ios/iphoneos

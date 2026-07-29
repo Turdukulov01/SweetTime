@@ -182,7 +182,14 @@ def _media_urls(rows: list[MediaFile]) -> tuple[str | None, str | None, str]:
     by_variant = {row.variant: row for row in rows}
     video = by_variant.get("video")
     if video is not None:
-        return storage_service.get_public_url(video.storage_key), None, "video"
+        thumbnail = by_variant.get("thumbnail")
+        return (
+            storage_service.get_public_url(video.storage_key),
+            storage_service.get_public_url(thumbnail.storage_key)
+            if thumbnail
+            else None,
+            "video",
+        )
     medium = by_variant.get("medium")
     thumbnail = by_variant.get("thumbnail")
     if medium is not None:
@@ -967,6 +974,7 @@ def _replace_media(
                 )
         else:
             new_keys.append(saved.storage_key)
+            new_keys.append(saved.thumbnail.storage_key)
             new_rows.append(
                 MediaFile(
                     id=f"{saved.video_id}:video",
@@ -977,10 +985,26 @@ def _replace_media(
                     original_filename=saved.original_filename,
                     mime_type="video/mp4",
                     size_bytes=saved.size_bytes,
-                    width=0,
-                    height=0,
+                    width=saved.width,
+                    height=saved.height,
                     variant="video",
+                    duration_ms=saved.duration_ms,
                     checksum_sha256=saved.checksum_sha256,
+                )
+            )
+            new_rows.append(
+                MediaFile(
+                    id=f"{saved.video_id}:thumbnail",
+                    tenant_id=company_id,
+                    entity_type=entity_type,
+                    entity_id=entity.id,
+                    storage_key=saved.thumbnail.storage_key,
+                    original_filename=saved.original_filename,
+                    mime_type="image/webp",
+                    size_bytes=saved.thumbnail.size_bytes,
+                    width=saved.thumbnail.width,
+                    height=saved.thumbnail.height,
+                    variant="thumbnail",
                 )
             )
         db.add_all(new_rows)

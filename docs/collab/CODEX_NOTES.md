@@ -1757,3 +1757,31 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
   `kg.sweettime.app/.MainActivity`; no recent `AndroidRuntime`/`FATAL EXCEPTION`/Flutter crash lines.
 - Remaining acceptance: manual phone QA for multiple recurring orders, edit/reprice/cancel, and
   admin recurring dashboard visibility with real logged-in owner session.
+
+## 2026-07-29 — iOS OAuth callback and black video root cause
+
+- Reviewed Claude commits `7b90990..1014a72` and inspected the latest unsigned IPA. The IPA really contained
+  the iOS client ID, reversed URL scheme and the attempted Impeller opt-out; the problem was not an old
+  Codemagic artifact.
+- Downloaded the actual production story/news MP4 files. Two files that reproduce black video contain
+  `vp09` + `mp4a`; the H.264 sample contains `avc1` + `mp4a`. Thus `Content-Type: video/mp4` was insufficient:
+  AVFoundation could play audio from the VP9-in-MP4 files while rendering no frame. The previous
+  `FLTEnableImpeller=false` workaround did not address the stored codec and was removed.
+- `backend/api/storage.py` now runs ffmpeg for every admin video upload and emits H.264 High/yuv420p level
+  4.1 + AAC, `faststart`, a WebP thumbnail, dimensions and duration. `content.py` stores/returns the preview.
+  The production backend image now installs ffmpeg. `backend/api/normalize_existing_videos.py` replaces old
+  media with normalized files under new UUID URLs, deliberately bypassing the immutable 30-day cache.
+  Inner and example host nginx configs give only authenticated story/news media uploads a 600-second
+  processing timeout; the generic API timeout remains 60 seconds.
+- Google configuration now includes `GIDServerClientID`; Dart passes explicit iOS and Web client IDs.
+  SceneDelegate handles the Google callback before forwarding unhandled URLs to Flutter, and AppDelegate has
+  the official legacy lifecycle fallback. Both Codemagic and GitHub iOS workflows pass the iOS client ID.
+  Mobile version is bumped to `1.0.10+11` for an unambiguous replacement build.
+- Checks completed locally: `flutter analyze --no-pub` clean; `flutter test --no-pub` 109/109 passed;
+  `git diff --check` clean. Backend runtime tests could not run on this Windows host because Python and a
+  Docker daemon are unavailable; the storage test has a deterministic injected video processor.
+- Production and the installed iPhone app have not been changed yet. Required rollout order: backup; deploy
+  and build ffmpeg-enabled backend; run backend tests/smoke; execute
+  `python -m api.normalize_existing_videos --tenant sweettime`; verify new media URLs and thumbnails; build
+  a fresh IPA in Codemagic; install with Sideloadly; test Google login and every video on the physical iPhone.
+- Do not include `.codex-phone-install.png` in any commit.

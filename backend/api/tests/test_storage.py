@@ -4,7 +4,7 @@ from io import BytesIO
 import pytest
 from PIL import Image
 
-from api.storage import StorageService, StorageValidationError
+from api.storage import ProcessedVideo, StorageService, StorageValidationError
 
 
 def _service(tmp_path) -> StorageService:
@@ -116,9 +116,25 @@ def test_delete_image_variants_removes_uuid_directory(tmp_path) -> None:
 
 
 def _minimal_mp4(payload: bytes = b"payload") -> bytes:
-    # 20-byte ftyp box followed by opaque bytes. Codec validation/transcoding is
-    # deliberately outside this first backend slice.
+    # 20-byte ftyp box followed by opaque bytes. Unit tests inject a fake
+    # processor; production always uses ffmpeg normalization.
     return (20).to_bytes(4, "big") + b"ftyp" + b"isom" + b"\x00\x00\x00\x00" + b"isom" + payload
+
+
+class _FakeVideoProcessor:
+    def process(self, *, source_path, video_path, thumbnail_path) -> ProcessedVideo:
+        video_path.write_bytes(source_path.read_bytes() + b"-h264")
+        Image.new("RGB", (180, 320), "#ff5c9a").save(
+            thumbnail_path,
+            "WEBP",
+        )
+        return ProcessedVideo(
+            width=1080,
+            height=1920,
+            duration_ms=6000,
+            thumbnail_width=180,
+            thumbnail_height=320,
+        )
 
 
 def test_save_mp4_streams_signature_validated_file(tmp_path) -> None:
@@ -128,6 +144,7 @@ def test_save_mp4_streams_signature_validated_file(tmp_path) -> None:
         max_image_bytes=1024,
         max_image_pixels=1_000,
         max_video_bytes=1024,
+        video_processor=_FakeVideoProcessor(),
     )
     saved = service.save_mp4(
         tenant_slug="sweettime",
@@ -140,6 +157,11 @@ def test_save_mp4_streams_signature_validated_file(tmp_path) -> None:
     assert saved.storage_key.endswith("/video.mp4")
     assert len(saved.checksum_sha256) == 64
     assert service.media_root.joinpath(*saved.storage_key.split("/")).is_file()
+    assert saved.thumbnail.storage_key.endswith("/thumbnail.webp")
+    assert service.media_root.joinpath(
+        *saved.thumbnail.storage_key.split("/")
+    ).is_file()
+    assert (saved.width, saved.height, saved.duration_ms) == (1080, 1920, 6000)
 
 
 @pytest.mark.parametrize(

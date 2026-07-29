@@ -6,7 +6,10 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 COPY backend/api/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY backend/api /app/api
 RUN chmod -R a+rX /app/api

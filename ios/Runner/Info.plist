@@ -4,10 +4,6 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
-	<!-- video_player на iOS с Impeller рендерит кадр чёрным (звук есть) —
-	     известный баг текстур. Пока переключаем iOS-рендер на Skia. -->
-	<key>FLTEnableImpeller</key>
-	<false/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -37,6 +33,9 @@
 	<!-- Google Sign-In (iOS): плагин google_sign_in читает iOS client ID отсюда. -->
 	<key>GIDClientID</key>
 	<string>23205820785-463eql7n3d8un18e805kqfbb9lmgedbb.apps.googleusercontent.com</string>
+	<!-- Web OAuth client used to mint the ID token accepted by SweetTime API. -->
+	<key>GIDServerClientID</key>
+	<string>23205820785-ap4kgng4fef97ie9l69e5erlufjc8v2i.apps.googleusercontent.com</string>
 	<!-- OAuth callback: reversed iOS client ID как URL scheme. -->
 	<key>CFBundleURLTypes</key>
 	<array>
