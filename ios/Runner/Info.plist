@@ -4,6 +4,10 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<!-- video_player на iOS с Impeller рендерит кадр чёрным (звук есть) —
+	     известный баг текстур. Пока переключаем iOS-рендер на Skia. -->
+	<key>FLTEnableImpeller</key>
+	<false/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
