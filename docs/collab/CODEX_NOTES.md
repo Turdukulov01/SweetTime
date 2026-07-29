@@ -1785,3 +1785,30 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
   `python -m api.normalize_existing_videos --tenant sweettime`; verify new media URLs and thumbnails; build
   a fresh IPA in Codemagic; install with Sideloadly; test Google login and every video on the physical iPhone.
 - Do not include `.codex-phone-install.png` in any commit.
+
+### 2026-07-29 production rollout status
+
+- Owner ran the verified deployment package `dist/sweettime-ios-media-fix-2bdd4ca.tar.gz`.
+- Production backend image was rebuilt with ffmpeg and all three existing SweetTime story/news videos
+  were normalized successfully: `converted=3, failed=0`.
+- Compose reported PostgreSQL, admin, backend and nginx healthy; public `/ready` returned HTTP 200.
+- Host nginx configuration passed `nginx -t` and was reloaded.
+- The verification shell exited after `/ready` because the check used the obsolete/nonexistent
+  `/home-stories` path instead of `/stories/home`; the resulting 404 JSON was then parsed as a story
+  list. This happened after the successful rollout and did not roll anything back.
+- Remaining acceptance: verify current DB-backed video rows expose thumbnails and H.264/yuv420p files,
+  then install the Codemagic `1.0.10+11` IPA and test Google callback plus story/feed video image on iPhone.
+
+### 2026-07-29 physical iPhone acceptance follow-up
+
+- Owner installed Codemagic build `1.0.10+11`. The Google account chooser/callback now completes and
+  production video previews render, confirming both original iOS client-side failures are fixed.
+- The subsequent backend exchange is rejected because production
+  `GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS` was created before the iOS OAuth client and contains only the
+  Android debug/release presenters. The iOS token uses the Web client as `aud` and the iOS client as
+  `azp`; the verifier correctly rejects an `azp` absent from the explicit app-family allowlist.
+- `deploy/production/.env.example` now includes the iOS client ID
+  `23205820785-463eql7n3d8un18e805kqfbb9lmgedbb.apps.googleusercontent.com`.
+- Remaining production action: back up `.env`, add that iOS ID to
+  `GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS`, recreate backend/nginx, verify loaded settings, and retry the
+  same installed IPA. No new mobile build is required for this configuration-only correction.
