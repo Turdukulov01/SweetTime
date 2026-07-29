@@ -1,0 +1,67 @@
+name: iOS build (unsigned IPA)
+
+# Собирает НЕподписанный .ipa на облачном macOS-раннере GitHub (Xcode предустановлен).
+# Подпись и установку на iPhone делает Sideloadly с бесплатным Apple ID — Mac НЕ нужен.
+#
+# Запуск: вкладка Actions → "iOS build (unsigned IPA)" → Run workflow (ветка main),
+#         либо push тега вида `ios-v1`.
+# Результат: артефакт "SweetTime-ios-unsigned" (скачать внизу страницы прогона) → в Sideloadly.
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "ios-*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    runs-on: macos-14 # Apple Silicon раннер с предустановленным Xcode
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.5
+          channel: stable
+          cache: true
+
+      - name: Flutter / Xcode versions
+        run: |
+          flutter --version
+          xcodebuild -version
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      # --no-codesign: сборка без подписи (её сделает Sideloadly).
+      # API_BASE/GOOGLE_WEB_CLIENT_ID — публичные (не секреты); в коде есть дефолты,
+      # передаём явно для наглядности и совпадения с релизным Android.
+      - name: Build iOS (release, unsigned)
+        run: >
+          flutter build ios --release --no-codesign
+          --dart-define=API_BASE=https://lnp-corporation.duckdns.org
+          --dart-define=GOOGLE_WEB_CLIENT_ID=23205820785-ap4kgng4fef97ie9l69e5erlufjc8v2i.apps.googleusercontent.com
+
+      # .app → Payload/ → zip → .ipa (Sideloadly принимает такой unsigned .ipa).
+      - name: Package unsigned IPA
+        run: |
+          cd build/ios/iphoneos
+          rm -rf Payload SweetTime-unsigned.ipa
+          mkdir Payload
+          mv Runner.app Payload/Runner.app
+          zip -qry SweetTime-unsigned.ipa Payload
+          ls -lh SweetTime-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SweetTime-ios-unsigned
+          path: build/ios/iphoneos/SweetTime-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
