@@ -1,0 +1,41 @@
+# Codemagic CI — бесплатная сборка НЕподписанного iOS .ipa (для Sideloadly).
+# Не зависит от биллинга GitHub Actions. 500 бесплатных macOS-минут/мес.
+#
+# Настройка (один раз): codemagic.io → войти через GitHub → Add application →
+#   выбрать репозиторий SweetTime → "I have a codemagic.yaml" → workflow ios-unsigned.
+# Запуск: кнопка Start new build → workflow "iOS unsigned (Sideloadly)".
+# Результат: артефакт SweetTime-unsigned.ipa в конце сборки → скачать → Sideloadly.
+
+workflows:
+  ios-unsigned:
+    name: iOS unsigned (Sideloadly)
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    environment:
+      flutter: 3.44.5
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Flutter/Xcode versions
+        script: |
+          flutter --version
+          xcodebuild -version
+      - name: Get packages
+        script: flutter pub get
+      # --no-codesign: подпись сделает Sideloadly бесплатным Apple ID.
+      # API_BASE/GOOGLE_WEB_CLIENT_ID — публичные (в коде есть дефолты).
+      - name: Build iOS (release, unsigned)
+        script: |
+          flutter build ios --release --no-codesign \
+            --dart-define=API_BASE=https://lnp-corporation.duckdns.org \
+            --dart-define=GOOGLE_WEB_CLIENT_ID=23205820785-ap4kgng4fef97ie9l69e5erlufjc8v2i.apps.googleusercontent.com
+      - name: Package unsigned IPA
+        script: |
+          cd build/ios/iphoneos
+          rm -rf Payload SweetTime-unsigned.ipa
+          mkdir Payload
+          mv Runner.app Payload/Runner.app
+          zip -qry SweetTime-unsigned.ipa Payload
+          ls -lh SweetTime-unsigned.ipa
+    artifacts:
+      - build/ios/iphoneos/SweetTime-unsigned.ipa
