@@ -346,6 +346,12 @@ class _MemoryPreferences implements LanguagePreferenceStore {
 
   @override
   Future<void> writeBackgroundOverride(String? value) async {}
+
+  @override
+  Future<String?> readSelectedBranchId() async => null;
+
+  @override
+  Future<void> writeSelectedBranchId(String value) async {}
 }
 
 class _MemoryCartStore implements CartStore {

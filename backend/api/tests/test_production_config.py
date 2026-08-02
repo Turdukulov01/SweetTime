@@ -30,6 +30,45 @@ def test_secure_production_settings_are_accepted() -> None:
     assert settings.seed_mode == "none"
 
 
+def test_smtp_delivery_accepts_authenticated_or_ip_relay_configuration() -> None:
+    authenticated = _production_settings(
+        staff_invite_delivery_mode="smtp",
+        smtp_host="smtp.example.com",
+        smtp_from_email="no-reply@example.com",
+        smtp_username="provider-user",
+        smtp_password="provider-secret",
+    )
+    relay = _production_settings(
+        staff_invite_delivery_mode="smtp",
+        smtp_host="relay.example.com",
+        smtp_from_email="no-reply@example.com",
+        smtp_username="",
+        smtp_password="",
+    )
+
+    assert authenticated.staff_invite_delivery_mode == "smtp"
+    assert relay.smtp_username == ""
+    assert relay.smtp_password == ""
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"smtp_host": "", "smtp_from_email": "no-reply@example.com"},
+        {"smtp_host": "smtp.example.com", "smtp_from_email": ""},
+        {
+            "smtp_host": "smtp.example.com",
+            "smtp_from_email": "no-reply@example.com",
+            "smtp_username": "provider-user",
+            "smtp_password": "",
+        },
+    ],
+)
+def test_smtp_delivery_rejects_incomplete_configuration(override: dict) -> None:
+    with pytest.raises(ValidationError):
+        _production_settings(staff_invite_delivery_mode="smtp", **override)
+
+
 @pytest.mark.parametrize(
     "override",
     [

@@ -46,9 +46,12 @@ below remains authoritative; this section records the current execution order.
   SMTP is not configured. The employee follows the HTTPS link and creates their own password; only a
   SHA-256 token digest is stored and accepted/revoked/expired links cannot be reused. Owner-only
   management, inactive-account rejection, branch-scoped barista order access and SSE revalidation are
-  enforced server-side. Migration: `d8e42c1a7f90`. Remaining acceptance: run backend tests against
-  PostgreSQL, deploy/migrate, configure and verify SMTP (manual-link delivery is the current safe
-  fallback), then complete owner/manager/barista browser acceptance.
+  enforced server-side. Migration: `d8e42c1a7f90`. SMTP delivery now has authenticated STARTTLS,
+  implicit SSL and approved relay coverage; failure logs exclude recipient local-parts, credentials,
+  provider responses and invite tokens. The full backend suite is 132/132 green. Remaining acceptance:
+  deploy/migrate, configure a real provider plus verified sender/SPF/DKIM/DMARC, verify an external
+  inbox (manual-link delivery remains the current safe fallback), then complete owner/manager/barista
+  browser acceptance.
 - [x] **Product detail media.** **[verified locally]** Product detail and cart-line editing now use
   the server product image first, then a bundled asset and finally generated drink art. Decode/network
   failures fall back safely; targeted Flutter analysis and 3/3 media regressions pass.
@@ -265,6 +268,19 @@ below remains authoritative; this section records the current execution order.
 - [x] Existing scaffold has a small `lib/main.dart`, feature folders, and `go_router`; Task 3 must still document and validate the final boundaries/deep-link behavior.
 - [ ] Define mock-first repository interfaces and separate mock/API implementations; demo/offline fallback must be explicit, not silent production behavior.
 - [ ] **Task 4 — Complete all P0 Flutter surfaces** from `UX_UI_BRIEF.md`, including guest/auth return-to-checkout, branch availability, promo, order lifecycle, loyalty ledger, referral, settings, and deletion.
+- [x] **[verified locally and on Android 2026-08-02]** Cart has a global confirmed clear action.
+  Catalog/Home/Product disclose selected-branch availability before configuration, provide `My branch`
+  and `All branches` scopes, never auto-add after branch changes, disable closed/incompatible branches,
+  and block checkout until every retained cart row is compatible. Catalog refresh rebinds cart rows by
+  stable IDs/current pricing. The selected open branch now survives restart; a stale/closed saved branch
+  falls back to the first open branch. Quick-add uses the cheapest size and no paid toppings, and cart
+  reconciliation shows an explicit notice when server catalog data changes a retained row. Flutter analyze
+  and 122/122 tests pass; the signed production APK was
+  installed over existing Redmi data and the cart/catalog smoke passed.
+- [ ] **[implemented locally 2026-08-02; physical iPhone acceptance pending]** Root pushed routes and
+  the shell own branded surfaces so Cupertino transitions no longer reveal/compose the outgoing
+  transparent screen. Duplicate backgrounds and broad Product/Loyalty rebuild subscriptions were
+  reduced. Route regression tests pass; confirm frame pacing and visual transitions on the next IPA.
 - [x] **[verified local prototype 2026-07-13]** Guest Cart -> Auth -> Checkout preserves cart state;
   direct Checkout and both local/API order methods reject guests. Auth cancellation clears the
   pending return destination. Phone input is limited to fixed `+996` plus exactly nine digits and

@@ -132,11 +132,10 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       colorScheme: colors,
-      // Прозрачный, чтобы глобальный BrandedBackground (см. main.dart builder)
-      // был виден под КАЖДЫМ экраном. Сплошную заливку даёт сам
-      // BrandedBackground (ColoredBox по base-цвету), поэтому чёрных
-      // просветов при переходах нет. AppBar/Card/BottomSheet имеют
-      // собственный surface и остаются непрозрачными.
+      // Прозрачный, чтобы route-level BrandedBackground из router.dart был
+      // виден под экраном. Каждый push-маршрут имеет собственную сплошную
+      // поверхность, поэтому во время Cupertino-перехода предыдущий экран не
+      // просвечивает. AppBar/Card/BottomSheet остаются непрозрачными.
       scaffoldBackgroundColor: Colors.transparent,
       textTheme: textTheme.copyWith(
         headlineLarge: textTheme.headlineLarge?.copyWith(

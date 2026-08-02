@@ -45,6 +45,84 @@ extension CatalogProductLocalizations on AppLocalizations {
   String get resetFilters =>
       _pick('Сбросить фильтры', 'Чыпкаларды тазалоо', 'Reset filters');
 
+  String get catalogBranchScope =>
+      _pick('Меню филиала', 'Филиалдын менюсу', 'Branch menu');
+
+  String myBranch(String branchName) => _pick(
+    'Мой филиал · $branchName',
+    'Менин филиалым · $branchName',
+    'My branch · $branchName',
+  );
+
+  String get allBranches =>
+      _pick('Все филиалы', 'Бардык филиалдар', 'All branches');
+
+  String availableAtBranch(String branchName) => _pick(
+    'Доступно в «$branchName»',
+    '«$branchName» филиалында бар',
+    'Available at “$branchName”',
+  );
+
+  String get unavailableAtBranchTitle => _pick(
+    'Нет в выбранном филиале',
+    'Тандалган филиалда жок',
+    'Not at the selected branch',
+  );
+
+  String unavailableAtBranchHint(String branchName) => _pick(
+    'Эти товары можно посмотреть, но для заказа нужно выбрать другой филиал вместо «$branchName».',
+    'Бул товарларды көрүүгө болот, бирок заказ үчүн «$branchName» ордуна башка филиалды тандаңыз.',
+    'You can still view these items, but choose another branch instead of “$branchName” to order them.',
+  );
+
+  String allBranchesHint(String branchName) => _pick(
+    'Показаны все товары. Доступность и быстрая корзина проверяются для «$branchName».',
+    'Бардык товарлар көрсөтүлдү. Жеткиликтүүлүк жана тез себет «$branchName» үчүн текшерилет.',
+    'Showing every item. Availability and quick add are checked for “$branchName”.',
+  );
+
+  String get chooseAvailableBranch =>
+      _pick('Выбрать филиал', 'Филиалды тандоо', 'Choose a branch');
+
+  String chooseBranchForProduct(String productName) => _pick(
+    'Где доступен «$productName»',
+    '«$productName» кайда бар',
+    'Where “$productName” is available',
+  );
+
+  String get branchDoesNotStockProduct => _pick(
+    'В этом филиале товара нет',
+    'Бул филиалда товар жок',
+    'Not available at this branch',
+  );
+
+  String get branchClosed => _pick(
+    'Филиал временно не принимает заказы',
+    'Филиал убактылуу заказ кабыл албайт',
+    'This branch is temporarily not accepting orders',
+  );
+
+  String branchSelectedForProduct(
+    String branchName,
+    String productName,
+  ) => _pick(
+    'Выбран «$branchName». Теперь «$productName» можно добавить в корзину.',
+    '«$branchName» тандалды. Эми «$productName» товарын себетке кошсо болот.',
+    '“$branchName” selected. You can now add “$productName” to the cart.',
+  );
+
+  String get productUnavailableEverywhere => _pick(
+    'Сейчас товар недоступен во всех филиалах',
+    'Товар азыр бардык филиалдарда жеткиликсиз',
+    'This item is currently unavailable at every branch',
+  );
+
+  String get productAddFailed => _pick(
+    'Не удалось добавить товар. Обновите каталог и попробуйте снова.',
+    'Товар кошулган жок. Каталогду жаңыртып, кайра аракет кылыңыз.',
+    'Could not add the item. Refresh the catalog and try again.',
+  );
+
   String reviewCount(int count) => _pick(
     '$count ${_russianReviews(count)}',
     '$count сын-пикир',
@@ -78,9 +156,9 @@ extension CatalogProductLocalizations on AppLocalizations {
   );
 
   String productUnavailableAtBranch(String branchName) => _pick(
-    'Этого напитка сейчас нет в «$branchName». Выберите другой филиал на главной.',
-    '«$branchName» филиалында бул суусундук азыр жок. Башкы беттен башка филиалды тандаңыз.',
-    'This drink is currently unavailable at “$branchName”. Choose another branch on Home.',
+    'Этого напитка сейчас нет в «$branchName». Выберите подходящий филиал здесь — настройки сохранятся.',
+    '«$branchName» филиалында бул суусундук азыр жок. Ылайыктуу филиалды ушул жерден тандаңыз — жөндөөлөр сакталат.',
+    'This drink is currently unavailable at “$branchName”. Choose a suitable branch here; your options will stay selected.',
   );
 
   String get back => _pick('Назад', 'Артка', 'Back');

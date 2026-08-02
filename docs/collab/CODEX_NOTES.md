@@ -1812,3 +1812,66 @@ feed post и MP4 story, затем проверить RU/KY/EN, expiry и Androi
 - Remaining production action: back up `.env`, add that iOS ID to
   `GOOGLE_OAUTH_AUTHORIZED_PARTY_IDS`, recreate backend/nginx, verify loaded settings, and retry the
   same installed IPA. No new mobile build is required for this configuration-only correction.
+
+### 2026-08-02 cart, branch availability, route surfaces, and staff email delivery
+
+- Added a global cart clear action with an explicit destructive confirmation. Clearing also resets
+  promo/bonus state and persists the empty local cart. Stable cart row snapshots prevent index errors
+  while removing several rows at once.
+- Added branch-aware catalog UX in RU/KY/EN: `My branch` and `All branches` scopes, available products
+  first, a separate unavailable section, disabled closed/incompatible branches, and an explicit branch
+  picker before adding an unavailable product. Changing branch never auto-adds a product. Home quick-add
+  and product details use the same rule.
+- The cart keeps locally selected products but clearly lists rows unavailable at the current branch,
+  offers only a branch compatible with the whole cart, and blocks checkout until the conflict is resolved.
+  Server catalog refresh now rebinds stored cart rows by stable product/modifier IDs and current prices.
+- Fixed the iOS transition overlap shown in screenshots: every root pushed route and the shell now owns
+  an opaque branded surface instead of revealing the outgoing transparent route. Removed duplicate nested
+  backgrounds, isolated pattern painting in a `RepaintBoundary`, and narrowed Product/Loyalty provider
+  subscriptions to reduce unrelated rebuilds. Physical iPhone smoothness still needs confirmation on the
+  next IPA; the regression is covered by route-surface widget tests.
+- Staff invitation SMTP adapter is production-configurable for authenticated STARTTLS, implicit SSL, or
+  approved anonymous/IP relay. Failures are reported honestly while logs omit recipient local-part,
+  provider response, password, and invitation token. Compose now forwards `SMTP_TIMEOUT_SECONDS`.
+- Real email delivery is intentionally not claimed yet: production stays in manual mode until an SMTP
+  provider/relay, verified sender, credentials, and SPF/DKIM/DMARC are configured in the server `.env`,
+  backend is recreated, and an external inbox acceptance test succeeds.
+- Checks: Flutter analyze clean; Flutter tests `117/117`; backend tests `132/132`; admin typecheck clean and
+  content tests `15/15`. Admin production compilation and page generation succeeded; Windows standalone
+  trace copy alone hit an OS `EPERM` symlink restriction (Linux/Docker build is unaffected). `git diff --check`
+  clean; public `/ready` HTTP 200.
+- Built signed Android release `1.0.10+11` with the production API/Google IDs and installed it over the
+  existing app on Redmi Note 9 Pro `f3bff2a5` without clearing data. Cold launch succeeded, no Flutter/
+  AndroidRuntime fatal logs appeared, production content loaded, cart confirmation was opened/cancelled
+  with all six rows preserved, and the catalog exposed both branch scopes.
+- New files: `lib/shared/widgets/branch_picker.dart` and
+  `backend/api/tests/test_staff_email.py`. Do not include unrelated `.codex-phone-install.png` in a commit.
+
+### 2026-08-02 final branch/transition review and Android acceptance
+
+- Closed branch rows in the shared picker are visible but disabled; Home now uses that same picker instead
+  of a second permissive implementation. Product detail handles a product removed during a live catalog
+  refresh without `firstWhere` crashes and offers a safe return to the catalog.
+- The selected open branch is persisted locally and restored after restart. Missing or newly closed saved
+  branches fall back to the first open branch and the corrected preference is persisted. Home and catalog
+  quick-add now use the cheapest size and no paid toppings, matching the displayed starting price.
+- Catalog reconciliation explicitly flags cart rows removed or repriced by the server and shows a localized
+  notice in Cart (including when reconciliation makes the cart empty). The user can acknowledge the notice;
+  clear-cart, completed checkout and account deletion reset it intentionally.
+- Removed the redundant app-wide `BrandedBackground` after verifying route coverage. Shell and pushed root
+  routes retain their own opaque branded surfaces, reducing normal GPU overdraw from two layers to one and
+  transition overdraw from three layers to two. Independent route review passed; physical iPhone frame
+  pacing remains the only acceptance step that cannot be performed from the connected Android device.
+- Final checks: Flutter analyze clean; complete Flutter suite `122/122`; backend `132/132`; admin typecheck
+  clean and content tests `15/15`; `git diff --check` clean; public `/ready` HTTP 200. Both independent SMTP
+  and branch/catalog audits passed.
+- Built production-signed Android `1.0.10+12` (versionCode 12; signer SHA-256
+  `0312d7d2993769a8169e0ce4815d4c9b96e9008c4b95fe8ed66d2a873fccd044`) and installed it over the existing
+  Redmi Note 9 Pro app without clearing application data. Cold launch completed in about 1.9 seconds with
+  no Flutter/Android fatal log. Production content and both branch scopes loaded. From the initially empty
+  cart, a temporary quick-add produced the advertised 360 som S/no-paid-topping row; clear confirmation was
+  cancelled once, then confirmed, returning the phone to its original empty-cart state.
+- Residual non-blocking limitation: an offline cold start cannot identify a price-only catalog change made
+  while the app was closed because legacy `CartDraftItem` intentionally stores IDs/options rather than the
+  previous server price. Current server data is still applied correctly; only that explanatory notice is
+  absent in this narrow scenario.

@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/format.dart';
 import '../../core/localization/app_localizations.dart';
+import '../../shared/app_models.dart';
 import '../../shared/app_state.dart';
+import '../../shared/widgets/branch_picker.dart';
 import '../../shared/widgets/common.dart';
 
 class CartPage extends ConsumerStatefulWidget {
@@ -60,35 +62,197 @@ class _CartPageState extends ConsumerState<CartPage> {
     );
   }
 
+  Future<void> _confirmClearCart(
+    AppStateController controller,
+    AppLocalizations strings,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(strings.clearCartTitle),
+        content: Text(strings.clearCartMessage),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(strings.keepCart),
+          ),
+          FilledButton(
+            key: const ValueKey('confirm-clear-cart'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(strings.clearCart),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    _promoController.clear();
+    _pointsController.clear();
+    setState(() => _promoInvalid = false);
+    await controller.clearCart();
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(appStateProvider);
     final controller = ref.read(appStateProvider.notifier);
     final theme = Theme.of(context);
     final strings = AppLocalizations.of(context);
+    final unavailable = state.unavailableForSelectedBranch();
+    final compatibleBranchIds = state.branches
+        .where(
+          (branch) =>
+              branch.isOpen &&
+              state.cart.every((item) => item.product.availableIn(branch)),
+        )
+        .map((branch) => branch.id)
+        .toSet();
+
+    Future<void> chooseCompatibleBranch() async {
+      final branch = await showBranchPicker(
+        context,
+        branches: state.branches,
+        selectedBranch: state.selectedBranch,
+        availableBranchIds: compatibleBranchIds,
+        title: strings.chooseCompatibleBranch,
+      );
+      if (!mounted || branch == null) return;
+      controller.selectBranch(branch);
+    }
 
     if (state.cart.isEmpty) {
       return Scaffold(
         appBar: AppBar(title: Text(strings.cart)),
-        body: EmptyState(
-          icon: Icons.shopping_bag_outlined,
-          title: strings.emptyCartTitle,
-          message: strings.emptyCartMessage,
-          action: FilledButton(
-            onPressed: () => context.go('/catalog'),
-            child: Text(strings.goToCatalog),
-          ),
+        body: Column(
+          children: [
+            if (state.cartCatalogAdjusted)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: _CartCatalogAdjustmentCard(
+                  onAcknowledge: controller.acknowledgeCartCatalogAdjustment,
+                ),
+              ),
+            Expanded(
+              child: EmptyState(
+                icon: Icons.shopping_bag_outlined,
+                title: strings.emptyCartTitle,
+                message: strings.emptyCartMessage,
+                action: FilledButton(
+                  onPressed: () => context.go('/catalog'),
+                  child: Text(strings.goToCatalog),
+                ),
+              ),
+            ),
+          ],
         ),
       );
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text(strings.cart)),
+      appBar: AppBar(
+        title: Text(strings.cart),
+        actions: [
+          Tooltip(
+            message: strings.clearCartTooltip,
+            child: TextButton.icon(
+              key: const ValueKey('clear-cart-button'),
+              onPressed: () => _confirmClearCart(controller, strings),
+              icon: const Icon(Icons.delete_sweep_outlined),
+              label: Text(strings.clearCart),
+              style: TextButton.styleFrom(
+                foregroundColor: theme.colorScheme.error,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         children: [
+          if (state.cartCatalogAdjusted) ...[
+            _CartCatalogAdjustmentCard(
+              onAcknowledge: controller.acknowledgeCartCatalogAdjustment,
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (unavailable.isNotEmpty) ...[
+            Card(
+              key: const ValueKey('cart-branch-availability-warning'),
+              color: theme.colorScheme.tertiaryContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.location_off_outlined,
+                          color: theme.colorScheme.onTertiaryContainer,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            strings.cartUnavailableTitle(unavailable.length),
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: theme.colorScheme.onTertiaryContainer,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      strings.cartUnavailableMessage(
+                        state.selectedBranch.name.resolve(strings.language),
+                      ),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onTertiaryContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final item in unavailable)
+                          Chip(
+                            visualDensity: VisualDensity.compact,
+                            label: Text(
+                              item.product.name.resolve(strings.language),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (compatibleBranchIds.isNotEmpty)
+                      FilledButton.tonalIcon(
+                        key: const ValueKey('cart-choose-branch-button'),
+                        onPressed: chooseCompatibleBranch,
+                        icon: const Icon(Icons.storefront_outlined),
+                        label: Text(strings.chooseCompatibleBranch),
+                      )
+                    else
+                      Text(
+                        strings.noCompatibleBranch,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onTertiaryContainer,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           for (var i = 0; i < state.cart.length; i++) ...[
-            _CartItemCard(index: i),
+            _CartItemCard(index: i, item: state.cart[i]),
             const SizedBox(height: 12),
           ],
           const SizedBox(height: 8),
@@ -215,21 +379,23 @@ class _CartPageState extends ConsumerState<CartPage> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
           child: FilledButton(
             key: const ValueKey('cart-checkout-button'),
-            onPressed: () async {
-              // A non-empty promo is checked against the latest active
-              // promotions before navigation. Empty input remains optional.
-              if (!await _validatePromoBeforeCheckout(controller)) return;
-              if (!context.mounted) return;
-              final currentState = ref.read(appStateProvider);
-              if (!currentState.accountReady) {
-                controller.requestAuthentication(
-                  AuthReturnDestination.checkout,
-                );
-                context.push(AuthReturnDestination.checkout.authLocation);
-                return;
-              }
-              context.push(AuthReturnDestination.checkout.location);
-            },
+            onPressed: unavailable.isNotEmpty
+                ? null
+                : () async {
+                    // A non-empty promo is checked against the latest active
+                    // promotions before navigation. Empty input remains optional.
+                    if (!await _validatePromoBeforeCheckout(controller)) return;
+                    if (!context.mounted) return;
+                    final currentState = ref.read(appStateProvider);
+                    if (!currentState.accountReady) {
+                      controller.requestAuthentication(
+                        AuthReturnDestination.checkout,
+                      );
+                      context.push(AuthReturnDestination.checkout.authLocation);
+                      return;
+                    }
+                    context.push(AuthReturnDestination.checkout.location);
+                  },
             child: Text(
               strings.checkoutWithTotal(
                 formatSom(state.total, strings.language),
@@ -242,14 +408,71 @@ class _CartPageState extends ConsumerState<CartPage> {
   }
 }
 
+class _CartCatalogAdjustmentCard extends StatelessWidget {
+  const _CartCatalogAdjustmentCard({required this.onAcknowledge});
+
+  final VoidCallback onAcknowledge;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final strings = AppLocalizations.of(context);
+    return Card(
+      key: const ValueKey('cart-catalog-adjustment-warning'),
+      color: theme.colorScheme.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 10, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.sync_problem_outlined,
+                  color: theme.colorScheme.onSecondaryContainer,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    strings.cartCatalogAdjustedTitle,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: theme.colorScheme.onSecondaryContainer,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              strings.cartCatalogAdjustedMessage,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSecondaryContainer,
+              ),
+            ),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton(
+                key: const ValueKey('acknowledge-cart-adjustment'),
+                onPressed: onAcknowledge,
+                child: Text(strings.understood),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CartItemCard extends ConsumerWidget {
-  const _CartItemCard({required this.index});
+  const _CartItemCard({required this.index, required this.item});
 
   final int index;
+  final CartItem item;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final item = ref.watch(appStateProvider.select((s) => s.cart[index]));
     final controller = ref.read(appStateProvider.notifier);
     final theme = Theme.of(context);
     final strings = AppLocalizations.of(context);

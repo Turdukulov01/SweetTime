@@ -14,11 +14,15 @@ class ProductCard extends ConsumerWidget {
     required this.product,
     required this.onTap,
     this.onAdd,
+    this.availableAtSelectedBranch = true,
+    this.onChooseBranch,
   });
 
   final Product product;
   final VoidCallback onTap;
   final VoidCallback? onAdd;
+  final bool availableAtSelectedBranch;
+  final VoidCallback? onChooseBranch;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -71,6 +75,14 @@ class ProductCard extends ConsumerWidget {
                     )
                   else
                     _ProductFallback(product: product),
+                  if (!availableAtSelectedBranch)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: ColoredBox(
+                          color: Colors.black.withValues(alpha: 0.28),
+                        ),
+                      ),
+                    ),
                   Positioned(
                     top: 8,
                     left: 8,
@@ -108,6 +120,33 @@ class ProductCard extends ConsumerWidget {
                       ),
                     ),
                   ),
+                  if (!availableAtSelectedBranch)
+                    Positioned(
+                      left: 8,
+                      right: 52,
+                      bottom: 8,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.72),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          child: Text(
+                            strings.unavailableAtBranchTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -156,14 +195,29 @@ class ProductCard extends ConsumerWidget {
                       ),
                     ],
                   ),
-                  if (onAdd != null) ...[
+                  if (onAdd != null || !availableAtSelectedBranch) ...[
                     const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.tonalIcon(
-                        onPressed: onAdd,
-                        icon: const Icon(Icons.add_shopping_cart, size: 18),
-                        label: Text(strings.addToCart),
+                        onPressed: availableAtSelectedBranch
+                            ? onAdd
+                            : onChooseBranch,
+                        icon: Icon(
+                          availableAtSelectedBranch
+                              ? Icons.add_shopping_cart
+                              : Icons.storefront_outlined,
+                          size: 18,
+                        ),
+                        label: Text(
+                          availableAtSelectedBranch
+                              ? strings.addToCart
+                              : onChooseBranch == null
+                              ? strings.productUnavailableEverywhere
+                              : strings.chooseAvailableBranch,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         style: FilledButton.styleFrom(
                           minimumSize: const Size.fromHeight(40),
                         ),

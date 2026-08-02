@@ -21,6 +21,7 @@ import '../features/qr/qr_page.dart';
 import '../features/qr/referral_invite_page.dart';
 import '../features/shell/app_shell.dart';
 import '../shared/app_state.dart';
+import '../shared/widgets/branded_background.dart';
 
 final _rootKey = GlobalKey<NavigatorState>();
 
@@ -29,8 +30,10 @@ final appRouter = GoRouter(
   initialLocation: '/',
   routes: [
     StatefulShellRoute.indexedStack(
-      builder: (context, state, navigationShell) =>
-          AppShell(navigationShell: navigationShell),
+      builder: (context, state, navigationShell) => BrandedBackground(
+        key: const ValueKey('branded-route-shell'),
+        child: AppShell(navigationShell: navigationShell),
+      ),
       branches: [
         StatefulShellBranch(
           routes: [
@@ -41,8 +44,10 @@ final appRouter = GoRouter(
                 GoRoute(
                   path: 'product/:id',
                   parentNavigatorKey: _rootKey,
-                  builder: (context, state) =>
-                      ProductPage(productId: state.pathParameters['id']!),
+                  builder: (context, state) => BrandedBackground(
+                    key: const ValueKey('branded-route-product'),
+                    child: ProductPage(productId: state.pathParameters['id']!),
+                  ),
                 ),
               ],
             ),
@@ -82,27 +87,31 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/invite/:companyId/:code',
       parentNavigatorKey: _rootKey,
-      builder: (context, state) => ReferralInvitePage(
-        companyId: state.pathParameters['companyId'] ?? '',
-        rawCode: state.pathParameters['code'] ?? '',
+      builder: (context, state) => BrandedBackground(
+        child: ReferralInvitePage(
+          companyId: state.pathParameters['companyId'] ?? '',
+          rawCode: state.pathParameters['code'] ?? '',
+        ),
       ),
     ),
     GoRoute(
       path: '/news',
       parentNavigatorKey: _rootKey,
-      builder: (context, state) => const NewsPage(),
+      builder: (context, state) => const BrandedBackground(child: NewsPage()),
     ),
     GoRoute(
       path: '/news/story/:id',
       parentNavigatorKey: _rootKey,
-      builder: (context, state) =>
-          NewsStoryPage(initialStoryId: state.pathParameters['id']!),
+      builder: (context, state) => BrandedBackground(
+        child: NewsStoryPage(initialStoryId: state.pathParameters['id']!),
+      ),
     ),
     GoRoute(
       path: '/news/collection/:id',
       parentNavigatorKey: _rootKey,
-      builder: (context, state) =>
-          NewsStoryPage(collectionId: state.pathParameters['id']!),
+      builder: (context, state) => BrandedBackground(
+        child: NewsStoryPage(collectionId: state.pathParameters['id']!),
+      ),
     ),
     GoRoute(
       path: '/news/:id',
@@ -111,53 +120,63 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/checkout',
       parentNavigatorKey: _rootKey,
-      builder: (context, state) => const _ProtectedCheckoutRoute(),
+      builder: (context, state) =>
+          const BrandedBackground(child: _ProtectedCheckoutRoute()),
     ),
     GoRoute(
       path: '/cart/edit/:index',
       parentNavigatorKey: _rootKey,
-      builder: (context, state) => _CartItemEditRoute(
-        index: int.tryParse(state.pathParameters['index'] ?? '') ?? -1,
+      builder: (context, state) => BrandedBackground(
+        child: _CartItemEditRoute(
+          index: int.tryParse(state.pathParameters['index'] ?? '') ?? -1,
+        ),
       ),
     ),
     GoRoute(
       path: '/auth',
       parentNavigatorKey: _rootKey,
-      builder: (context, state) => const AuthPage(),
+      builder: (context, state) => const BrandedBackground(child: AuthPage()),
     ),
     GoRoute(
       path: '/profile/edit',
       parentNavigatorKey: _rootKey,
-      builder: (context, state) =>
-          const _ProtectedProfileRoute(child: EditProfilePage()),
+      builder: (context, state) => const BrandedBackground(
+        child: _ProtectedProfileRoute(child: EditProfilePage()),
+      ),
     ),
     GoRoute(
       path: '/profile/loyalty',
       parentNavigatorKey: _rootKey,
-      builder: (context, state) =>
-          const _ProtectedProfileRoute(child: LoyaltyPage()),
+      builder: (context, state) => const BrandedBackground(
+        child: _ProtectedProfileRoute(child: LoyaltyPage()),
+      ),
     ),
     GoRoute(
       path: '/profile/orders',
       parentNavigatorKey: _rootKey,
-      builder: (context, state) =>
-          const _ProtectedProfileRoute(child: OrderHistoryPage()),
+      builder: (context, state) => const BrandedBackground(
+        child: _ProtectedProfileRoute(child: OrderHistoryPage()),
+      ),
     ),
     GoRoute(
       path: '/profile/recurring',
       parentNavigatorKey: _rootKey,
-      builder: (context, state) =>
-          const _ProtectedProfileRoute(child: RecurringOrdersPage()),
+      builder: (context, state) => const BrandedBackground(
+        child: _ProtectedProfileRoute(child: RecurringOrdersPage()),
+      ),
     ),
     GoRoute(
       path: '/profile/support',
       parentNavigatorKey: _rootKey,
-      builder: (context, state) => const SupportPage(),
+      builder: (context, state) => const BrandedBackground(
+        key: ValueKey('branded-route-support'),
+        child: SupportPage(),
+      ),
     ),
     GoRoute(
       path: '/profile/faq',
       parentNavigatorKey: _rootKey,
-      builder: (context, state) => const FaqPage(),
+      builder: (context, state) => const BrandedBackground(child: FaqPage()),
     ),
   ],
 );

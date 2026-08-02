@@ -79,6 +79,8 @@ abstract interface class LanguagePreferenceStore {
   Future<void> writeThemeMode(String value);
   Future<String?> readBackgroundOverride();
   Future<void> writeBackgroundOverride(String? value);
+  Future<String?> readSelectedBranchId();
+  Future<void> writeSelectedBranchId(String value);
 }
 
 class SharedPreferencesLanguagePreferenceStore
@@ -117,6 +119,16 @@ class SharedPreferencesLanguagePreferenceStore
       await _instance.setString(key, value);
     }
   }
+
+  @override
+  Future<String?> readSelectedBranchId() =>
+      _instance.getString(AppStateController.selectedBranchPreferenceKey);
+
+  @override
+  Future<void> writeSelectedBranchId(String value) => _instance.setString(
+    AppStateController.selectedBranchPreferenceKey,
+    value,
+  );
 }
 
 bool _validRecurringTerm(RecurringPlan plan, DateTime? customUntil) {
@@ -124,11 +136,7 @@ bool _validRecurringTerm(RecurringPlan plan, DateTime? customUntil) {
   if (customUntil == null) return false;
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
-  final until = DateTime(
-    customUntil.year,
-    customUntil.month,
-    customUntil.day,
-  );
+  final until = DateTime(customUntil.year, customUntil.month, customUntil.day);
   final daysAhead = until.difference(today).inDays;
   return daysAhead >= 1 && daysAhead <= 366;
 }
@@ -173,6 +181,7 @@ class AppState {
     required this.viewedStoryIds,
     required this.favoriteIds,
     required this.cart,
+    required this.cartCatalogAdjusted,
     required this.useBonus,
     required this.bonusPointsToUse,
     required this.promoCode,
@@ -247,6 +256,7 @@ class AppState {
   final Set<String> viewedStoryIds;
   final List<String> favoriteIds;
   final List<CartItem> cart;
+  final bool cartCatalogAdjusted;
   final bool useBonus;
   final int bonusPointsToUse;
   final String? promoCode;
@@ -290,8 +300,12 @@ class AppState {
   List<Product> get favorites =>
       products.where((p) => favoriteIds.contains(p.id)).toList();
 
-  List<CartItem> unavailableForSelectedBranch() =>
-      cart.where((item) => !item.product.availableIn(selectedBranch)).toList();
+  List<CartItem> unavailableForSelectedBranch() => cart
+      .where(
+        (item) =>
+            !selectedBranch.isOpen || !item.product.availableIn(selectedBranch),
+      )
+      .toList();
 
   AppState copyWith({
     bool? apiConnected,
@@ -332,6 +346,7 @@ class AppState {
     Set<String>? viewedStoryIds,
     List<String>? favoriteIds,
     List<CartItem>? cart,
+    bool? cartCatalogAdjusted,
     bool? useBonus,
     int? bonusPointsToUse,
     String? promoCode,
@@ -396,6 +411,7 @@ class AppState {
       viewedStoryIds: viewedStoryIds ?? this.viewedStoryIds,
       favoriteIds: favoriteIds ?? this.favoriteIds,
       cart: cart ?? this.cart,
+      cartCatalogAdjusted: cartCatalogAdjusted ?? this.cartCatalogAdjusted,
       useBonus: useBonus ?? this.useBonus,
       bonusPointsToUse: bonusPointsToUse ?? this.bonusPointsToUse,
       promoCode: clearPromoCode ? null : (promoCode ?? this.promoCode),
@@ -495,6 +511,7 @@ class AppStateController extends StateNotifier<AppState> {
            viewedStoryIds: const {},
            favoriteIds: DemoData.favoriteIds,
            cart: const [],
+           cartCatalogAdjusted: false,
            useBonus: false,
            bonusPointsToUse: 0,
            promoCode: null,
@@ -527,6 +544,7 @@ class AppStateController extends StateNotifier<AppState> {
   static const languagePreferenceKey = 'app_language';
   static const themePreferenceKey = 'app_theme_mode';
   static const backgroundOverridePreferenceKey = 'app_background_override';
+  static const selectedBranchPreferenceKey = 'app_selected_branch';
   bool _bootstrapped = false;
   int _accountEpoch = 0;
   bool _authInProgress = false;
@@ -546,6 +564,8 @@ class AppStateController extends StateNotifier<AppState> {
   Future<void>? _publishedContentRefreshInFlight;
   DateTime? _lastCompanyRefreshAt;
   int _cartRevision = 0;
+  int _branchSelectionRevision = 0;
+  bool _branchPreferenceRestored = false;
   bool _cartPersistRunning = false;
   bool _cartPersistDirty = false;
   Completer<void>? _cartPersistCompleter;
@@ -575,7 +595,9 @@ class AppStateController extends StateNotifier<AppState> {
     if (_bootstrapped) return;
     _bootstrapped = true;
     final cartRevision = _cartRevision;
+    final branchRevision = _branchSelectionRevision;
     final cartDraftFuture = _readCartDraft();
+    final selectedBranchIdFuture = _readSelectedBranchId();
     final viewedStoryIdsFuture = _readViewedStoryIds();
     try {
       final savedLanguage = await _languagePreferences.readLanguageCode();
@@ -603,10 +625,50 @@ class AppStateController extends StateNotifier<AppState> {
       // Настройки языка/темы/фона не должны блокировать автономный запуск.
     }
     await refreshCompanyData(force: true);
+    await _restoreSelectedBranch(selectedBranchIdFuture, branchRevision);
     await _restoreCart(cartDraftFuture, cartRevision);
     final viewedStoryIds = await viewedStoryIdsFuture;
     state = state.copyWith(viewedStoryIds: viewedStoryIds);
     await _restoreSession();
+  }
+
+  Future<String?> _readSelectedBranchId() async {
+    try {
+      return await _languagePreferences.readSelectedBranchId();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeSelectedBranchId(String branchId) async {
+    try {
+      await _languagePreferences.writeSelectedBranchId(branchId);
+    } catch (_) {
+      // A local preference failure must not block branch selection or orders.
+    }
+  }
+
+  Future<void> _restoreSelectedBranch(
+    Future<String?> storedIdFuture,
+    int revisionAtStart,
+  ) async {
+    final storedId = await storedIdFuture;
+    if (revisionAtStart != _branchSelectionRevision) {
+      _branchPreferenceRestored = true;
+      return;
+    }
+    final storedBranch = state.branches
+        .where((branch) => branch.id == storedId && branch.isOpen)
+        .firstOrNull;
+    final fallback = state.branches
+        .where((branch) => branch.isOpen)
+        .firstOrNull;
+    final selected = storedBranch ?? fallback ?? state.branches.firstOrNull;
+    if (selected != null) {
+      state = state.copyWith(selectedBranch: selected);
+      await _writeSelectedBranchId(selected.id);
+    }
+    _branchPreferenceRestored = true;
   }
 
   Future<Set<String>> _readHiddenOrderIds(String accountId) async {
@@ -668,26 +730,38 @@ class AppStateController extends StateNotifier<AppState> {
     if (revisionAtStart != _cartRevision || draft.isEmpty) return;
 
     final restored = <CartItem>[];
+    var adjusted = false;
     for (final stored in draft) {
       if (stored.quantity <= 0 ||
           stored.quantity > 99 ||
           !DemoData.sugarLevels.contains(stored.sugarPercent)) {
+        adjusted = true;
         continue;
       }
       final product = state.products
           .where((candidate) => candidate.id == stored.productId)
           .firstOrNull;
-      if (product == null) continue;
+      if (product == null) {
+        adjusted = true;
+        continue;
+      }
       final size = product.sizes.isEmpty
           ? null
           : product.sizes
                 .where((candidate) => candidate.id == stored.sizeId)
                 .firstOrNull;
-      if (product.sizes.isNotEmpty && size == null) continue;
+      if ((product.sizes.isEmpty && stored.sizeId != null) ||
+          (product.sizes.isNotEmpty && size == null)) {
+        adjusted = true;
+        continue;
+      }
       final ice = IceLevel.values
           .where((candidate) => candidate.name == stored.ice)
           .firstOrNull;
-      if (ice == null) continue;
+      if (ice == null) {
+        adjusted = true;
+        continue;
+      }
 
       final toppingIds = <String>[];
       var toppingPrice = 0;
@@ -695,7 +769,10 @@ class AppStateController extends StateNotifier<AppState> {
         final topping = product.toppings
             .where((candidate) => candidate.id == toppingId)
             .firstOrNull;
-        if (topping == null || toppingIds.contains(topping.id)) continue;
+        if (topping == null || toppingIds.contains(topping.id)) {
+          adjusted = true;
+          continue;
+        }
         toppingIds.add(topping.id);
         toppingPrice += topping.priceDelta;
       }
@@ -717,10 +794,95 @@ class AppStateController extends StateNotifier<AppState> {
     if (revisionAtStart != _cartRevision) return;
     state = state.copyWith(
       cart: List.unmodifiable(restored),
+      cartCatalogAdjusted: state.cartCatalogAdjusted || adjusted,
       useBonus: false,
       bonusPointsToUse: 0,
     );
     await _queueCartPersist();
+  }
+
+  /// Rebinds local cart rows to the latest server catalog by stable IDs.
+  ///
+  /// Availability changes do not delete a row: the cart UI asks the customer
+  /// to select a compatible branch. Products or modifier IDs that disappeared
+  /// from the authoritative catalog cannot be ordered safely and are removed,
+  /// matching the cold-start restoration rules above.
+  ({List<CartItem> items, bool adjusted}) _reconcileCartWithProducts(
+    List<CartItem> cart,
+    List<Product> products,
+  ) {
+    final reconciled = <CartItem>[];
+    var adjusted = false;
+    for (final stored in cart) {
+      final product = products
+          .where((candidate) => candidate.id == stored.product.id)
+          .firstOrNull;
+      if (product == null ||
+          stored.quantity <= 0 ||
+          stored.quantity > 99 ||
+          !DemoData.sugarLevels.contains(stored.sugarPercent)) {
+        adjusted = true;
+        continue;
+      }
+
+      final size = product.sizes.isEmpty
+          ? null
+          : product.sizes
+                .where((candidate) => candidate.id == stored.sizeId)
+                .firstOrNull;
+      if ((product.sizes.isEmpty && stored.sizeId != null) ||
+          (product.sizes.isNotEmpty && size == null)) {
+        adjusted = true;
+        continue;
+      }
+
+      final toppingIds = <String>[];
+      var toppingPrice = 0;
+      for (final toppingId in stored.toppingIds) {
+        final topping = product.toppings
+            .where((candidate) => candidate.id == toppingId)
+            .firstOrNull;
+        if (topping == null || toppingIds.contains(topping.id)) {
+          adjusted = true;
+          continue;
+        }
+        toppingIds.add(topping.id);
+        toppingPrice += topping.priceDelta;
+      }
+      final unitPrice =
+          product.basePrice + (size?.priceDelta ?? 0) + toppingPrice;
+      final total = unitPrice * stored.quantity;
+      if (total != stored.total) adjusted = true;
+      reconciled.add(
+        CartItem(
+          product: product,
+          quantity: stored.quantity,
+          sizeId: size?.id,
+          sugarPercent: stored.sugarPercent,
+          ice: stored.ice,
+          toppingIds: List.unmodifiable(toppingIds),
+          total: total,
+        ),
+      );
+    }
+    return (items: List.unmodifiable(reconciled), adjusted: adjusted);
+  }
+
+  bool _cartDraftChanged(List<CartItem> before, List<CartItem> after) {
+    if (before.length != after.length) return true;
+    for (var index = 0; index < before.length; index++) {
+      final left = before[index];
+      final right = after[index];
+      if (left.product.id != right.product.id ||
+          left.quantity != right.quantity ||
+          left.sizeId != right.sizeId ||
+          left.sugarPercent != right.sugarPercent ||
+          left.ice != right.ice ||
+          !listEquals(left.toppingIds, right.toppingIds)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Обновляет управляемый из админки контент.
@@ -820,10 +982,16 @@ class AppStateController extends StateNotifier<AppState> {
       final nextBranches = (branches == null || branches.isEmpty)
           ? state.branches
           : branches;
-      final selected = nextBranches.firstWhere(
-        (b) => b.id == state.selectedBranch.id,
-        orElse: () => nextBranches.first,
-      );
+      final previousSelectedBranchId = state.selectedBranch.id;
+      final selected =
+          nextBranches
+              .where(
+                (branch) =>
+                    branch.id == previousSelectedBranchId && branch.isOpen,
+              )
+              .firstOrNull ??
+          nextBranches.where((branch) => branch.isOpen).firstOrNull ??
+          nextBranches.first;
       final categories = <MenuCategory>[];
       for (final product in nextProducts) {
         if (!categories.any((category) => category.id == product.category.id)) {
@@ -838,6 +1006,12 @@ class AppStateController extends StateNotifier<AppState> {
           nextPromotions.any(
             (promotion) => promotion.code.trim().toUpperCase() == appliedPromo,
           );
+      final previousCart = state.cart;
+      final reconciliation = products == null
+          ? (items: previousCart, adjusted: false)
+          : _reconcileCartWithProducts(previousCart, nextProducts);
+      final reconciledCart = reconciliation.items;
+      final cartDraftChanged = _cartDraftChanged(previousCart, reconciledCart);
 
       state = state.copyWith(
         apiConnected: true,
@@ -867,8 +1041,19 @@ class AppStateController extends StateNotifier<AppState> {
         newsPosts:
             newsPosts ?? (legacyNews != null ? const [] : state.newsPosts),
         promotions: nextPromotions,
+        cart: reconciledCart,
+        cartCatalogAdjusted:
+            state.cartCatalogAdjusted || reconciliation.adjusted,
         clearPromoCode: !promoStillActive,
       );
+      if (cartDraftChanged) {
+        _cartRevision++;
+        await _queueCartPersist();
+      }
+      if (_branchPreferenceRestored &&
+          selected.id != previousSelectedBranchId) {
+        unawaited(_writeSelectedBranchId(selected.id));
+      }
       try {
         await _brandingStore.write(config);
       } catch (_) {
@@ -1389,6 +1574,7 @@ class AppStateController extends StateNotifier<AppState> {
       final committedOrder = result.value!.historyEntry;
       state = state.copyWith(
         cart: const [],
+        cartCatalogAdjusted: false,
         useBonus: false,
         bonusPointsToUse: 0,
         clearPromoCode: true,
@@ -1711,6 +1897,7 @@ class AppStateController extends StateNotifier<AppState> {
       points: 0,
       favoriteIds: const [],
       cart: const [],
+      cartCatalogAdjusted: false,
       useBonus: false,
       bonusPointsToUse: 0,
       clearPromoCode: true,
@@ -1725,7 +1912,15 @@ class AppStateController extends StateNotifier<AppState> {
   }
 
   void selectBranch(Branch branch) {
-    state = state.copyWith(selectedBranch: branch);
+    final current = state.branches
+        .where((candidate) => candidate.id == branch.id && candidate.isOpen)
+        .firstOrNull;
+    if (current == null) return;
+    if (state.selectedBranch.id != current.id) {
+      state = state.copyWith(selectedBranch: current);
+      _branchSelectionRevision++;
+    }
+    unawaited(_writeSelectedBranchId(current.id));
   }
 
   Future<void> toggleFavorite(Product product) async {
@@ -1778,26 +1973,24 @@ class AppStateController extends StateNotifier<AppState> {
   }
 
   Future<bool> quickAdd(Product product) async {
-    if (!product.availableIn(state.selectedBranch)) {
+    if (!state.selectedBranch.isOpen ||
+        !product.availableIn(state.selectedBranch)) {
       return false;
     }
 
     final size = product.sizes.isEmpty
         ? null
-        : product.sizes.firstWhere(
-            (option) => option.id == 'm',
-            orElse: () => product.sizes.first,
+        : product.sizes.reduce(
+            (lowest, option) =>
+                option.priceDelta < lowest.priceDelta ? option : lowest,
           );
-    final topping = product.toppings
-        .where((option) => option.id == 'tapioca')
-        .firstOrNull;
 
     return addConfigured(
       product,
       sizeId: size?.id,
       sugarPercent: 50,
       ice: IceLevel.regular,
-      toppingIds: topping == null ? const [] : [topping.id],
+      toppingIds: const [],
     );
   }
 
@@ -1812,6 +2005,7 @@ class AppStateController extends StateNotifier<AppState> {
         .where((candidate) => candidate.id == product.id)
         .firstOrNull;
     if (currentProduct == null ||
+        !state.selectedBranch.isOpen ||
         !currentProduct.availableIn(state.selectedBranch) ||
         !DemoData.sugarLevels.contains(sugarPercent) ||
         toppingIds.length != toppingIds.toSet().length) {
@@ -1932,9 +2126,30 @@ class AppStateController extends StateNotifier<AppState> {
 
   Future<void> removeFromCart(int index) async {
     final cart = [...state.cart]..removeAt(index);
-    state = state.copyWith(cart: cart);
+    state = state.copyWith(
+      cart: cart,
+      cartCatalogAdjusted: cart.isEmpty ? false : state.cartCatalogAdjusted,
+    );
     _cartRevision++;
     await _queueCartPersist();
+  }
+
+  Future<void> clearCart() async {
+    if (state.cart.isEmpty) return;
+    state = state.copyWith(
+      cart: const [],
+      cartCatalogAdjusted: false,
+      useBonus: false,
+      bonusPointsToUse: 0,
+      clearPromoCode: true,
+    );
+    _cartRevision++;
+    await _queueCartPersist();
+  }
+
+  void acknowledgeCartCatalogAdjustment() {
+    if (!state.cartCatalogAdjusted) return;
+    state = state.copyWith(cartCatalogAdjusted: false);
   }
 
   void setUseBonus(bool value) {

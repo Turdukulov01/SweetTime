@@ -7,8 +7,8 @@ import '../../core/localization/app_localizations.dart';
 import '../news/news_media.dart';
 import '../../shared/app_models.dart';
 import '../../shared/app_state.dart';
+import '../../shared/widgets/branch_picker.dart';
 import '../../shared/widgets/common.dart';
-import '../../shared/widgets/branded_background.dart';
 import '../../shared/widgets/fullscreen_image.dart';
 import '../../shared/widgets/product_card.dart';
 import '../../shared/widgets/top_notice.dart';
@@ -44,116 +44,125 @@ class HomePage extends ConsumerWidget {
     final newsStories = selectHomeStories(state.newsStories);
 
     return Scaffold(
-      body: BrandedBackground(
-        child: SafeArea(
-          bottom: false,
-          child: RefreshIndicator.adaptive(
-            onRefresh: () => controller.refreshCompanyData(force: true),
-            child: CustomScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              // Build roughly two product rows ahead. The Home feed contains only a
-              // small curated set, so this keeps image decoding out of the visible
-              // scroll path without retaining the full catalog.
-              scrollCacheExtent: const ScrollCacheExtent.pixels(720),
-              slivers: [
-                SliverToBoxAdapter(
-                  child: _TopBar(
-                    language: state.language,
-                    onToggleTheme: controller.toggleTheme,
-                    onLanguageSelected: controller.setLanguage,
-                  ),
+      body: SafeArea(
+        bottom: false,
+        child: RefreshIndicator.adaptive(
+          onRefresh: () => controller.refreshCompanyData(force: true),
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            // Build roughly two product rows ahead. The Home feed contains only a
+            // small curated set, so this keeps image decoding out of the visible
+            // scroll path without retaining the full catalog.
+            scrollCacheExtent: const ScrollCacheExtent.pixels(720),
+            slivers: [
+              SliverToBoxAdapter(
+                child: _TopBar(
+                  language: state.language,
+                  onToggleTheme: controller.toggleTheme,
+                  onLanguageSelected: controller.setLanguage,
                 ),
-                SliverToBoxAdapter(
-                  child: _BranchSelector(
-                    selectedBranch: state.selectedBranch,
-                    branches: state.branches,
-                  ),
+              ),
+              SliverToBoxAdapter(
+                child: _BranchSelector(
+                  selectedBranch: state.selectedBranch,
+                  branches: state.branches,
                 ),
-                SliverToBoxAdapter(
-                  child: _Hero(onOrder: () => context.go('/catalog')),
-                ),
+              ),
+              SliverToBoxAdapter(
+                child: _Hero(onOrder: () => context.go('/catalog')),
+              ),
 
-                // Пустой промо-блок скрываем целиком (критерий приёмки UX-брифа).
-                if (state.promotions.isNotEmpty) ...[
-                  _sectionPadding(
-                    SectionHeader(
-                      overline: strings.today,
-                      title: strings.seasonalOffers,
-                      actionLabel: strings.all,
-                      onAction: () => context.go('/catalog'),
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: _PromoRail(promotions: state.promotions),
-                  ),
-                ],
-
-                if (newsStories.isNotEmpty) ...[
-                  _sectionPadding(
-                    SectionHeader(
-                      overline: strings.news,
-                      title: strings.whatsNew,
-                      actionIcon: Icons.arrow_forward_rounded,
-                      actionTooltip: strings.openNews,
-                      onAction: () => context.push('/news'),
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: _NewsStoryRail(
-                      stories: newsStories,
-                      language: state.language,
-                      accentColor: state.accentColor,
-                      logoUrl: state.logoUrl,
-                      viewedStoryIds: state.viewedStoryIds,
-                    ),
-                  ),
-                ],
-
+              // Пустой промо-блок скрываем целиком (критерий приёмки UX-брифа).
+              if (state.promotions.isNotEmpty) ...[
                 _sectionPadding(
                   SectionHeader(
-                    overline: strings.popular,
-                    title: strings.bestSellers,
+                    overline: strings.today,
+                    title: strings.seasonalOffers,
                     actionLabel: strings.all,
                     onAction: () => context.go('/catalog'),
                   ),
                 ),
-                _ProductGrid(products: bestSellers, controller: controller),
+                SliverToBoxAdapter(
+                  child: _PromoRail(promotions: state.promotions),
+                ),
+              ],
 
+              if (newsStories.isNotEmpty) ...[
                 _sectionPadding(
                   SectionHeader(
-                    overline: strings.newItems,
-                    title: strings.newOnMenu,
+                    overline: strings.news,
+                    title: strings.whatsNew,
+                    actionIcon: Icons.arrow_forward_rounded,
+                    actionTooltip: strings.openNews,
+                    onAction: () => context.push('/news'),
                   ),
                 ),
-                _ProductGrid(products: fresh, controller: controller),
-
-                const SliverToBoxAdapter(child: SizedBox(height: 32)),
                 SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          strings.footer(state.appName),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          strings.dataSource(state.apiConnected),
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant
-                                .withValues(alpha: 0.7),
-                          ),
-                        ),
-                      ],
-                    ),
+                  child: _NewsStoryRail(
+                    stories: newsStories,
+                    language: state.language,
+                    accentColor: state.accentColor,
+                    logoUrl: state.logoUrl,
+                    viewedStoryIds: state.viewedStoryIds,
                   ),
                 ),
               ],
-            ),
+
+              _sectionPadding(
+                SectionHeader(
+                  overline: strings.popular,
+                  title: strings.bestSellers,
+                  actionLabel: strings.all,
+                  onAction: () => context.go('/catalog'),
+                ),
+              ),
+              _ProductGrid(
+                products: bestSellers,
+                controller: controller,
+                branches: state.branches,
+                selectedBranch: state.selectedBranch,
+              ),
+
+              _sectionPadding(
+                SectionHeader(
+                  overline: strings.newItems,
+                  title: strings.newOnMenu,
+                ),
+              ),
+              _ProductGrid(
+                products: fresh,
+                controller: controller,
+                branches: state.branches,
+                selectedBranch: state.selectedBranch,
+              ),
+
+              const SliverToBoxAdapter(child: SizedBox(height: 32)),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        strings.footer(state.appName),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        strings.dataSource(state.apiConnected),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant.withValues(
+                            alpha: 0.7,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -314,44 +323,14 @@ class _BranchSelector extends ConsumerWidget {
     );
   }
 
-  void _showBranchPicker(BuildContext context, WidgetRef ref) {
-    final strings = AppLocalizations.of(context);
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                AppLocalizations.of(context).chooseBranch,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-            ),
-            for (final branch in branches)
-              ListTile(
-                leading: const Icon(Icons.storefront_outlined),
-                title: Text(branch.name.resolve(strings.language)),
-                subtitle: Text(
-                  '${branch.address.resolve(strings.language)} · ${branch.hours}',
-                ),
-                trailing: branch.id == selectedBranch.id
-                    ? Icon(
-                        Icons.check_circle,
-                        color: Theme.of(context).colorScheme.primary,
-                      )
-                    : null,
-                onTap: () {
-                  ref.read(appStateProvider.notifier).selectBranch(branch);
-                  Navigator.pop(context);
-                },
-              ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+  Future<void> _showBranchPicker(BuildContext context, WidgetRef ref) async {
+    final branch = await showBranchPicker(
+      context,
+      branches: branches,
+      selectedBranch: selectedBranch,
     );
+    if (!context.mounted || branch == null) return;
+    ref.read(appStateProvider.notifier).selectBranch(branch);
   }
 }
 
@@ -837,10 +816,17 @@ class _NewsStoryRail extends StatelessWidget {
 }
 
 class _ProductGrid extends StatelessWidget {
-  const _ProductGrid({required this.products, required this.controller});
+  const _ProductGrid({
+    required this.products,
+    required this.controller,
+    required this.branches,
+    required this.selectedBranch,
+  });
 
   final List<Product> products;
   final AppStateController controller;
+  final List<Branch> branches;
+  final Branch selectedBranch;
 
   @override
   Widget build(BuildContext context) {
@@ -858,22 +844,65 @@ class _ProductGrid extends StatelessWidget {
         delegate: SliverChildBuilderDelegate(
           (context, index) {
             final product = products[index];
+            final available =
+                selectedBranch.isOpen && product.availableIn(selectedBranch);
+            final availableBranchIds = branches
+                .where((branch) => branch.isOpen && product.availableIn(branch))
+                .map((branch) => branch.id)
+                .toSet();
+
+            Future<void> addProduct() async {
+              final added = await controller.quickAdd(product);
+              if (!context.mounted) return;
+              if (!added) {
+                showTopNotice(
+                  context,
+                  message: strings.productAddFailed,
+                  actionLabel: strings.retry,
+                  onAction: () => controller.refreshCompanyData(force: true),
+                );
+                return;
+              }
+              showTopNotice(
+                context,
+                message: strings.productAdded(
+                  product.name.resolve(strings.language),
+                ),
+                actionLabel: strings.cart,
+                onAction: () => context.go('/cart'),
+              );
+            }
+
+            Future<void> chooseBranch() async {
+              final branch = await showBranchPicker(
+                context,
+                branches: branches,
+                selectedBranch: selectedBranch,
+                availableBranchIds: availableBranchIds,
+                title: strings.chooseBranchForProduct(
+                  product.name.resolve(strings.language),
+                ),
+              );
+              if (!context.mounted || branch == null) return;
+              controller.selectBranch(branch);
+              showTopNotice(
+                context,
+                message: strings.branchSelectedForProduct(
+                  branch.name.resolve(strings.language),
+                  product.name.resolve(strings.language),
+                ),
+                actionLabel: strings.addToCart,
+                onAction: addProduct,
+              );
+            }
+
             return ProductCard(
               key: ValueKey(product.id),
               product: product,
+              availableAtSelectedBranch: available,
               onTap: () => context.push('/product/${product.id}'),
-              onAdd: () async {
-                final added = await controller.quickAdd(product);
-                if (!context.mounted || !added) return;
-                showTopNotice(
-                  context,
-                  message: strings.productAdded(
-                    product.name.resolve(strings.language),
-                  ),
-                  actionLabel: strings.cart,
-                  onAction: () => context.go('/cart'),
-                );
-              },
+              onAdd: available ? addProduct : null,
+              onChooseBranch: availableBranchIds.isEmpty ? null : chooseBranch,
             );
           },
           childCount: products.length,

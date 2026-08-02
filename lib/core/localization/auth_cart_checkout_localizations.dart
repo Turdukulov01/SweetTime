@@ -127,6 +127,42 @@ extension AuthCartCheckoutLocalizations on AppLocalizations {
   );
   String get goToCatalog =>
       _pick('Перейти в каталог', 'Каталогго өтүү', 'Go to catalog');
+  String get clearCart => _pick('Очистить', 'Тазалоо', 'Clear');
+  String get clearCartTooltip =>
+      _pick('Очистить корзину', 'Себетти тазалоо', 'Clear cart');
+  String get clearCartTitle =>
+      _pick('Очистить корзину?', 'Себетти тазалайсызбы?', 'Clear the cart?');
+  String get clearCartMessage => _pick(
+    'Все товары и применённые настройки заказа будут удалены.',
+    'Бардык товарлар жана колдонулган заказ жөндөөлөрү өчүрүлөт.',
+    'All items and applied order settings will be removed.',
+  );
+  String get keepCart => _pick('Оставить', 'Калтыруу', 'Keep items');
+  String get cartCatalogAdjustedTitle =>
+      _pick('Корзина обновлена', 'Себет жаңыртылды', 'Cart updated');
+  String get cartCatalogAdjustedMessage => _pick(
+    'Ассортимент или цены изменились. Недоступные позиции и дополнения убраны, итог пересчитан — проверьте заказ.',
+    'Ассортимент же баалар өзгөрдү. Жеткиликсиз товарлар жана кошумчалар алынып, сумма кайра эсептелди — заказды текшериңиз.',
+    'The menu or prices changed. Unavailable items and extras were removed and the total was recalculated. Please review the order.',
+  );
+  String get understood => _pick('Понятно', 'Түшүнүктүү', 'Got it');
+  String cartUnavailableTitle(int count) => _pick(
+    'В выбранном филиале недоступно: $count',
+    'Тандалган филиалда жеткиликсиз: $count',
+    '$count unavailable at the selected branch',
+  );
+  String cartUnavailableMessage(String branchName) => _pick(
+    'В «$branchName» есть не все товары. Корзина сохранена: выберите филиал, где доступны все позиции.',
+    '«$branchName» филиалында айрым товарлар жок. Себет сакталды: бардык товарлар бар филиалды тандаңыз.',
+    'Some items are unavailable at “$branchName”. Your cart is saved: choose a branch where every item is available.',
+  );
+  String get chooseCompatibleBranch =>
+      _pick('Сменить филиал', 'Филиалды алмаштыруу', 'Change branch');
+  String get noCompatibleBranch => _pick(
+    'Нет одного филиала, где доступны все позиции. Удалите несовместимые товары или оформите их отдельно.',
+    'Бардык товарлар бар бир филиал жок. Туура келбеген товарларды өчүрүңүз же өзүнчө заказ бериңиз.',
+    'No single branch has every item. Remove incompatible items or order them separately.',
+  );
   String get orderSummary => _pick('Итого', 'Жыйынтык', 'Summary');
   String get promoCode => _pick('Промокод', 'Промокод', 'Promo code');
   String get applyPromoCode =>

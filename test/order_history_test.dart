@@ -108,11 +108,7 @@ void main() {
       'items': [
         {
           'productId': 'strawberry-jam',
-          'productName': {
-            'ru': 'Клубничный джем',
-            'ky': null,
-            'en': '',
-          },
+          'productName': {'ru': 'Клубничный джем', 'ky': null, 'en': ''},
           'productDescription': null,
           'sizeId': 's',
           'size': {'ru': 'Маленький', 'ky': null, 'en': null},
@@ -302,6 +298,12 @@ class _MemoryPreferences implements LanguagePreferenceStore {
 
   @override
   Future<void> writeBackgroundOverride(String? value) async {}
+
+  @override
+  Future<String?> readSelectedBranchId() async => null;
+
+  @override
+  Future<void> writeSelectedBranchId(String value) async {}
 }
 
 class _MemoryAuthStore implements AuthStore {

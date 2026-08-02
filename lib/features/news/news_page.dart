@@ -7,7 +7,6 @@ import '../../core/localization/app_localizations.dart';
 import '../../shared/app_models.dart';
 import '../../shared/app_state.dart';
 import '../../shared/widgets/common.dart';
-import '../../shared/widgets/branded_background.dart';
 import 'news_media.dart';
 
 class NewsPage extends ConsumerWidget {
@@ -41,64 +40,62 @@ class NewsPage extends ConsumerWidget {
           ..sort(_comparePosts);
 
     return Scaffold(
-      body: BrandedBackground(
-        child: SafeArea(
-          bottom: false,
-          child: RefreshIndicator.adaptive(
-            onRefresh: () => ref
-                .read(appStateProvider.notifier)
-                .refreshCompanyData(force: true),
-            child: CustomScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              scrollCacheExtent: const ScrollCacheExtent.pixels(480),
-              slivers: [
-                SliverAppBar.large(pinned: true, title: Text(strings.news)),
-                if (collections.isNotEmpty) ...[
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
-                    sliver: SliverToBoxAdapter(
-                      child: SectionHeader(title: strings.storyCollections),
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: _CollectionRail(
-                      collections: collections,
-                      language: state.language,
-                    ),
-                  ),
-                ],
+      body: SafeArea(
+        bottom: false,
+        child: RefreshIndicator.adaptive(
+          onRefresh: () => ref
+              .read(appStateProvider.notifier)
+              .refreshCompanyData(force: true),
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            scrollCacheExtent: const ScrollCacheExtent.pixels(480),
+            slivers: [
+              SliverAppBar.large(pinned: true, title: Text(strings.news)),
+              if (collections.isNotEmpty) ...[
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 28, 16, 12),
+                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
                   sliver: SliverToBoxAdapter(
-                    child: SectionHeader(title: strings.newsFeed),
+                    child: SectionHeader(title: strings.storyCollections),
                   ),
                 ),
-                if (posts.isEmpty)
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: EmptyState(
-                      icon: Icons.newspaper_outlined,
-                      title: strings.newsFeedEmptyTitle,
-                      message: strings.newsFeedEmptyMessage,
-                    ),
-                  )
-                else
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-                    sliver: SliverList.builder(
-                      itemCount: posts.length,
-                      itemBuilder: (context, index) => Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: _NewsPostCard(
-                          key: ValueKey('news-post-${posts[index].id}'),
-                          post: posts[index],
-                          language: state.language,
-                        ),
+                SliverToBoxAdapter(
+                  child: _CollectionRail(
+                    collections: collections,
+                    language: state.language,
+                  ),
+                ),
+              ],
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 28, 16, 12),
+                sliver: SliverToBoxAdapter(
+                  child: SectionHeader(title: strings.newsFeed),
+                ),
+              ),
+              if (posts.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: EmptyState(
+                    icon: Icons.newspaper_outlined,
+                    title: strings.newsFeedEmptyTitle,
+                    message: strings.newsFeedEmptyMessage,
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                  sliver: SliverList.builder(
+                    itemCount: posts.length,
+                    itemBuilder: (context, index) => Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: _NewsPostCard(
+                        key: ValueKey('news-post-${posts[index].id}'),
+                        post: posts[index],
+                        language: state.language,
                       ),
                     ),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
       ),

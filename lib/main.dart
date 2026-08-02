@@ -12,7 +12,6 @@ import 'core/referral_invite.dart';
 import 'core/theme/app_theme.dart';
 import 'shared/app_state.dart';
 import 'shared/app_models.dart';
-import 'shared/widgets/branded_background.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -139,9 +138,6 @@ class _SweetTimeAppState extends ConsumerState<SweetTimeApp>
         GlobalCupertinoLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
       ],
-      // Один фон под всем приложением: Scaffold'ы прозрачны (см. AppTheme), а
-      // брендовый фон рисуется здесь, поэтому виден на КАЖДОМ экране, включая
-      // push-страницы (товар, оформление, профиль-подэкраны).
       builder: (context, child) {
         // Системный размер шрифта уважаем (доступность), но в диапазоне
         // 0.9–1.3: экстремальный масштаб на старых/маленьких телефонах
@@ -154,7 +150,7 @@ class _SweetTimeAppState extends ConsumerState<SweetTimeApp>
               maxScaleFactor: 1.3,
             ),
           ),
-          child: BrandedBackground(child: child ?? const SizedBox.shrink()),
+          child: child ?? const SizedBox.shrink(),
         );
       },
       routerConfig: appRouter,

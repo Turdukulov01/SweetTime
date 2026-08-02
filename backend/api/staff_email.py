@@ -8,10 +8,14 @@ honestly instead of claiming that an email was sent.
 
 from dataclasses import dataclass
 from email.message import EmailMessage
+import logging
 import smtplib
 import ssl
 
 from .config import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +74,22 @@ def deliver_staff_invitation(
             if settings.smtp_username:
                 client.login(settings.smtp_username, settings.smtp_password)
             client.send_message(message)
-    except (ValueError, OSError, smtplib.SMTPException):
+    except (ValueError, OSError, smtplib.SMTPException) as exc:
+        # Keep credentials and the recipient's local part out of logs while
+        # still leaving enough context to diagnose TLS/provider failures.
+        # logger.exception()/str(exc) are deliberately avoided: exceptions
+        # such as SMTPRecipientsRefused contain the full recipient address.
+        recipient_domain = recipient.rpartition("@")[2] or "invalid"
+        logger.error(
+            "Staff invitation SMTP delivery failed "
+            "(host=%s, security=%s, recipient_domain=%s, "
+            "error_type=%s, smtp_code=%s)",
+            settings.smtp_host,
+            settings.smtp_security,
+            recipient_domain,
+            type(exc).__name__,
+            getattr(exc, "smtp_code", "n/a"),
+        )
         return InvitationDelivery(status="failed", sent=False)
 
     return InvitationDelivery(status="sent", sent=True)

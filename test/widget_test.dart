@@ -16,6 +16,7 @@ import 'package:sweettime/main.dart';
 import 'package:sweettime/shared/app_models.dart';
 import 'package:sweettime/shared/app_state.dart';
 import 'package:sweettime/shared/demo_data.dart';
+import 'package:sweettime/shared/widgets/branded_background.dart';
 
 const _testCustomerProfile = CustomerProfile(
   id: 'c-test',
@@ -220,11 +221,92 @@ void main() {
     expect(after.sugarPercent, before.sugarPercent);
     expect(after.ice, before.ice);
     expect(after.toppingIds, before.toppingIds);
-    expect(
-      strings.cartModifiers(after),
-      'M • sugar 50% • regular ice • Tapioca pearls',
-    );
+    expect(strings.cartModifiers(after), 'S • sugar 50% • regular ice');
   });
+
+  test(
+    'quick add matches the catalog starting price without paid extras',
+    () async {
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        cartStore: _MemoryCartStore(),
+        api: _OfflineApiClient(),
+      );
+      final product = DemoData.products.first;
+
+      expect(await controller.quickAdd(product), isTrue);
+
+      final item = controller.state.cart.single;
+      expect(item.total, product.startingPrice);
+      expect(item.toppingIds, isEmpty);
+      expect(item.sizeOption?.priceDelta, -30);
+    },
+  );
+
+  test('selected open branch survives a controller restart', () async {
+    final preferences = _MemoryLanguagePreferenceStore();
+    final first = AppStateController(
+      languagePreferences: preferences,
+      cartStore: _MemoryCartStore(),
+      api: _OfflineApiClient(),
+    );
+    await first.bootstrap();
+    final manas = first.state.branches.singleWhere(
+      (branch) => branch.id == 'b2',
+    );
+
+    first.selectBranch(manas);
+    await Future<void>.delayed(Duration.zero);
+
+    final restored = AppStateController(
+      languagePreferences: preferences,
+      cartStore: _MemoryCartStore(),
+      api: _OfflineApiClient(),
+    );
+    await restored.bootstrap();
+
+    expect(preferences.selectedBranchId, 'b2');
+    expect(restored.state.selectedBranch.id, 'b2');
+  });
+
+  test(
+    'a stored branch that closed falls back to the first open branch',
+    () async {
+      final preferences = _MemoryLanguagePreferenceStore(
+        selectedBranchId: 'b2',
+      );
+      final branches = [
+        for (final branch in DemoData.branches)
+          if (branch.id == 'b2')
+            Branch(
+              id: branch.id,
+              name: branch.name,
+              address: branch.address,
+              hours: branch.hours,
+              phone: branch.phone,
+              isOpen: false,
+              twoGisUrl: branch.twoGisUrl,
+              googleMapsUrl: branch.googleMapsUrl,
+            )
+          else
+            branch,
+      ];
+      final controller = AppStateController(
+        languagePreferences: preferences,
+        cartStore: _MemoryCartStore(),
+        api: _MutableProductsApiClient(
+          List<Product>.of(DemoData.products),
+          branches: branches,
+        ),
+      );
+
+      await controller.bootstrap();
+
+      expect(controller.state.selectedBranch.id, 'b1');
+      expect(controller.state.selectedBranch.isOpen, isTrue);
+      expect(preferences.selectedBranchId, 'b1');
+    },
+  );
 
   test('quick add reports failure for an unavailable product', () async {
     final original = DemoData.products.first;
@@ -252,6 +334,55 @@ void main() {
 
     expect(await controller.quickAdd(unavailable), isFalse);
     expect(controller.state.cart, isEmpty);
+  });
+
+  test('p5 cannot be added at b2 and remains out of the cart', () async {
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      cartStore: _MemoryCartStore(),
+      api: _OfflineApiClient(),
+    );
+    final manas = DemoData.branches.singleWhere((branch) => branch.id == 'b2');
+    final cocoa = DemoData.products.singleWhere(
+      (product) => product.id == 'p5',
+    );
+
+    controller.selectBranch(manas);
+
+    expect(cocoa.name.ru, 'Какао фрост с шариками');
+    expect(cocoa.availableIn(manas), isFalse);
+    expect(await controller.quickAdd(cocoa), isFalse);
+    expect(controller.state.cart, isEmpty);
+  });
+
+  test('p2 and p5 are jointly available only at b1', () async {
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      cartStore: _MemoryCartStore(),
+      api: _OfflineApiClient(),
+    );
+    final chuy = DemoData.branches.singleWhere((branch) => branch.id == 'b1');
+    final matcha = DemoData.products.singleWhere(
+      (product) => product.id == 'p2',
+    );
+    final cocoa = DemoData.products.singleWhere(
+      (product) => product.id == 'p5',
+    );
+
+    controller.selectBranch(chuy);
+    expect(await controller.quickAdd(matcha), isTrue);
+    expect(await controller.quickAdd(cocoa), isTrue);
+
+    final compatibleBranchIds = DemoData.branches
+        .where(
+          (branch) => controller.state.cart.every(
+            (item) => item.product.availableIn(branch),
+          ),
+        )
+        .map((branch) => branch.id)
+        .toList();
+
+    expect(compatibleBranchIds, ['b1']);
   });
 
   test('order submission uses stable ids independent of language', () async {
@@ -557,6 +688,71 @@ void main() {
       api.promotions = const [];
       expect(await controller.validatePromoCode(activeCode), isFalse);
       expect(controller.state.promoCode, isNull);
+    },
+  );
+
+  test(
+    'company refresh rebinds cart rows to fresh product availability',
+    () async {
+      final api = _MutableProductsApiClient(
+        List<Product>.of(DemoData.products),
+      );
+      final cartStore = _MemoryCartStore();
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(),
+        cartStore: cartStore,
+        api: api,
+      );
+      await controller.bootstrap();
+      final manas = controller.state.branches.singleWhere(
+        (branch) => branch.id == 'b2',
+      );
+      final original = controller.state.products.singleWhere(
+        (product) => product.id == 'p2',
+      );
+      controller.selectBranch(manas);
+      expect(await controller.quickAdd(original), isTrue);
+      expect(controller.state.unavailableForSelectedBranch(), isEmpty);
+
+      final refreshed = Product(
+        id: original.id,
+        category: original.category,
+        name: original.name,
+        description: original.description,
+        basePrice: original.basePrice + 100,
+        accentColor: original.accentColor,
+        rating: original.rating,
+        reviewsCount: original.reviewsCount,
+        sizes: original.sizes,
+        toppings: original.toppings,
+        availableBranchIds: const ['b1'],
+        assetImage: original.assetImage,
+        imageUrl: original.imageUrl,
+        isNew: original.isNew,
+        isBestSeller: original.isBestSeller,
+      );
+      api.products = [
+        for (final product in DemoData.products)
+          if (product.id == refreshed.id) refreshed else product,
+      ];
+
+      await controller.refreshCompanyData(force: true);
+
+      final rebound = controller.state.cart.single;
+      expect(identical(rebound.product, original), isFalse);
+      expect(rebound.product.availableBranchIds, ['b1']);
+      expect(rebound.product.basePrice, original.basePrice + 100);
+      expect(rebound.total, 460);
+      expect(controller.state.cartCatalogAdjusted, isTrue);
+      controller.acknowledgeCartCatalogAdjustment();
+      expect(controller.state.cartCatalogAdjusted, isFalse);
+      expect(
+        controller.state.unavailableForSelectedBranch().map(
+          (item) => item.product.id,
+        ),
+        ['p2'],
+      );
     },
   );
 
@@ -1119,6 +1315,7 @@ void main() {
     expect(controller.state.cart, hasLength(1));
     expect(controller.state.cart.single.product.id, product.id);
     expect(controller.state.cart.single.toppingIds, isEmpty);
+    expect(controller.state.cartCatalogAdjusted, isTrue);
     expect(cartStore.items, hasLength(1));
     expect(cartStore.items.single.toppingIds, isEmpty);
   });
@@ -1144,6 +1341,26 @@ void main() {
 
     expect(cartStore.items, isEmpty);
     expect(restored.state.cart, isEmpty);
+  });
+
+  test('clearing the cart persists one empty draft', () async {
+    final cartStore = _MemoryCartStore();
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(),
+      cartStore: cartStore,
+      api: _OfflineApiClient(),
+    );
+    await controller.quickAdd(DemoData.products.first);
+    await controller.quickAdd(DemoData.products.last);
+
+    await controller.clearCart();
+
+    expect(controller.state.cart, isEmpty);
+    expect(controller.state.useBonus, isFalse);
+    expect(controller.state.bonusApplied, 0);
+    expect(controller.state.promoCode, isNull);
+    expect(cartStore.items, isEmpty);
   });
 
   test(
@@ -1755,6 +1972,140 @@ void main() {
     expect(controller.state.cart, isNotEmpty);
   });
 
+  testWidgets('push pages have their own branded transition surface', (
+    WidgetTester tester,
+  ) async {
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+    )..seedDemo(auth: true);
+    await tester.pumpWidget(_testAppWithController(controller));
+    await tester.pump(const Duration(milliseconds: 900));
+
+    appRouter.push('/product/${DemoData.products.first.id}');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byKey(const ValueKey('branded-route-product')), findsOneWidget);
+    expect(find.byType(ProductPage), findsOneWidget);
+    final productSurface = tester.widget<BrandedBackground>(
+      find.byKey(const ValueKey('branded-route-product')),
+    );
+    expect(productSurface.child, isA<ProductPage>());
+
+    appRouter.pop();
+    await tester.pumpAndSettle();
+    appRouter.push('/profile/support');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byKey(const ValueKey('branded-route-support')), findsOneWidget);
+  });
+
+  testWidgets('open product handles a catalog removal without crashing', (
+    WidgetTester tester,
+  ) async {
+    final api = _MutableProductsApiClient(List<Product>.of(DemoData.products));
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(),
+      cartStore: _MemoryCartStore(),
+      api: api,
+    );
+    await controller.bootstrap();
+    final product = controller.state.products.first;
+    await tester.pumpWidget(_testAppWithController(controller));
+    appRouter.push('/product/${product.id}');
+    await tester.pumpAndSettle();
+    expect(find.text(product.name.ru), findsOneWidget);
+
+    api.products = [
+      for (final candidate in DemoData.products)
+        if (candidate.id != product.id) candidate,
+    ];
+    await controller.refreshCompanyData(force: true);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Сейчас товар недоступен во всех филиалах'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('catalog price adjustment is disclosed in the cart', (
+    WidgetTester tester,
+  ) async {
+    final api = _MutableProductsApiClient(List<Product>.of(DemoData.products));
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(),
+      cartStore: _MemoryCartStore(),
+      api: api,
+    );
+    await controller.bootstrap();
+    final product = controller.state.products.first;
+    await controller.quickAdd(product);
+    api.products = [
+      for (final candidate in DemoData.products)
+        if (candidate.id == product.id)
+          Product(
+            id: candidate.id,
+            category: candidate.category,
+            name: candidate.name,
+            description: candidate.description,
+            basePrice: candidate.basePrice + 10,
+            accentColor: candidate.accentColor,
+            rating: candidate.rating,
+            reviewsCount: candidate.reviewsCount,
+            sizes: candidate.sizes,
+            toppings: candidate.toppings,
+            availableBranchIds: candidate.availableBranchIds,
+            assetImage: candidate.assetImage,
+            imageUrl: candidate.imageUrl,
+            isNew: candidate.isNew,
+            isBestSeller: candidate.isBestSeller,
+          )
+        else
+          candidate,
+    ];
+    await controller.refreshCompanyData(force: true);
+
+    await tester.pumpWidget(_testAppWithController(controller));
+    appRouter.go('/cart');
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('cart-catalog-adjustment-warning')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('acknowledge-cart-adjustment')));
+    await tester.pumpAndSettle();
+    expect(controller.state.cartCatalogAdjusted, isFalse);
+  });
+
+  testWidgets('cart clear action requires confirmation and removes all items', (
+    WidgetTester tester,
+  ) async {
+    final cartStore = _MemoryCartStore();
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      cartStore: cartStore,
+    )..seedDemo(auth: true, cart: true);
+    await tester.pumpWidget(_testAppWithController(controller));
+    appRouter.go('/cart');
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('clear-cart-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Очистить корзину?'), findsOneWidget);
+    expect(controller.state.cart, isNotEmpty);
+
+    await tester.tap(find.byKey(const ValueKey('confirm-clear-cart')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Корзина пуста'), findsOneWidget);
+    expect(controller.state.cart, isEmpty);
+    expect(cartStore.items, isEmpty);
+  });
+
   testWidgets('cart edit opens configured product and replaces the same row', (
     tester,
   ) async {
@@ -2182,6 +2533,132 @@ void main() {
   });
 
   testWidgets(
+    'catalog separates p5 at b2 and branch selection does not auto-add it',
+    (WidgetTester tester) async {
+      final api = _MutableProductsApiClient(
+        List<Product>.of(DemoData.products),
+      );
+      final controller = AppStateController(
+        languagePreferences: _MemoryLanguagePreferenceStore(),
+        authStore: _MemoryAuthStore(),
+        cartStore: _MemoryCartStore(),
+        api: api,
+      );
+      await controller.bootstrap();
+      controller.selectBranch(
+        controller.state.branches.singleWhere((branch) => branch.id == 'b2'),
+      );
+
+      await tester.pumpWidget(_testAppWithController(controller));
+      appRouter.go('/catalog');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 900));
+
+      final cocoaCard = find.byKey(const ValueKey('p5'));
+      final catalogScroll = find.byType(CustomScrollView).first;
+      for (var step = 0; step < 12 && cocoaCard.evaluate().isEmpty; step++) {
+        await tester.drag(catalogScroll, const Offset(0, -360));
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(cocoaCard, findsOneWidget);
+      expect(
+        find.descendant(
+          of: cocoaCard,
+          matching: find.text('Нет в выбранном филиале'),
+        ),
+        findsOneWidget,
+      );
+
+      final chooseBranch = find.descendant(
+        of: cocoaCard,
+        matching: find.text('Выбрать филиал'),
+      );
+      await tester.drag(catalogScroll, const Offset(0, -220));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(chooseBranch);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(find.text('SweetTime на Манаса'), findsOneWidget);
+
+      await tester.tap(find.text('SweetTime на Чуй').last);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+
+      expect(controller.state.selectedBranch.id, 'b1');
+      expect(controller.state.cart, isEmpty);
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump(const Duration(milliseconds: 200));
+    },
+  );
+
+  testWidgets('cart warns about p5 at b2 and blocks checkout', (
+    WidgetTester tester,
+  ) async {
+    final api = _MutableProductsApiClient(List<Product>.of(DemoData.products));
+    final controller = AppStateController(
+      languagePreferences: _MemoryLanguagePreferenceStore(),
+      authStore: _MemoryAuthStore(),
+      cartStore: _MemoryCartStore(),
+      api: api,
+    );
+    await controller.bootstrap();
+    final chuy = controller.state.branches.singleWhere(
+      (branch) => branch.id == 'b1',
+    );
+    final manas = controller.state.branches.singleWhere(
+      (branch) => branch.id == 'b2',
+    );
+    controller.selectBranch(chuy);
+    expect(
+      await controller.quickAdd(
+        controller.state.products.singleWhere((product) => product.id == 'p2'),
+      ),
+      isTrue,
+    );
+    expect(
+      await controller.quickAdd(
+        controller.state.products.singleWhere((product) => product.id == 'p5'),
+      ),
+      isTrue,
+    );
+    controller.selectBranch(manas);
+
+    await tester.pumpWidget(_testAppWithController(controller));
+    appRouter.go('/cart');
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('cart-branch-availability-warning')),
+      findsOneWidget,
+    );
+    expect(
+      controller.state.unavailableForSelectedBranch().map(
+        (item) => item.product.id,
+      ),
+      ['p5'],
+    );
+    var checkout = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('cart-checkout-button')),
+    );
+    expect(checkout.onPressed, isNull);
+
+    await tester.tap(find.byKey(const ValueKey('cart-choose-branch-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SweetTime на Чуй').last);
+    await tester.pumpAndSettle();
+
+    expect(controller.state.selectedBranch.id, 'b1');
+    expect(
+      find.byKey(const ValueKey('cart-branch-availability-warning')),
+      findsNothing,
+    );
+    checkout = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('cart-checkout-button')),
+    );
+    expect(checkout.onPressed, isNotNull);
+  });
+
+  testWidgets(
     'layouts survive a 320dp screen at maximum (clamped) text scale',
     (WidgetTester tester) async {
       // Старый/маленький телефон с крупным системным шрифтом: худший случай,
@@ -2406,8 +2883,7 @@ class _OfflineApiClient extends ApiClient {
   ) async => const ApiResult<List<RecurringRefund>>.unavailable();
 
   @override
-  Future<ApiResult<RecurringCancellationQuote>>
-  fetchRecurringCancellationQuote(
+  Future<ApiResult<RecurringCancellationQuote>> fetchRecurringCancellationQuote(
     String accessToken,
     String recurringId,
   ) async => const ApiResult<RecurringCancellationQuote>.unavailable();
@@ -2700,8 +3176,7 @@ class _FakeAuthApiClient extends ApiClient {
       : const ApiResult<List<RecurringRefund>>.rejected();
 
   @override
-  Future<ApiResult<RecurringCancellationQuote>>
-  fetchRecurringCancellationQuote(
+  Future<ApiResult<RecurringCancellationQuote>> fetchRecurringCancellationQuote(
     String accessToken,
     String recurringId,
   ) async {
@@ -3086,6 +3561,20 @@ class _MutableCompanyContentApiClient extends ApiClient {
   Future<List<Promotion>?> fetchPromotions() async => promotions;
 }
 
+class _MutableProductsApiClient extends _MutableCompanyContentApiClient {
+  _MutableProductsApiClient(this.products, {this.branches = DemoData.branches})
+    : super(news: null, promotions: null);
+
+  List<Product>? products;
+  List<Branch>? branches;
+
+  @override
+  Future<List<Product>?> fetchProducts() async => products;
+
+  @override
+  Future<List<Branch>?> fetchBranches() async => branches;
+}
+
 class _ControlledOrdersApiClient extends _CatalogAuthApiClient {
   _ControlledOrdersApiClient({required super.profile});
 
@@ -3196,9 +3685,12 @@ class _PendingFavoritePut {
 }
 
 class _MemoryLanguagePreferenceStore implements LanguagePreferenceStore {
+  _MemoryLanguagePreferenceStore({this.selectedBranchId});
+
   String? code;
   String? themeMode;
   String? backgroundOverride;
+  String? selectedBranchId;
 
   @override
   Future<String?> readLanguageCode() async => code;
@@ -3222,5 +3714,13 @@ class _MemoryLanguagePreferenceStore implements LanguagePreferenceStore {
   @override
   Future<void> writeBackgroundOverride(String? value) async {
     backgroundOverride = value;
+  }
+
+  @override
+  Future<String?> readSelectedBranchId() async => selectedBranchId;
+
+  @override
+  Future<void> writeSelectedBranchId(String value) async {
+    selectedBranchId = value;
   }
 }

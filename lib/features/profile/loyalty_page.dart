@@ -14,7 +14,19 @@ class LoyaltyPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(appStateProvider);
+    final state = ref.watch(
+      appStateProvider.select(
+        (state) => (
+          points: state.points,
+          earnRate: state.loyaltyEarnRate,
+          maxSpendShare: state.loyaltyMaxSpendShare,
+          userCode: state.userCode,
+          appName: state.appName,
+          invitedBonus: state.referralInvitedBonus,
+          inviterBonus: state.referralInviterBonus,
+        ),
+      ),
+    );
     final strings = AppLocalizations.of(context);
 
     return Scaffold(
@@ -27,15 +39,15 @@ class LoyaltyPage extends ConsumerWidget {
             _BonusCard(points: state.points),
             const SizedBox(height: 16),
             _LoyaltyRules(
-              earnRate: state.loyaltyEarnRate,
-              maxSpendShare: state.loyaltyMaxSpendShare,
+              earnRate: state.earnRate,
+              maxSpendShare: state.maxSpendShare,
             ),
             const SizedBox(height: 16),
             _ReferralCard(
               code: state.userCode,
               appName: state.appName,
-              invitedBonus: state.referralInvitedBonus,
-              inviterBonus: state.referralInviterBonus,
+              invitedBonus: state.invitedBonus,
+              inviterBonus: state.inviterBonus,
             ),
           ],
         ),

@@ -56,11 +56,13 @@ class BrandedBackground extends ConsumerWidget {
               errorBuilder: (_, _, _) => const SizedBox.shrink(),
             )
           else if (kind == 'pattern' && preset != 'none')
-            CustomPaint(
-              painter: _BrandPatternPainter(
-                preset: preset,
-                color: Theme.of(context).colorScheme.primary.withValues(
-                  alpha: background.patternOpacity,
+            RepaintBoundary(
+              child: CustomPaint(
+                painter: _BrandPatternPainter(
+                  preset: preset,
+                  color: Theme.of(context).colorScheme.primary.withValues(
+                    alpha: background.patternOpacity,
+                  ),
                 ),
               ),
             ),

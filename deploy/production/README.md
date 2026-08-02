@@ -68,6 +68,7 @@ SMTP_USERNAME=replace-locally
 SMTP_PASSWORD=replace-locally
 SMTP_FROM_EMAIL=no-reply@example.com
 SMTP_SECURITY=starttls
+SMTP_TIMEOUT_SECONDS=10
 ```
 
 Only certificate-verified STARTTLS or implicit TLS (`ssl`, normally port 465) is supported. Never commit SMTP

@@ -7,6 +7,7 @@ import '../../core/localization/app_localizations.dart';
 import '../../shared/app_models.dart';
 import '../../shared/app_state.dart';
 import '../../shared/demo_data.dart';
+import '../../shared/widgets/branch_picker.dart';
 import '../../shared/widgets/drink_art.dart';
 import '../../shared/widgets/top_notice.dart';
 
@@ -67,18 +68,62 @@ class _ProductPageState extends ConsumerState<ProductPage> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(appStateProvider);
+    final state = ref.watch(
+      appStateProvider.select(
+        (state) => (
+          products: state.products,
+          cart: state.cart,
+          favoriteIds: state.favoriteIds,
+          selectedBranch: state.selectedBranch,
+          branches: state.branches,
+          language: state.language,
+        ),
+      ),
+    );
     final controller = ref.read(appStateProvider.notifier);
     final theme = Theme.of(context);
     final strings = AppLocalizations.of(context);
     final language = state.language;
+    final product = state.products
+        .where((candidate) => candidate.id == widget.productId)
+        .firstOrNull;
+    if (product == null) {
+      return Scaffold(
+        appBar: AppBar(),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.inventory_2_outlined,
+                  size: 56,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  strings.productUnavailableEverywhere,
+                  style: theme.textTheme.titleLarge,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: () => context.go('/catalog'),
+                  child: Text(strings.goToCatalog),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     final productImageCacheWidth =
         (MediaQuery.sizeOf(context).width *
                 MediaQuery.devicePixelRatioOf(context))
             .ceil()
             .clamp(1, 1024)
             .toInt();
-    final product = state.products.firstWhere((p) => p.id == widget.productId);
     final editIndex = widget.editCartIndex;
     final editingItem =
         editIndex != null &&
@@ -91,7 +136,9 @@ class _ProductPageState extends ConsumerState<ProductPage> {
     final isFavorite = state.favoriteIds.contains(product.id);
     _syncSelections(product, editingItem);
 
-    final available = product.availableIn(state.selectedBranch);
+    final available =
+        state.selectedBranch.isOpen &&
+        product.availableIn(state.selectedBranch);
     final selectedSize = product.sizes.isEmpty
         ? null
         : product.sizes.firstWhere((size) => size.id == _sizeId);
@@ -102,6 +149,21 @@ class _ProductPageState extends ConsumerState<ProductPage> {
     final total = product.basePrice + sizeDelta + toppingsDelta;
     final canAdd = available && (product.sizes.isEmpty || selectedSize != null);
     final actionTotal = total * (editingItem?.quantity ?? 1);
+    final hasAvailableBranch = state.branches.any(
+      (branch) => branch.isOpen && product.availableIn(branch),
+    );
+
+    Future<void> chooseAvailableBranch() async {
+      final branch = await showBranchPicker(
+        context,
+        branches: state.branches,
+        selectedBranch: state.selectedBranch,
+        availableBranchIds: product.availableBranchIds.toSet(),
+        title: strings.chooseBranchForProduct(product.name.resolve(language)),
+      );
+      if (!mounted || branch == null) return;
+      controller.selectBranch(branch);
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -247,7 +309,11 @@ class _ProductPageState extends ConsumerState<ProductPage> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
           child: FilledButton(
-            onPressed: canAdd
+            onPressed: !available
+                ? hasAvailableBranch
+                      ? chooseAvailableBranch
+                      : null
+                : canAdd
                 ? () async {
                     final saved = isEditing
                         ? await controller.replaceConfiguredAt(
@@ -282,7 +348,11 @@ class _ProductPageState extends ConsumerState<ProductPage> {
                   }
                 : null,
             child: Text(
-              canAdd
+              !available
+                  ? hasAvailableBranch
+                        ? strings.chooseAvailableBranch
+                        : strings.productUnavailableEverywhere
+                  : canAdd
                   ? isEditing
                         ? strings.saveCartChangesWithPrice(
                             formatSom(actionTotal, language),
